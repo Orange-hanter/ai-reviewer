@@ -1,0 +1,8 @@
+id: no-dangerously-set-inner-html
+language: Tsx
+rule:
+  kind: property_identifier
+  regex: '^dangerouslySetInnerHTML$'
+message: >-
+  Avoid dangerouslySetInnerHTML — use safe renderers (e.g. MiniMarkdown) or sanitize HTML.
+severity: warning

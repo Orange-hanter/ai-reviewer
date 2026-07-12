@@ -1,0 +1,113 @@
+name: PR Review Feedback (R8)
+
+# Сбор 👍/👎 на inline + label ai-review-fp → versioned JSONL → bot PR.
+# Запускается в репозитории-потребителе (Orakul): checkout + npm ci в ops/, затем этот workflow
+# или локальный скрипт с REVIEW_FEEDBACK_LOG на overlay-путь потребителя.
+env:
+  REVIEW_FEEDBACK_LABEL: ai-review-fp
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Номер PR для точечного harvest (пусто = последние PR)'
+        required: false
+        default: ''
+
+concurrency:
+  group: pr-review-feedback-${{ github.event.pull_request.number || inputs.pr_number || 'scheduled' }}
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  harvest:
+    name: Harvest AI review feedback
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'ai-review-fp')
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Guard against duplicate feedback PR
+        id: guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OPEN="$(gh pr list --state open --limit 100 --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("bot/ai-review-feedback-"))] | length')"
+          if [ "$OPEN" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Open feedback bot PR already exists; postpone harvest"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Migrate log + harvest feedback batch
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          REVIEW_FEEDBACK_LABEL: ${{ env.REVIEW_FEEDBACK_LABEL }}
+          REVIEW_FEEDBACK_TRUSTED_AUTHORS: github-actions[bot]
+          REVIEW_FEEDBACK_WRITE: '1'
+          REVIEW_FEEDBACK_LOG: feedback/fp-feedback.jsonl
+          REVIEW_FEEDBACK_CANDIDATES: '0'
+          REVIEW_FEEDBACK_MD_APPEND: '0'
+          REVIEW_FEEDBACK_SINCE_DAYS: '14'
+          REVIEW_FEEDBACK_PR_LIMIT: '30'
+        run: |
+          node feedback/migrate-feedback.mjs --file feedback/fp-feedback.jsonl --write
+          node bin/pr-review-feedback-batch.mjs
+
+      - name: Create feedback data PR if log changed
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LOG="feedback/fp-feedback.jsonl"
+          if git diff --quiet -- "$LOG"; then
+            echo "No new feedback"
+            exit 0
+          fi
+          BRANCH="bot/ai-review-feedback-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add "$LOG"
+          git commit -m "chore(pr-review): persist harvested feedback"
+          git push -u origin "$BRANCH"
+          PR_URL="$(gh pr create --base main \
+            --title "chore(pr-review): persist harvested feedback" \
+            --body "Automated schema-v1 feedback log update. Promotion runs after review and merge.")"
+          echo "Created $PR_URL"
+          PR_NUMBER="$(gh pr view "$BRANCH" --json number --jq .number)"
+          gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Upload feedback harvest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-review-feedback-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+          path: feedback/fp-feedback.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

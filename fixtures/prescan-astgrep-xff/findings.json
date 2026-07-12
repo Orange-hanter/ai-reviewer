@@ -1,0 +1,16 @@
+{
+  "findings": [
+    {
+      "file": "server/auth.ts",
+      "line": 42,
+      "severity": "critical",
+      "confidence": 1,
+      "title": "ast-grep: raw-x-forwarded-for",
+      "body": "Use clientIp(req) from server/net.ts — raw X-Forwarded-For is spoofable and bypasses anti-brute.",
+      "model": "astgrep-prescan",
+      "prescan": true,
+      "prescanBlock": true,
+      "ruleId": "raw-x-forwarded-for"
+    }
+  ]
+}

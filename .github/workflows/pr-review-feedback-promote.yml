@@ -1,0 +1,66 @@
+name: PR Review Feedback Promote (weekly)
+
+# Агрегация fp-feedback.jsonl: ≥2 одинаковых FP → fp-patterns + eval fixtures → bot PR.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    name: Promote FP patterns + fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Aggregate feedback → patterns + fixtures
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          REVIEW_FP_PROMOTE_MIN: '2'
+        run: |
+          node feedback/promote-feedback.mjs --aggregate
+          node bin/pr-review-eval.mjs
+
+      - name: Create PR if changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CHANGES="$(git status --porcelain -- feedback/fp-patterns.jsonl fixtures)"
+          if [ -z "$CHANGES" ]; then
+            echo "No promote changes"
+            exit 0
+          fi
+          BRANCH="bot/fp-promote-$(date +%Y%m%d-%H%M)-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add feedback/fp-patterns.jsonl fixtures
+          git commit -m "$(cat <<'EOF'
+          chore(pr-review): promote recurring FP patterns and fixtures
+
+          Weekly aggregate from fp-feedback.jsonl (R8 → R1 loop).
+          EOF
+          )"
+          git push -u origin "$BRANCH"
+          gh pr create --title "chore(pr-review): promote recurring FP patterns" --body "$(cat <<'EOF'
+          ## Summary
+          - Auto-promoted recurring false-positive patterns and eval fixtures from `fp-feedback.jsonl`
+          - Eval harness green on promoted fixtures
+
+          ## Test plan
+          - [x] `npm run eval`
+          EOF
+          )"

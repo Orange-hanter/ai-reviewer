@@ -1,0 +1,9 @@
+{
+  "verdicts": [
+    {
+      "candidateIndex": 0,
+      "decision": "rejected",
+      "reason": "userId проверяется в middleware выше по стеку — FP"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+id: backend-imports-client
+language: TypeScript
+rule:
+  kind: import_statement
+  regex: from\s+['"][^'"]*client/
+message: >-
+  Layer boundary: server/integrations/ops/scripts must not import client/ code.
+severity: warning

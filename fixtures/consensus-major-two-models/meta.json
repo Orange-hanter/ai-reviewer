@@ -1,0 +1,9 @@
+{
+  "id": "consensus-major-two-models",
+  "description": "major ×2 модели + confidence ≥0.8 → консенсус-блок",
+  "gate": { "consensusMin": 2 },
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1
+  }
+}

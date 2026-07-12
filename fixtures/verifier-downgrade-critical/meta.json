@@ -1,0 +1,9 @@
+{
+  "id": "verifier-downgrade-critical",
+  "description": "critical → verifier downgrade to minor → не блок (R3)",
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0,
+    "findingCount": 1
+  }
+}

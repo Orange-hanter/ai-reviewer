@@ -1,0 +1,8 @@
+id: no-prisma-raw-unsafe
+language: TypeScript
+rule:
+  kind: call_expression
+  regex: '\$queryRawUnsafe|\$executeRawUnsafe'
+message: >-
+  Prefer Prisma $queryRaw tagged template — $queryRawUnsafe/$executeRawUnsafe bypass parameterization.
+severity: error

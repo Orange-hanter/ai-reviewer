@@ -1,0 +1,21 @@
+# Coverage: header/get/headers[...] × single/double quotes × x-forwarded-for case (12 variants).
+# Fixture + eval: ops/pr-review/ast-grep/fixtures/xff-variants.ts
+id: raw-x-forwarded-for
+language: TypeScript
+rule:
+  any:
+    - pattern: $REQ.header('x-forwarded-for')
+    - pattern: $REQ.header("x-forwarded-for")
+    - pattern: $REQ.header('X-Forwarded-For')
+    - pattern: $REQ.header("X-Forwarded-For")
+    - pattern: $REQ.get('x-forwarded-for')
+    - pattern: $REQ.get("x-forwarded-for")
+    - pattern: $REQ.get('X-Forwarded-For')
+    - pattern: $REQ.get("X-Forwarded-For")
+    - pattern: $REQ.headers['x-forwarded-for']
+    - pattern: $REQ.headers["x-forwarded-for"]
+    - pattern: $REQ.headers['X-Forwarded-For']
+    - pattern: $REQ.headers["X-Forwarded-For"]
+message: >-
+  Use clientIp(req) from server/net.ts — raw X-Forwarded-For is spoofable and bypasses anti-brute.
+severity: error

@@ -1,0 +1,40 @@
+{
+  "findings": [
+    {
+      "file": "app/client/public/push-sw.js",
+      "line": 1,
+      "severity": "major",
+      "confidence": 0.95,
+      "title": "push-sw.js отсутствует в PR",
+      "body": "файл push-sw.js отсутствует в диффе PR, но подключён через importScripts",
+      "model": "m1"
+    },
+    {
+      "file": "app/client/public/push-sw.js",
+      "line": 2,
+      "severity": "major",
+      "confidence": 0.93,
+      "title": "push-sw.js отсутствует в PR",
+      "body": "файл push-sw.js отсутствует в диффе PR",
+      "model": "m2"
+    },
+    {
+      "file": "app/server/notifications.ts",
+      "line": 10,
+      "severity": "major",
+      "confidence": 0.9,
+      "title": "нет e2e на web push",
+      "body": "playwright e2e отсутствуют для dispatch и NotificationSettings",
+      "model": "m1"
+    },
+    {
+      "file": "app/server/notifications.ts",
+      "line": 11,
+      "severity": "major",
+      "confidence": 0.88,
+      "title": "нет e2e на web push",
+      "body": "playwright e2e отсутствуют",
+      "model": "m2"
+    }
+  ]
+}

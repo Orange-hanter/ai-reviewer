@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "file": "server/suppliers.ts",
+      "line": 10,
+      "severity": "major",
+      "confidence": 0.95,
+      "title": "нет e2e на удаление",
+      "body": "добавьте playwright тест",
+      "model": "m1"
+    }
+  ]
+}

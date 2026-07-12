@@ -1,0 +1,9 @@
+{
+  "id": "prescan-eslint-layer-block",
+  "description": "eslint-prescan critical (no-restricted-imports) → блок без LLM (R6)",
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "titles": ["eslint: no-restricted-imports"]
+  }
+}

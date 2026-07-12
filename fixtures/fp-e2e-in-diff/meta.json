@@ -1,0 +1,9 @@
+{
+  "id": "fp-e2e-in-diff",
+  "description": "«нет e2e» при e2e.spec.ts в PR → фильтруется (PR #245 pattern)",
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0,
+    "noTitles": ["нет e2e на удаление"]
+  }
+}

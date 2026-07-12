@@ -1,0 +1,9 @@
+{
+  "id": "verifier-keeps-block",
+  "description": "critical + verifier verified → блок сохраняется (R3)",
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "titles": ["IDOR на подписке"]
+  }
+}

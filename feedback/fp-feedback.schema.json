@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orakul.local/schemas/pr-review/fp-feedback-v1.json",
+  "title": "Orakul AI review feedback entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "ts",
+    "repo",
+    "pr",
+    "source",
+    "signal",
+    "finding"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "ts": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repo": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pr": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source": {
+      "enum": ["label", "reaction"]
+    },
+    "signal": {
+      "enum": ["fp", "tp"]
+    },
+    "label": {
+      "type": "string"
+    },
+    "reaction": {
+      "type": "string"
+    },
+    "commentId": {
+      "type": "number"
+    },
+    "user": {
+      "type": "string"
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "line", "severity", "title"],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "number",
+          "minimum": 0
+        },
+        "severity": {
+          "enum": ["critical", "major", "minor", "nit"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

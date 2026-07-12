@@ -1,0 +1,9 @@
+{
+  "id": "refutation-verified-keeps",
+  "description": "security verified → critical блок сохраняется (R5)",
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "titles": ["IDOR на подписке"]
+  }
+}

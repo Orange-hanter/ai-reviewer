@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "file": "server/handler.ts",
+      "line": 2,
+      "severity": "critical",
+      "confidence": 0.4,
+      "title": "возможный null deref",
+      "body": "не уверен без контекста",
+      "model": "m1"
+    }
+  ]
+}

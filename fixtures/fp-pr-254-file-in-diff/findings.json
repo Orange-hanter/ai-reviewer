@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "file": "app/client/src/utils/preps.ts",
+      "line": 169,
+      "severity": "major",
+      "confidence": 0.95,
+      "title": "preps.ts не в PR",
+      "body": "файл preps.ts отсутствует в диффе PR — модель ссылается на строки 169/269",
+      "model": "m1"
+    },
+    {
+      "file": "app/client/src/utils/preps.ts",
+      "line": 170,
+      "severity": "major",
+      "confidence": 0.92,
+      "title": "preps.ts не в PR",
+      "body": "файл preps.ts отсутствует в диффе PR",
+      "model": "m2"
+    }
+  ]
+}

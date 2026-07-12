@@ -1,0 +1,39 @@
+#!/usr/bin/env node
+// R8: harvest GitHub feedback (👍/👎, label ai-review-fp) → JSONL + fixture candidates.
+
+import { pathToFileURL } from 'node:url';
+import { loadReviewConfig, parseCli } from '../lib/config.mjs';
+import { createGithubClient } from '../lib/github.mjs';
+import { harvestFeedback, formatHarvestReport } from '../lib/feedback.mjs';
+
+async function main() {
+  const argv = process.argv.slice(2);
+  const dryRun = argv.includes('--dry-run');
+  const env = { ...process.env };
+  if (dryRun) env.REVIEW_FEEDBACK_WRITE = '0';
+
+  const cli = parseCli(argv);
+  const cfg = loadReviewConfig(env, cli);
+
+  if (!cfg.feedback.enabled) {
+    console.log('REVIEW_FEEDBACK=0 — harvest отключён');
+    process.exit(0);
+  }
+  if (!cfg.github.token || !cfg.github.repo || !cfg.github.prNumber) {
+    console.error('[pr-review.feedback] нужны GITHUB_TOKEN, GITHUB_REPOSITORY (или --repo), PR_NUMBER (или --pr)');
+    process.exit(1);
+  }
+
+  const log = (m) => console.log(m);
+  const github = createGithubClient(cfg, log);
+  const result = await harvestFeedback(cfg, github, { log });
+  console.log(formatHarvestReport(result));
+  process.exit(result.ok === false ? 1 : 0);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((e) => {
+    console.error('[pr-review.feedback]', e.stack || e.message);
+    process.exit(1);
+  });
+}

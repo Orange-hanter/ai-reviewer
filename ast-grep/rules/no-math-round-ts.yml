@@ -1,0 +1,11 @@
+id: no-math-round-ts
+language: TypeScript
+ignores:
+  - '**/shared/round.ts'
+  - '**/*.test.ts'
+  - '**/tests/**'
+  - '**/e2e/**'
+rule:
+  pattern: Math.round($$$)
+message: Use round2/round1 from shared/round.ts instead of Math.round for money/stock rounding.
+severity: warning

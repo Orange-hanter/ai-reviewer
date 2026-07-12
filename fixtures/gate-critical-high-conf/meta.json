@@ -1,0 +1,9 @@
+{
+  "id": "gate-critical-high-conf",
+  "description": "critical + confidence 0.9 от одной модели → блок (single-tier)",
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "titles": ["IDOR на подписке"]
+  }
+}

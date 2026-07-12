@@ -1,0 +1,9 @@
+{
+  "id": "fp-pr-257-file-and-e2e-in-diff",
+  "description": "push-sw «не в PR» + «нет e2e» при обоих в diff → фильтруется (PR #257 pattern 1)",
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0,
+    "noTitles": ["push-sw.js отсутствует в PR", "нет e2e на web push"]
+  }
+}

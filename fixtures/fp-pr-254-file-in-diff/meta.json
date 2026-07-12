@@ -1,0 +1,9 @@
+{
+  "id": "fp-pr-254-file-in-diff",
+  "description": "«preps.ts не в PR» при файле в diff → фильтруется (PR #254 pattern 1)",
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0,
+    "noTitles": ["preps.ts не в PR"]
+  }
+}

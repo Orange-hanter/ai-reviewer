@@ -1,0 +1,9 @@
+{
+  "id": "prescan-astgrep-xff",
+  "description": "ast-grep raw-x-forwarded-for → critical prescan block без LLM (R6+)",
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "titles": ["ast-grep: raw-x-forwarded-for"]
+  }
+}

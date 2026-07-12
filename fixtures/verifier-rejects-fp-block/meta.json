@@ -1,0 +1,9 @@
+{
+  "id": "verifier-rejects-fp-block",
+  "description": "critical проходит R2, но verifier Pass B reject → merge не блокируется (R3)",
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0,
+    "findingCount": 0
+  }
+}

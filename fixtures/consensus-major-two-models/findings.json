@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "file": "shared/round.ts",
+      "line": 10,
+      "severity": "major",
+      "confidence": 0.85,
+      "title": "не round2",
+      "body": "Math.round вместо канона",
+      "model": "m1"
+    },
+    {
+      "file": "shared/round.ts",
+      "line": 11,
+      "severity": "major",
+      "confidence": 0.9,
+      "title": "не round2",
+      "body": "дублирует canonical",
+      "model": "m2"
+    }
+  ]
+}

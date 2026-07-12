@@ -1,0 +1,9 @@
+{
+  "verdicts": [
+    {
+      "candidateIndex": 0,
+      "decision": "verified",
+      "reason": "прямой db.get без auth — IDOR подтверждён"
+    }
+  ]
+}

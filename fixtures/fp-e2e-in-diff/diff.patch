@@ -1,0 +1,6 @@
+diff --git a/app/e2e/supplier-delete.spec.ts b/app/e2e/supplier-delete.spec.ts
+--- a/app/e2e/supplier-delete.spec.ts
++++ b/app/e2e/supplier-delete.spec.ts
+@@ -1,2 +1,3 @@
+ test('delete', async () => {});
++test('confirm', async () => {});

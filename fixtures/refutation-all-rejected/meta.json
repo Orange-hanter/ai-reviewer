@@ -1,0 +1,9 @@
+{
+  "id": "refutation-all-rejected",
+  "description": "critical, но все advisorClaims rejected → finding dropped (R5)",
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0,
+    "findingCount": 0
+  }
+}

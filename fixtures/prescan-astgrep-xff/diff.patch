@@ -1,0 +1,10 @@
+diff --git a/server/auth.ts b/server/auth.ts
+--- a/server/auth.ts
++++ b/server/auth.ts
+@@ -39,6 +39,7 @@ export async function login(req: Request, res: Response) {
+   const user = await findUser(login);
+   if (!user) return res.status(401).json({ error: 'invalid' });
++  const ip = req.header('x-forwarded-for') || '';
+   const ip = clientIp(req);
+   await rateLimitLogin(ip);
+ }

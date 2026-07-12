@@ -1,0 +1,3 @@
+# ast-grep project for R6+ prescan (paths passed explicitly from pr-review runner).
+ruleDirs:
+  - rules

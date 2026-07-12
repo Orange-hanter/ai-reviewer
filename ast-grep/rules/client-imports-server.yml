@@ -1,0 +1,9 @@
+# Coverage: import_statement + server|integrations|ops|scripts path (post-filter: client/ only).
+id: client-imports-server
+language: TypeScript
+rule:
+  kind: import_statement
+  regex: from\s+['"][^'"]*(?:server|integrations|ops|scripts)/
+message: >-
+  Layer boundary: client/ must not import server/integrations/ops/scripts — use HTTP API (client/src/api.ts).
+severity: warning

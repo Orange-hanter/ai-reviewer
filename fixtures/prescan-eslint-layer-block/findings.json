@@ -1,0 +1,16 @@
+{
+  "findings": [
+    {
+      "file": "client/src/foo.ts",
+      "line": 1,
+      "severity": "critical",
+      "confidence": 1,
+      "title": "eslint: no-restricted-imports",
+      "body": "Граница слоёв: client/ не импортирует серверный код",
+      "model": "eslint-prescan",
+      "prescan": true,
+      "prescanBlock": true,
+      "ruleId": "no-restricted-imports"
+    }
+  ]
+}

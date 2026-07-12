@@ -1,0 +1,39 @@
+{
+  "name": "@orakul/ai-reviewer",
+  "version": "0.1.0",
+  "description": "AI code review engine: MoA/consensus LLM pipeline, prescan, eval fixtures, GitHub feedback loop",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "pr-review": "./bin/pr-review.mjs",
+    "pr-review-eval": "./bin/pr-review-eval.mjs",
+    "pr-review-feedback": "./bin/pr-review-feedback.mjs",
+    "pr-review-feedback-batch": "./bin/pr-review-feedback-batch.mjs"
+  },
+  "exports": {
+    ".": "./index.mjs",
+    "./pipeline": "./pipeline.mjs",
+    "./lib/*": "./lib/*",
+    "./feedback/*": "./feedback/*",
+    "./bin/*": "./bin/*"
+  },
+  "files": [
+    "bin",
+    "index.mjs",
+    "pipeline.mjs",
+    "lib",
+    "feedback",
+    "ast-grep",
+    "fixtures",
+    "docs"
+  ],
+  "scripts": {
+    "test": "node --test test/pr-review.test.mjs test/pr-review.eval.test.mjs",
+    "eval": "node bin/pr-review-eval.mjs",
+    "check": "npm test && npm run eval"
+  }
+}

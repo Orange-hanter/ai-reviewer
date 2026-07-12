@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "file": "client/foo.ts",
+      "line": 1,
+      "severity": "major",
+      "confidence": 0.55,
+      "title": "может сломать api",
+      "body": "гипотеза",
+      "model": "m1"
+    }
+  ]
+}

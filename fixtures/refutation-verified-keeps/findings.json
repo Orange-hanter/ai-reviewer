@@ -1,0 +1,17 @@
+{
+  "findings": [
+    {
+      "file": "server/api.ts",
+      "line": 11,
+      "severity": "critical",
+      "confidence": 0.92,
+      "title": "IDOR на подписке",
+      "body": "прямой db.get без auth",
+      "model": "moa-specialist",
+      "advisorClaims": [
+        { "role": "security", "status": "verified", "reason": "IDOR подтверждён" },
+        { "role": "correctness", "status": "rejected", "reason": "не про логику" }
+      ]
+    }
+  ]
+}

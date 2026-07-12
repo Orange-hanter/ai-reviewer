@@ -1,0 +1,9 @@
+# Post-filter: shared/ only (eslint duplicate — ast-grep catches dynamic re-exports).
+id: shared-imports-upper
+language: TypeScript
+rule:
+  kind: import_statement
+  regex: from\s+['"][^'"]*(?:server|client|integrations|ops|scripts)/
+message: >-
+  Layer boundary: shared/ must not import upper layers (server/client/integrations/ops/scripts).
+severity: warning

@@ -1,0 +1,10 @@
+{
+  "verdicts": [
+    {
+      "candidateIndex": 0,
+      "decision": "downgrade",
+      "severity": "minor",
+      "reason": "риск есть, но auth на route-level — не merge-blocker"
+    }
+  ]
+}

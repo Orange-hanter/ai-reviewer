@@ -1,0 +1,8 @@
+{
+  "id": "gate-critical-low-conf",
+  "description": "critical, но confidence 0.4 → advisory, merge не блокируется (R2)",
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0
+  }
+}
