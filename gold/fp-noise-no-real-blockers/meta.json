@@ -1,0 +1,8 @@
+{
+  "id": "fp-noise-no-real-blockers",
+  "description": "PR #477 post-fix: все major находки — ручным разбором подтверждённые FP (ESM-«синтаксис», shell whitespace, имена контейнеров) — merge не должен блокироваться",
+  "expect": {
+    "wouldBlock": false,
+    "note": "единственная реальная находка (mkdir в exporter) исправлена до генерации этого диффа"
+  }
+}

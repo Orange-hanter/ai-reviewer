@@ -1,8 +1,8 @@
-// Канонические re-export API @orakul/ai-reviewer.
+// Канонический публичный API движка (import 'ai-reviewer' / 'ai-reviewer/lib/*').
 
-export { parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks, readChangedFiles } from './lib/diff.mjs';
+export { parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, parseDiffNewPath, parseDiffGitPath, unescapeGitPath } from './lib/diff.mjs';
 export { extractJsonObject } from './lib/json.mjs';
-export { filterFalsePositiveFindings, matchesKnownFalsePositive, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers, applyPrescanBlockPolicy } from './lib/findings.mjs';
+export { filterFalsePositiveFindings, matchesKnownFalsePositive, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers, applyPrescanBlockPolicy, filterStalePriorFindings, dedupeSameModelFindings } from './lib/findings.mjs';
 export { selectVerifierCandidates, applyVerifierVerdicts, createVerifierRunner } from './lib/verifier.mjs';
 export {
   parseSpecialistAssignments, applyRefutation, decideRefutation, normalizeAdvisorClaims,
@@ -21,22 +21,31 @@ export {
   astgrepStreamToFindings, mapAstgrepRuleSeverity, filterAstgrepFindings,
   runAstgrepPrescan, DEFAULT_ASTGREP_BLOCK_RULES, astgrepPathToAppPath,
 } from './lib/astgrep.mjs';
-export { runEvalHarness, loadFixtures, runFixtureCase, formatEvalReport, DEFAULT_FIXTURES_DIR } from './lib/eval.mjs';
+export { runEvalHarness, loadFixtures, runFixtureCase, formatEvalReport } from './lib/eval.mjs';
 export {
   collectFeedbackEntries, parseReviewCommentFinding, parseReviewCommentFindings,
   parseStickyFindings, isTrustedReviewAuthor, parseTrustedAuthors,
   dedupeFeedbackEntries, buildFixtureCandidate, harvestFeedback, formatHarvestReport,
   DEFAULT_FP_LABEL, DEFAULT_TRUSTED_AUTHORS,
 } from './lib/feedback.mjs';
-export { buildMoAReferenceSection } from './lib/prompt.mjs';
+export { buildMoAReferenceSection, buildChangedFilesSection, createPromptBuilder } from './lib/prompt.mjs';
 export { loadReviewConfig, parseCli } from './lib/config.mjs';
 export { createReviewEngine } from './lib/engine.mjs';
+export { createOllamaClient } from './lib/ollama.mjs';
 export {
   buildReviewJson, buildSarif, writeReviewExports, selectSarifFindings,
   extractReasoningEntries, sarifArtifactUri, sarifAutomationGuid,
-  EXPORT_VERSION, SARIF_SCHEMA, SARIF_GUID_RE, TOOL_NAME,
+  EXPORT_VERSION, SARIF_SCHEMA, SARIF_GUID_RE, TOOL_VERSION, toolName,
 } from './lib/export.mjs';
-export { buildSummary, buildRouterSummary, buildReasoningSection, buildStickyReasoningFooter } from './lib/report.mjs';
+export { buildSummary, buildRouterSummary, buildLlmUnavailableSummary, buildReasoningSection, buildStickyReasoningFooter } from './lib/report.mjs';
+export { MARKERS, hasMarker, extractStickyFooterRaw, repoRules, SEV } from './lib/constants.mjs';
+export {
+  DEFAULT_PROFILE, PROFILE_FILENAMES, createMarkers, normalizeProfile, loadProfileFile,
+  getProfile, setProfile, resetProfile, resolveProfile,
+} from './lib/profile.mjs';
+export { publicErrorLabel, createAdaptiveSemaphore } from './lib/util.mjs';
+export { parseJsonl, aggregateMetrics, formatMetricsReport } from './lib/metrics.mjs';
+export { createGraphifyClient } from './lib/graphify.mjs';
 export { decideAutoTriage, buildTriageContext, runAutoTriage, findingLocationKey as triageLocationKey } from './lib/triage.mjs';
 export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog } from './lib/router.mjs';
-export { createReviewPipeline, runReview } from './pipeline.mjs';
+export { createReviewPipeline, runGateResolution, runReview } from './pipeline.mjs';

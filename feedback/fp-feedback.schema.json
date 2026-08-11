@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://orakul.local/schemas/pr-review/fp-feedback-v1.json",
-  "title": "Orakul AI review feedback entry",
+  "$id": "https://ai-reviewer.local/schemas/fp-feedback-v1.json",
+  "title": "AI review feedback entry",
   "type": "object",
   "additionalProperties": false,
   "required": [

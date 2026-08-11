@@ -1,33 +1,64 @@
-# @orakul/ai-reviewer
+# ai-reviewer
 
-AI code review engine для GitHub PR: unified diff → Graphify blast-radius → LLM (Ollama MoA/consensus) → inline/sticky comments. Блокирует merge только на подтверждённых `critical`/`major` findings.
+Движок AI код-ревью для pull request'ов: unified diff → blast-radius по графу кода →
+детерминированный prescan (eslint + ast-grep) → LLM (Mixture-of-Agents с жюри и verifier)
+→ inline-комментарии и sticky-отчёт в GitHub.
 
-Первый потребитель — [Orakul](https://github.com/Orange-hanter/Orakul). Пакет переиспользуем в sibling-репозиториях Mozarella.
+Merge блокируется только на **подтверждённых** `critical`/`major` — тех, что пережили
+refutation жюри и второй проход независимой модели. Инфра-сбои merge не блокируют.
+
+Движок ничего не знает о конкретном репозитории: маркеры комментариев, правила проекта для
+промпта, раскладка каталогов, scope правил и пути данных приходят из
+[профиля проекта](docs/profiles.md) — одного JSON-файла на стороне потребителя.
 
 ## Быстрый старт
 
 ```bash
 git clone git@github.com:Orange-hanter/ai-reviewer.git
 cd ai-reviewer
-npm install
-npm test && npm run eval
+npm test && npm run eval          # зависимостей нет — только Node ≥ 22
 ```
 
-Offline-ревью diff без GitHub:
+Offline-ревью произвольного диффа, без GitHub:
 
 ```bash
-export OLLAMA_API_KEY=...
-npx pr-review --dry-run --diff /path/to/changes.patch
+git -C /path/to/repo diff origin/main... > /tmp/changes.patch
+OLLAMA_API_KEY=… npx pr-review --dry-run --diff /tmp/changes.patch
+```
+
+Ревью настоящего PR:
+
+```bash
+GITHUB_TOKEN=… GITHUB_REPOSITORY=owner/repo PR_NUMBER=123 OLLAMA_API_KEY=… \
+  REVIEW_PROFILE=ops/ai-review/profile.json npx pr-review
 ```
 
 ## CLI
 
 | Команда | Назначение |
 |---------|------------|
-| `pr-review` | Полный pipeline (PR или `--diff`) |
-| `pr-review-eval` | Golden fixtures без LLM |
-| `pr-review-feedback` | Harvest 👍/👎 с одного PR |
-| `pr-review-feedback-batch` | Batch harvest по последним PR |
+| `pr-review` | Полный прогон (PR или `--diff`) |
+| `pr-review-eval` | Golden fixtures без LLM — гейт post-processing |
+| `pr-review-gold` | Shadow-прогон с LLM на размеченных TP/FP диффах |
+| `pr-review-metrics` | Сводка по observability-логу прогонов |
+| `pr-review-probe-models` | Доступность, latency и JSON-mode моделей |
+| `pr-review-feedback` | Сбор 👍/👎 с одного PR |
+| `pr-review-feedback-batch` | Batch-сбор по последним PR |
+
+## Что внутри
+
+- **Mixture-of-Agents**: три специалиста (security / correctness / architecture) → жюри-агрегатор
+  с обязательной refutation каждой претензии → verifier Pass B по кандидатам в блокеры.
+- **Prescan**: eslint и ast-grep по изменённым файлам — детерминированные находки идут и в гейт,
+  и в промпт как «уже сказано, не повторяй».
+- **Blast-radius**: кто зависит от изменённых символов вне диффа (graphify, fail-open).
+- **Сходимость**: sticky несёт машинный футер с находками, отпечатками кода и историей
+  прогонов — следующий прогон показывает Δ и не переоткрывает закрытое.
+- **Маршрут по доказуемости**: где показать находку, решает сумма детерминированных сигналов,
+  а не ярлык severity от модели.
+- **Петля обучения**: 👎 или метка → журнал → промоут в FP-паттерн и eval fixture.
+
+Зависимостей нет: только стандартная библиотека Node.
 
 ## Документация
 
@@ -35,21 +66,34 @@ npx pr-review --dry-run --diff /path/to/changes.patch
 |--------|------|
 | Оглавление | [docs/README.md](docs/README.md) |
 | Архитектура | [docs/architecture.md](docs/architecture.md) |
-| Env / CLI | [docs/configuration.md](docs/configuration.md) |
+| Профиль проекта | [docs/profiles.md](docs/profiles.md) |
+| CLI и env | [docs/configuration.md](docs/configuration.md) |
 | Интеграция в CI | [docs/integration.md](docs/integration.md) |
-| Журнал FP | [docs/ai-review-false-positives.md](docs/ai-review-false-positives.md) |
-| Feedback loop | [feedback/README.md](feedback/README.md) |
-| Eval fixtures | [fixtures/README.md](fixtures/README.md) |
+| Ложные срабатывания | [docs/false-positives.md](docs/false-positives.md) |
+| Модели и параметры | [docs/model-tuning.md](docs/model-tuning.md) |
 
-## Интеграция (Orakul)
+## Подключение к репозиторию
 
-```bash
-# pin в потребителе: ops/ai-reviewer-ref → v0.1.0
-cd Orakul/ops && npm ci
-node node_modules/@orakul/ai-reviewer/bin/pr-review.mjs --dry-run --diff ../tmp.patch
+Движок берётся по пину и никогда не исполняется из кода PR:
+
+```
+ops/ai-reviewer-ref          # v0.2.0 или commit SHA
+ops/ai-review/profile.json   # профиль проекта
 ```
 
-См. [docs/integration.md](docs/integration.md).
+Шаблоны workflow — [`examples/ci/`](examples/ci/), пошагово — [docs/integration.md](docs/integration.md).
+
+## Разработка
+
+```bash
+npm test        # юнит + контракты (в т.ч. шаблоны workflow), node:test
+npm run eval    # golden fixtures без LLM
+npm run check   # то и другое
+```
+
+Регрессионный набор гоняется под reference-профилем [`profiles/orakul.json`](profiles/orakul.json) —
+тем же, на котором движок работал внутри первого потребителя до выноса в отдельный пакет.
+Поведение дефолтного (нейтрального) профиля покрыто отдельно в `test/profile.test.mjs`.
 
 ## Лицензия
 

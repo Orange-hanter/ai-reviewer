@@ -5,7 +5,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { migrateFeedbackText } from '../lib/feedback-schema.mjs';
-import { pkgPath } from '../lib/package-root.mjs';
+import { loadReviewConfig } from '../lib/config.mjs';
 
 export async function migrateFeedbackLog(path, { write = false } = {}) {
   const target = resolve(path);
@@ -33,7 +33,7 @@ async function main() {
     const index = argv.indexOf(name);
     return index >= 0 ? argv[index + 1] : undefined;
   };
-  const path = flag('--file') || pkgPath('feedback/fp-feedback.jsonl');
+  const path = flag('--file') || loadReviewConfig().feedback.logFile;
   const write = argv.includes('--write');
   const result = await migrateFeedbackLog(path, { write });
   console.log(JSON.stringify({

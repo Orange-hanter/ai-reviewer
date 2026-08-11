@@ -1,0 +1,39 @@
+{
+  "name": "orakul",
+  "markerNamespace": "orakul-ai-review",
+  "toolName": "orakul-ai-review",
+  "sarifRulePrefix": "orakul",
+  "repositoryUri": "https://github.com/Orange-hanter/Orakul",
+  "repoRulesFile": "orakul-repo-rules.md",
+  "layout": {
+    "appDir": "app",
+    "layerDirs": ["server", "shared", "client", "integrations", "ops", "scripts", "tests", "e2e"],
+    "lintable": "^app/(?:shared|server|client|integrations|ops|scripts|tests|e2e)/.+\\.(?:ts|tsx)$|^app/[^/]+\\.ts$",
+    "e2eSpec": "^app/e2e/.*\\.spec\\.ts$",
+    "logic": "^(?:app/)?(?:server|shared|client)/.+\\.(?:ts|tsx|js|jsx|mjs|cjs)$",
+    "sensitive": "(?:^|/)ops/(?:pr-merge|pr-review|backup|deploy)"
+  },
+  "astgrep": {
+    "scopes": {
+      "no-math-round-ts": "^app/(?:shared|server)/",
+      "client-imports-server": "^app/client/",
+      "shared-imports-upper": "^app/shared/",
+      "backend-imports-client": "^app/(?:server|integrations|ops|scripts)/",
+      "no-prisma-raw-unsafe": "^app/(?:shared|server)/",
+      "no-dangerously-set-inner-html": "^app/client/",
+      "raw-x-forwarded-for": "^app/server/"
+    },
+    "allow": {
+      "raw-x-forwarded-for": ["app/server/net.ts", "app/server/bugdropProxy.ts"]
+    }
+  },
+  "paths": {
+    "feedbackLog": "ops/pr-review/feedback/fp-feedback.jsonl",
+    "feedbackCandidatesDir": "ops/pr-review/feedback/candidates",
+    "fpPatterns": "ops/pr-review/feedback/fp-patterns.jsonl",
+    "fpMarkdown": "docs/08-technical/ai-review-false-positives.md",
+    "observabilityDir": ".graphify/graphify-out/observability",
+    "exportDir": ".graphify/graphify-out/review-export",
+    "astgrepConfig": "ops/pr-review/ast-grep/sgconfig.yml"
+  }
+}
