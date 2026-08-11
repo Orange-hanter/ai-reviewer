@@ -122,8 +122,8 @@ verifier проверяет кандидатов в блокеры. Агрега
 
 | Что | Команда |
 |-----|---------|
-| Юнит + контракты (203 теста) | `npm test` |
-| Golden fixtures без LLM | `npm run eval` |
+| Юнит + контракты | `npm test` |
+| Golden fixtures без LLM (16 кейсов) | `npm run eval` |
 | Shadow-прогон с LLM на размеченных диффах | `OLLAMA_API_KEY=… npx pr-review-gold` |
 
 Регрессионный набор гоняется под reference-профилем `profiles/orakul.json` — тем же, на

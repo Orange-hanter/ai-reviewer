@@ -42,7 +42,7 @@
 ### Проверки
 
 - `npm test` — 203 теста (юнит, контракты пайплайна, шаблоны workflow).
-- `npm run eval` — 15 golden fixtures, гейт post-processing зелёный.
+- `npm run eval` — 16 golden fixtures, гейт post-processing зелёный.
 - Регрессионный набор гоняется под reference-профилем `profiles/orakul.json`: движок под ним
   ведёт себя ровно так же, как до выноса в отдельный пакет.
 
