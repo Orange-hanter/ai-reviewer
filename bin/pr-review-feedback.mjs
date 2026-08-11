@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // R8: harvest GitHub feedback (👍/👎, label ai-review-fp) → JSONL + fixture candidates.
+// Запуск: npx pr-review-feedback [--dry-run] [--pr N] [--repo owner/repo]
 
 import { pathToFileURL } from 'node:url';
 import { loadReviewConfig, parseCli } from '../lib/config.mjs';

@@ -1,0 +1,87 @@
+name: PR Review Metrics (weekly)
+# ШАБЛОН для репозитория-потребителя (скопируйте в .github/workflows/ и поправьте под себя).
+
+# Еженедельная агрегация observability (бэклог #9): скачиваем JSONL из артефактов
+# pr-review-observability-* за 14 дней и считаем сводку (.ai-reviewer-engine/bin/pr-review-metrics.mjs).
+# Результат — в job summary; лог run'а остаётся в Actions. Не гейтит ничего.
+on:
+  schedule:
+    - cron: '3 7 * * 2'   # вторник 07:03 UTC (не :00/:30 — anti-herd)
+  workflow_dispatch:
+
+permissions:
+  actions: read    # список и скачивание артефактов
+  contents: read
+
+jobs:
+  metrics:
+    name: Aggregate review metrics
+    runs-on: ${{ vars.SELF_HOSTED_CI == '1' && fromJSON('["self-hosted", "linux", "review"]') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Read pinned engine ref
+        id: pin
+        run: |
+          REF="$(tr -d '[:space:]' < ops/ai-reviewer-ref)"
+          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pinned AI review engine
+        uses: actions/checkout@v6
+        with:
+          repository: Orange-hanter/ai-reviewer
+          ref: ${{ steps.pin.outputs.ref }}
+          path: .ai-reviewer-engine
+
+      # gh CLI на self-hosted раннере нет — список артефактов через REST (node).
+      - name: Download observability artifacts (14d)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/metr/extracted" && cd "$RUNNER_TEMP/metr"
+          node --input-type=module -e '
+            const since = Date.now() - 14 * 86400e3;
+            const api = process.env.GITHUB_API_URL, repo = process.env.GITHUB_REPOSITORY;
+            const h = { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, "X-GitHub-Api-Version": "2022-11-28" };
+            const ids = [];
+            for (let page = 1; ; page++) {
+              const res = await fetch(`${api}/repos/${repo}/actions/artifacts?per_page=100&page=${page}`, { headers: h });
+              if (!res.ok) throw new Error(`artifacts → ${res.status}`);
+              const { artifacts } = await res.json();
+              if (!artifacts?.length) break;
+              ids.push(...artifacts
+                .filter((a) => a.name.startsWith("pr-review-observability-") && !a.expired && new Date(a.created_at).getTime() >= since)
+                .map((a) => a.id));
+              if (artifacts.length < 100) break;
+            }
+            console.log(ids.join("\n"));
+          ' > ids.txt
+          echo "артефактов за 14д: $(grep -c . ids.txt || true)"
+          while read -r id; do
+            [ -z "$id" ] && continue
+            if curl -sfL -H "Authorization: Bearer $GITHUB_TOKEN" \
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/artifacts/$id/zip" -o "$id.zip"; then
+              unzip -oq "$id.zip" -d extracted 2>/dev/null || python3 -m zipfile -e "$id.zip" extracted/
+            else
+              echo "пропуск артефакта $id (скачивание не удалось)"
+            fi
+          done < ids.txt
+          find extracted -name 'pr-review-runs.jsonl' -exec cat {} + 2>/dev/null | sort -u > merged.jsonl || true
+          echo "строк JSONL: $(wc -l < merged.jsonl)"
+
+      - name: Metrics report → job summary
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          if [ -s "$RUNNER_TEMP/metr/merged.jsonl" ]; then
+            node .ai-reviewer-engine/bin/pr-review-metrics.mjs "$RUNNER_TEMP/metr/merged.jsonl" | tee metrics-report.md
+            cat metrics-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Нет observability-артефактов за 14 дней (review ещё не запускался?)" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

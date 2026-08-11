@@ -1,5 +1,6 @@
 // Eval harness + confidence gate (R1/R2). Запуск: node --test ops/pr-review.eval.test.mjs
 
+import './helpers/reference-profile.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runEvalHarness, runFixtureCase, loadFixtures } from '../lib/eval.mjs';
@@ -51,11 +52,12 @@ import { buildReviewJson, buildSarif, writeReviewExports, selectSarifFindings, s
 import { buildSummary, buildReasoningSection, buildStickyReasoningFooter } from '../lib/report.mjs';
 import { access, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('normalizeConfidence: missing → 1, clamp 0–1', () => {
-  assert.equal(normalizeConfidence(undefined), 1);
+test('normalizeConfidence: missing → 0.5 (не 1.0 — иначе обход гейта), clamp 0–1', () => {
+  assert.equal(normalizeConfidence(undefined), 0.5);
   assert.equal(normalizeConfidence(0.95), 0.95);
   assert.equal(normalizeConfidence(1.5), 1);
   assert.equal(normalizeConfidence(-0.1), 0);
@@ -106,12 +108,12 @@ test('applyVerifierVerdicts: downgrade critical → minor, не блок', () =>
 
 test('eval harness: все fixtures green', async () => {
   const { ok, metrics, results } = await runEvalHarness();
-  assert.equal(metrics.total, 15, 'ожидаем 15 seed fixtures');
+  assert.equal(metrics.total, 16, 'ожидаем 16 seed fixtures');
   if (!ok) {
     const failed = results.filter((r) => !r.pass).map((r) => `${r.id}: ${r.errors.join('; ')}`);
     assert.fail(`eval fixtures failed:\n${failed.join('\n')}`);
   }
-  assert.equal(metrics.passed, 15);
+  assert.equal(metrics.passed, 16);
 });
 
 test('loadReviewConfig: REVIEW_VERIFIER off', () => {
@@ -251,7 +253,7 @@ test('loadReviewConfig: MoA defaults', () => {
   const cfg = loadReviewConfig({ OLLAMA_API_KEY: 'x' });
   assert.equal(cfg.reviewMode, 'moa');
   assert.deepEqual([...cfg.moa.references], ['kimi-k2.7-code', 'glm-5.2', 'deepseek-v4-flash']);
-  assert.equal(cfg.moa.aggregator, 'minimax-m2.7');
+  assert.equal(cfg.moa.aggregator, 'minimax-m3');
   assert.equal(cfg.verifier.model, 'deepseek-v4-pro');
   assert.equal(cfg.gate.consensusMin, 1);
   assert.equal(cfg.triage.enabled, true);
@@ -275,7 +277,7 @@ test('runAstgrepPrescan: sgconfig smoke on dishCost.ts', async () => {
 });
 
 test('raw-x-forwarded-for: 12 header/get/headers quote+case variants', async () => {
-  const bin = resolve('app/node_modules/.bin/ast-grep');
+  const bin = resolve(REPO_ROOT, 'node_modules/.bin/ast-grep');
   const configPath = resolve(REPO_ROOT, 'ast-grep/sgconfig.yml');
   const fixture = resolve(REPO_ROOT, 'ast-grep/fixtures/xff-variants.ts');
   try {
@@ -287,7 +289,7 @@ test('raw-x-forwarded-for: 12 header/get/headers quote+case variants', async () 
   const { stdout } = await runCommand(
     bin,
     ['scan', '-c', configPath, '--json=stream', fixture],
-    { cwd: resolve('app') },
+    { cwd: REPO_ROOT },
   );
   const rows = stdout.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
   assert.equal(rows.length, 12, `expected 12 xff variants, got ${rows.length}`);
@@ -355,6 +357,89 @@ test('dedupeAgainstPrescan R6: app/ prefix alias', () => {
   assert.equal(dedupeAgainstPrescan(llm, prescan).length, 0);
 });
 
+// Политика с 2026-08-08: minor/nit больше не «всегда в свод». Маршрут считает доказуемость
+// (actionability), а не ярлык модели — на трёх прогонах одного sha одна тема получала
+// critical/major/minor, при этом среди minor были дефекты гейт-уровня (`-->` в футере,
+// `sort` без LC_ALL=C). Блокировка merge по-прежнему по severity: это разные решения.
+test('actionability: доказуемый minor уходит в строку, «голый» — в свод', async () => {
+  const { routeFindings } = await import('../lib/actionability.mjs');
+  const files = new Map([['server/auth.ts', { validLines: new Set([10, 20]) }]]);
+  const proven = {
+    file: 'server/auth.ts', line: 10, severity: 'minor', title: 'p', model: 'm1',
+    confidence: 0.9, consensus: true, suggestion: 'fix()',
+  };
+  const bare = { file: 'server/auth.ts', line: 20, severity: 'nit', title: 'b', model: 'm1', confidence: 0.4 };
+  const routed = routeFindings([proven, bare], files, {
+    ctx: { fileClass: () => 'logic' },
+  });
+  const byTitle = Object.fromEntries(routed.map((r) => [r.finding.title, r]));
+  assert.equal(byTitle.p.route, 'inline', 'консенсус + уверенность + фикс + чувствительный путь');
+  assert.equal(byTitle.b.route, 'sticky', 'ничем не подкреплённый nit остаётся в своде');
+  assert.ok(byTitle.p.finding.actionabilityReasons.length, 'в комментарий уйдёт объяснение, почему он в строке');
+});
+
+test('actionability: находка про невидимый чанку файл в строку не поднимается', async () => {
+  const { routeFindings } = await import('../lib/actionability.mjs');
+  const files = new Map([['server/auth.ts', { validLines: new Set([10]) }]]);
+  const f = {
+    file: 'server/auth.ts', line: 10, severity: 'minor', title: 'x', model: 'm1',
+    confidence: 0.9, consensus: true, suggestion: 'fix()', outOfChunk: true,
+  };
+  const [routed] = routeFindings([f], files, { ctx: { fileClass: () => 'logic' } });
+  assert.equal(routed.route, 'sticky', 'outOfChunk перевешивает остальные сигналы');
+});
+
+test('actionability: лимит инлайна берёт самые доказуемые, а не первые', async () => {
+  const { routeFindings } = await import('../lib/actionability.mjs');
+  const files = new Map([['server/auth.ts', { validLines: new Set([1, 2, 3]) }]]);
+  const mk = (line, extra) => ({
+    file: 'server/auth.ts', line, severity: 'minor', title: `t${line}`, model: 'm1',
+    confidence: 0.9, consensus: true, ...extra,
+  });
+  const routed = routeFindings([mk(1), mk(2, { suggestion: 'fix()' }), mk(3)], files, {
+    maxAdvisoryInline: 1,
+    ctx: { fileClass: () => 'logic' },
+  });
+  const inline = routed.filter((r) => r.route === 'inline').map((r) => r.finding.title);
+  assert.deepEqual(inline, ['t2'], 'выиграла находка с конкретным фиксом');
+});
+
+test('auto-triage: поднятую в строку advisory бот не резолвит молча', () => {
+  const promoted = { file: 'server/auth.ts', line: 10, severity: 'minor', actionabilityScore: 6 };
+  const plain = { file: 'server/auth.ts', line: 30, severity: 'minor' };
+  const ctx = buildTriageContext({
+    allFindings: [promoted, plain], blockers: [], blockOn: ['critical', 'major'],
+    changedPaths: [], headSha: 'abc',
+  });
+  const mk = (line) => ({
+    path: 'server/auth.ts', line,
+    comments: [{ body: '<!-- orakul-ai-review-inline -->\n🟡 **minor (m): x**', author: 'github-actions[bot]' }],
+  });
+  const promotedDecision = decideAutoTriage(mk(10), ctx);
+  assert.notEqual(promotedDecision.reason, 'advisory_only', 'поднятая по доказуемости не резолвится как advisory');
+  assert.notEqual(promotedDecision.action, 'resolve', 'и вообще не резолвится ботом — тред ждёт человека');
+  const plainDecision = decideAutoTriage(mk(30), ctx);
+  assert.equal(plainDecision.reason, 'advisory_only');
+  assert.equal(plainDecision.action, 'resolve', 'обычная advisory закрывается ботом, как раньше');
+});
+
+test('classify: доказуемая advisory уходит в inline через маршрутизацию', () => {
+  const cfg = { inlineOn: ['critical', 'major'], actionability: { threshold: 4, maxAdvisoryInline: 5 } };
+  const files = new Map([['server/auth.ts', { validLines: new Set([10, 20]) }]]);
+  const proven = {
+    file: 'server/auth.ts', line: 10, severity: 'minor', title: 'доказуемая', body: '',
+    model: 'm1', confidence: 0.9, consensus: true, suggestion: 'fix()',
+  };
+  const bare = { file: 'server/auth.ts', line: 20, severity: 'nit', title: 'голая', body: '', model: 'm1', confidence: 0.3 };
+  const { inline, outside } = createFindingsFormatter(cfg).classify([proven, bare], files, {
+    fileClass: () => 'logic',
+  });
+  assert.equal(inline.length, 1, 'в строку ушла одна находка');
+  assert.match(inline[0].body, /доказуемая/);
+  assert.match(inline[0].body, /в строке, потому что/, 'в комментарии объяснено, почему advisory в строке');
+  assert.deepEqual(outside.map((f) => f.title), ['голая']);
+});
+
 test('classify: minor/nit → sticky only (REVIEW_INLINE_ON)', () => {
   const diff = `diff --git a/app/client/src/foo.ts b/app/client/src/foo.ts
 --- a/app/client/src/foo.ts
@@ -373,6 +458,26 @@ test('classify: minor/nit → sticky only (REVIEW_INLINE_ON)', () => {
   assert.equal(inline.length, 1);
   assert.equal(outside.length, 1);
   assert.equal(outside[0].severity, 'minor');
+});
+
+test('classify: inline contains only the finding, without review metadata', () => {
+  const diff = `diff --git a/app/client/src/foo.ts b/app/client/src/foo.ts
+--- a/app/client/src/foo.ts
++++ b/app/client/src/foo.ts
+@@ -1 +1 @@
++import x from 'bad';
+`;
+  const { files } = parseDiff(diff);
+  const cfg = loadReviewConfig({ OLLAMA_API_KEY: 'x', REVIEW_MODE: 'moa' });
+  const { inline } = createFindingsFormatter(cfg).classify([
+    {
+      file: 'app/client/src/foo.ts', line: 1, severity: 'major', title: 'unsafe import', body: 'Use the boundary.',
+      model: 'moa-specialist(minimax-m3←security+correctness+architecture)',
+    },
+  ], files);
+  assert.match(inline[0].body, /\*\*major: unsafe import\*\*/);
+  assert.doesNotMatch(inline[0].body, /¹ MoA|модели и методика|подтверждено несколькими моделями/);
+  assert.doesNotMatch(inline[0].body, /moa-specialist\(/);
 });
 
 test('fp-patterns.jsonl: e2e-in-diff matches', () => {
@@ -394,7 +499,7 @@ test('groupFpEntries: aggregates recurring FP', () => {
 
 test('feedback promote workflow keeps heredocs inside run block', async () => {
   const workflow = await readFile(
-    resolve(REPO_ROOT, '.github/workflows/pr-review-feedback-promote.yml'),
+    resolve(REPO_ROOT, 'examples/ci/pr-review-feedback-promote.yml'),
     'utf8',
   );
   const lines = workflow.split('\n');
@@ -651,7 +756,7 @@ test('loadReviewConfig: specialist model mapping + independent aggregator/verifi
     correctness: 'kimi-k2.7-code',
     architecture: 'glm-5.2',
   });
-  assert.equal(cfg.moa.aggregator, 'minimax-m2.7');
+  assert.equal(cfg.moa.aggregator, 'minimax-m3');
   assert.equal(cfg.verifier.model, 'deepseek-v4-pro');
   const advisorModels = new Set(cfg.specialists.assignments.map((x) => x.model));
   assert.equal(advisorModels.has(cfg.moa.aggregator), false);
@@ -952,6 +1057,7 @@ test('buildSummary R9: MoA reasoning chain in sticky + footer', () => {
   assert.match(md, /MoA reasoning/);
   assert.match(md, /Advisor sees SSRF/);
   assert.match(md, /Jury \(advisor → aggregator\)/);
+  assert.match(md, /¹ MoA specialists:/);
   const stickyFindings = parseStickyFindings(md);
   assert.equal(stickyFindings.length, 1);
   assert.match(md, /"reasoning":\[/);
@@ -1075,6 +1181,13 @@ test('parseReviewCommentFindings R8: grouped inline', () => {
   assert.equal(fs.length, 2);
   assert.equal(fs[0].title, 'leak');
   assert.equal(fs[1].title, 'race');
+});
+
+test('parseReviewCommentFindings R8: compact inline heading without model', () => {
+  const body = `${MARKERS.inline}\n**major: race**\n\nbody`;
+  const fs = parseReviewCommentFindings({ path: 'server/s.ts', line: 5, body });
+  assert.deepEqual(fs, [{ file: 'server/s.ts', line: 5, severity: 'major', title: 'race', model: '' }]);
+  assert.equal(parseInlineReviewTitle(body), 'race');
 });
 
 test('collectFeedbackEntries R8: reaction expands grouped findings', () => {
@@ -1266,21 +1379,215 @@ test('feedback batch: explicit PR is harvested through injected client', async (
   assert.equal(result.failed, 0);
 });
 
+const yamlIndent = (line) => line.length - line.trimStart().length;
+
+// Контрактные ассерты по workflow цепляются за структуру (скаляр по пути, шаг → его
+// shell-скрипт), а не за сырой YAML: regex вида /…\n\s+…/ ломался от безобидной смены
+// отступов, хотя поведение не менялось. Полноценный yaml-парсер брать некуда — ops-тесты
+// работают без npm-зависимостей, поэтому разбираем нужное подмножество по отступам.
+
+/** Снять кавычки и хвостовой комментарий со скалярного значения YAML. */
+const yamlScalarValue = (raw) => raw.replace(/\s+#.*$/, '').trim().replace(/^['"]|['"]$/g, '');
+
+/**
+ * Скаляр по пути вложенных мэппингов: `concurrency.group` → 'pr-review-feedback'.
+ * Поддерживается только блочная форма записи; inline mapping (`{a: b}`) и блочные скаляры
+ * (`|`, `>`) на пути не парсятся — на них хелпер падает с явным сообщением, а не возвращает
+ * мусор, который выглядел бы как «ассерт зелёный».
+ */
+function workflowScalar(workflow, path) {
+  let lines = workflow.split('\n');
+  let indent = 0;
+  let raw = '';
+  const keys = path.split('.');
+  for (const [depth, key] of keys.entries()) {
+    // Сравнение строкой, а не собранным regex: ключ с `.`/`*`/`[` иначе стал бы шаблоном.
+    const start = lines.findIndex((line) => {
+      if (yamlIndent(line) !== indent) return false;
+      const trimmed = line.trim();
+      const tail = trimmed.startsWith(`${key}:`) ? trimmed.slice(key.length + 1) : null;
+      return tail !== null && (tail === '' || /^\s/.test(tail));
+    });
+    assert.ok(start >= 0, `ключ «${key}» из «${path}» не найден в workflow`);
+    raw = yamlScalarValue(lines[start].trim().slice(key.length + 1));
+    const isLeaf = depth === keys.length - 1;
+    assert.ok(
+      isLeaf ? !raw.startsWith('{') && !/^[|>]/.test(raw) : raw === '',
+      `«${key}» в «${path}» записан неподдерживаемой формой YAML (${raw || '<пусто>'}) — хелпер разбирает только блочные мэппинги со скалярными листьями`,
+    );
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((line) => line.trim() && yamlIndent(line) <= indent);
+    lines = end === -1 ? rest : rest.slice(0, end);
+    indent += 2;
+  }
+  return raw;
+}
+
+/** Shell-скрипт шага по его `name:` — с дедентом, без окружающего YAML. */
+function workflowStepScript(workflow, stepName) {
+  const lines = workflow.split('\n');
+  const start = lines.findIndex((line) => {
+    const match = /^- name:\s*(.+)$/.exec(line.trim());
+    return match ? yamlScalarValue(match[1]) === stepName : false;
+  });
+  assert.ok(start >= 0, `шаг «${stepName}» не найден в workflow`);
+  const stepIndent = yamlIndent(lines[start]);
+  let runIndent = null;
+  const script = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() && yamlIndent(line) <= stepIndent) break; // начался следующий шаг
+    if (runIndent === null) {
+      if (/^\s*run:\s*\|[0-9+-]*\s*(?:#.*)?$/.test(line)) runIndent = yamlIndent(line);
+      continue;
+    }
+    if (line.trim() && yamlIndent(line) <= runIndent) break; // run-блок кончился
+    script.push(line);
+  }
+  assert.ok(runIndent !== null, `у шага «${stepName}» нет run-блока`);
+  const body = script.filter((line) => line.trim());
+  // Пустой run-блок дал бы Math.min() === Infinity и молчаливую пустую строку — то есть
+  // «зелёные» ассерты по скрипту, которого нет.
+  assert.ok(body.length > 0, `run-блок шага «${stepName}» пустой`);
+  const dedent = Math.min(...body.map(yamlIndent));
+  return script.map((line) => line.slice(dedent)).join('\n').trim();
+}
+
 test('feedback workflow: scheduled batch persists through a bot PR', async () => {
   const workflow = await readFile(
-    resolve(REPO_ROOT, '.github/workflows/pr-review-feedback.yml'),
+    resolve(REPO_ROOT, 'examples/ci/pr-review-feedback.yml'),
     'utf8',
   );
+  const guardScript = workflowStepScript(workflow, 'Guard against duplicate feedback PR');
+  const harvestScript = workflowStepScript(workflow, 'Migrate log + harvest feedback batch');
+  const prScript = workflowStepScript(workflow, 'Create feedback data PR if new records');
+
+  // Guard считает своими только фиксированную ветку и легаси-суффикс из цифр: по голому
+  // префиксу чужая bot/ai-review-feedback-experiment заблокировала бы harvest навсегда.
+  assert.match(guardScript, /ref === "bot\/ai-review-feedback"/);
+  assert.match(guardScript, /\^bot\\\/ai-review-feedback-\\d\+\$/);
+  assert.doesNotMatch(guardScript, /startsWith\("bot\/ai-review-feedback"\)/);
+
   assert.match(workflow, /schedule:/);
   assert.match(workflow, /github\.event_name == 'schedule'/);
-  assert.match(workflow, /bin\/pr-review-feedback-batch\.mjs/);
-  assert.match(workflow, /actions:\s+write/);
-  assert.match(workflow, /contents:\s+write/);
-  assert.match(workflow, /bot\/ai-review-feedback-/);
-  assert.match(workflow, /gh workflow run ci\.yml --ref "\$BRANCH"/);
+  // Harvest гоняет движок из пина (отдельный чекаут), а не код из рабочего дерева.
+  assert.match(harvestScript, /\.ai-reviewer-engine\/bin\/pr-review-feedback-batch\.mjs/);
+  assert.equal(workflowScalar(workflow, 'permissions.actions'), 'write');
+  assert.equal(workflowScalar(workflow, 'permissions.contents'), 'write');
+  // Имя ветки фиксированное (без ${GITHUB_RUN_ID}): суффикс копил по ветке в день, 14 висячих.
+  assert.match(prScript, /BRANCH="bot\/ai-review-feedback"/);
+  assert.doesNotMatch(prScript, /bot\/ai-review-feedback-\$\{GITHUB_RUN_ID\}/);
+  // Одна ветка + force-push ⇒ одна группа concurrency на все триггеры (иначе cron и
+  // labeled-событие затирают друг друга), и обе стороны сравнения проходят миграцию —
+  // иначе смена схемы делает каждую старую запись «новой».
+  assert.equal(workflowScalar(workflow, 'concurrency.group'), 'pr-review-feedback');
+  assert.equal(workflowScalar(workflow, 'concurrency.cancel-in-progress'), 'false');
+  assert.match(prScript, /--file "\$RUNNER_TEMP\/head\.jsonl" --write/);
+
+  // Сравниваем МНОЖЕСТВА записей побайтово: без `LC_ALL=C` смена локали раннера
+  // переставила бы строки и `comm` снова насчитал бы «новые» на пустом месте, а без `-u`
+  // дубль в логе считался бы новой записью.
+  assert.match(prScript, /jq -cS \. "\$RUNNER_TEMP\/head\.jsonl" \| LC_ALL=C sort -u/);
+  assert.match(prScript, /jq -cS \. "\$LOG" \| LC_ALL=C sort -u/);
+
+  // PR открываем по НОВЫМ ЗАПИСЯМ, а не по байтовому диффу (переупаковка схемы — не повод).
+  // Проверяем по смыслу скрипта, а не по форматированию: решение считается через `comm -13`,
+  // а весь `git diff` и ранний выход живут ПОСЛЕ ветки «новых записей нет» — то есть diff
+  // только поясняет сообщение и не решает, открывать ли PR. Условие матчим по смыслу
+  // («if … $NEW … 0»), чтобы переход на [[ … ]] или (( … )) тест не ронял.
+  const prLines = prScript.split('\n');
+  const decision = prLines.findIndex((line) => /^NEW=.*\bcomm -13\b/.test(line.trim()));
+  assert.ok(decision >= 0, 'решение об открытии PR должно считаться через comm -13');
+  // Ближайший gate ПОСЛЕ подсчёта: чужая (например, вложенная) ветка с тем же условием
+  // не должна подменять собой ту, что охраняет ранний выход.
+  const after = prLines.slice(decision + 1);
+  const gateOffset = after.findIndex((line) => /^if\b.*\bNEW\b.*(?:-eq|==?)\s*0/.test(line.trim()));
+  assert.ok(gateOffset >= 0, 'ранний выход должен стоять под условием «новых записей нет»');
+  const gate = decision + 1 + gateOffset;
+  // Границы ветки — по вложенности `if`/`fi`, а не «всё, что ниже по тексту»: строка после
+  // закрывающего `fi` формально идёт после gate, но выполняется уже при $NEW > 0.
+  // Открывающим считается только shell-форма `if …; then` — иначе `if (…) {` из инлайнового
+  // node-скрипта ниже наращивал бы глубину, которую нечем закрыть (в JS нет `fi`).
+  let depth = 0;
+  let gateEnd = -1;
+  for (let index = gate; index < prLines.length; index++) {
+    const trimmed = prLines[index].trim();
+    if (/^if\b.*;\s*then$/.test(trimmed)) depth += 1;
+    if (/^fi\b/.test(trimmed) && (depth -= 1) === 0) {
+      gateEnd = index;
+      break;
+    }
+  }
+  assert.ok(gateEnd > gate, 'ветка «новых записей нет» не закрыта — разбор скрипта сломан');
+  for (const [index, line] of prLines.entries()) {
+    const at = `строка ${index + 1} шага create-PR`;
+    const insideGate = index > gate && index < gateEnd;
+    if (/\bgit diff\b/.test(line)) {
+      assert.ok(insideGate, `${at}: git diff вне ветки $NEW == 0 снова сделает переупаковку схемы поводом для PR`);
+    }
+    if (/^exit\s+0\b/.test(line.trim())) {
+      assert.ok(insideGate, `${at}: ранний exit 0 вне ветки $NEW == 0`);
+    }
+  }
+
+  // gh CLI на self-hosted раннере отсутствует — PR и dispatch через REST API (node).
+  assert.match(prScript, /\/actions\/workflows\/ci\.yml\/dispatches/);
+  assert.match(prScript, /\/actions\/workflows\/pr-review\.yml\/dispatches/);
+  assert.doesNotMatch(workflow, /\bgh (pr|workflow) /);
   assert.doesNotMatch(workflow, /HEAD:main/);
-  const ciWorkflow = await readFile(resolve(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8');
-  assert.match(ciWorkflow, /workflow_dispatch:/);
+  // Обе диспатчимые workflow — на стороне потребителя (его ci.yml и pr-review.yml обязаны
+  // иметь workflow_dispatch, см. docs/integration.md); здесь проверяем только шаблон.
+});
+
+// Ассерты выше проверяют ФОРМУ шага; этот тест — его ПОВЕДЕНИЕ: те же три команды, взятые
+// из workflow, прогоняются на подготовленных логах. Иначе «PR только при новых записях»
+// держится на regex, и подмена сравнения прошла бы мимо теста.
+test('feedback workflow: подсчёт новых записей выполняется по множеству записей', async (t) => {
+  if (spawnSync('jq', ['--version']).error) {
+    t.skip('jq недоступен — прогон конвейера сравнения пропущен');
+    return;
+  }
+  const workflow = await readFile(
+    resolve(REPO_ROOT, 'examples/ci/pr-review-feedback.yml'),
+    'utf8',
+  );
+  const prScript = workflowStepScript(workflow, 'Create feedback data PR if new records');
+  const compare = prScript.split('\n').filter((line) => /^(?:jq -cS|NEW=)/.test(line.trim()));
+  assert.equal(compare.length, 3, 'ожидались три строки сравнения (before, after, NEW) из шага create-PR');
+  // Из workflow в bash уходят только эти три формы команд — тест исполняет контракт, а не
+  // произвольный текст файла: любая другая строка обязана сначала попасть в этот список.
+  const allowed = [
+    /^jq -cS \. "\$RUNNER_TEMP\/head\.jsonl" \| LC_ALL=C sort -u > "\$RUNNER_TEMP\/before\.jsonl"$/,
+    /^jq -cS \. "\$LOG" \| LC_ALL=C sort -u > "\$RUNNER_TEMP\/after\.jsonl"$/,
+    /^NEW=\$\(LC_ALL=C comm -13 "\$RUNNER_TEMP\/before\.jsonl" "\$RUNNER_TEMP\/after\.jsonl" \| wc -l \| tr -d ' '\)$/,
+  ];
+  for (const [index, line] of compare.entries()) {
+    assert.match(line.trim(), allowed[index], `строка сравнения ${index + 1} изменилась — обнови ожидаемую форму осознанно`);
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), 'feedback-new-'));
+  const log = join(dir, 'log.jsonl');
+  const countNew = async (head, current) => {
+    await writeFile(join(dir, 'head.jsonl'), head, 'utf8');
+    await writeFile(log, current, 'utf8');
+    const res = spawnSync('bash', ['-c', `set -euo pipefail\n${compare.join('\n')}\necho "$NEW"`], {
+      env: { ...process.env, RUNNER_TEMP: dir, LOG: log },
+      encoding: 'utf8',
+      timeout: 30_000, // зависший jq не должен вешать весь прогон тестов
+    });
+    assert.equal(res.status, 0, res.stderr);
+    const parsed = Number(res.stdout.trim());
+    assert.ok(Number.isInteger(parsed), `конвейер вернул не число: ${JSON.stringify(res.stdout)}`);
+    return parsed;
+  };
+
+  const a = '{"pr":1,"finding":{"file":"a.ts","title":"t"}}';
+  const aRepacked = '{"finding":{"title":"t","file":"a.ts"},"pr":1}'; // та же запись, другой порядок ключей
+  const b = '{"pr":2,"finding":{"file":"b.ts","title":"u"}}';
+  assert.equal(await countNew(`${a}\n`, `${a}\n`), 0, 'без изменений новых записей нет');
+  assert.equal(await countNew(`${a}\n`, `${aRepacked}\n`), 0, 'переупаковка ключей — не новая запись (та самая регрессия 2026-08-01)');
+  assert.equal(await countNew(`${a}\n`, `${a}\n${b}\n`), 1, 'настоящая новая запись должна детектироваться');
+  assert.equal(await countNew(`${a}\n`, `${a}\n${a}\n`), 0, 'дубль уже известной записи не считается новой');
+  assert.equal(await countNew('', `${a}\n`), 1, 'bootstrap: пустой HEAD и запись в логе — одна новая');
 });
 
 test('writeFixtureCandidates R8: skip existing', async () => {
@@ -1339,7 +1646,7 @@ test('harvestFeedback R8: mock github dry-run', async () => {
   const cfg = loadReviewConfig({
     OLLAMA_API_KEY: 'x',
     REVIEW_FEEDBACK_WRITE: '0',
-    REVIEW_FEEDBACK_LOG: 'feedback/test-fp.jsonl',
+    REVIEW_FEEDBACK_LOG: 'ops/pr-review/feedback/test-fp.jsonl',
   }, { repo: 'o/r', prNumber: 5 });
   const github = {
     listIssueLabels: async () => [],

@@ -1,0 +1,92 @@
+name: PR Review Feedback Promote (weekly)
+# ШАБЛОН для репозитория-потребителя (скопируйте в .github/workflows/ и поправьте под себя).
+
+# Агрегация fp-feedback.jsonl: ≥2 одинаковых FP → fp-patterns + eval fixtures → bot PR.
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # понедельник 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    name: Promote FP patterns + fixtures
+    runs-on: ${{ vars.SELF_HOSTED_CI == '1' && fromJSON('["self-hosted", "linux", "review"]') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Read pinned engine ref
+        id: pin
+        run: |
+          REF="$(tr -d '[:space:]' < ops/ai-reviewer-ref)"
+          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pinned AI review engine
+        uses: actions/checkout@v6
+        with:
+          repository: Orange-hanter/ai-reviewer
+          ref: ${{ steps.pin.outputs.ref }}
+          path: .ai-reviewer-engine
+
+      - name: Aggregate feedback → patterns + fixtures
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          REVIEW_FP_PROMOTE_MIN: '2'
+          REVIEW_PROFILE: ops/ai-review/profile.json
+          REVIEW_FIXTURES_DIR: ops/ai-review/fixtures
+        run: |
+          node .ai-reviewer-engine/feedback/promote-feedback.mjs --aggregate
+          node .ai-reviewer-engine/bin/pr-review-eval.mjs --fixtures ops/ai-review/fixtures
+
+      - name: Create PR if changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CHANGES="$(git status --porcelain -- ops/ai-review/feedback/fp-patterns.jsonl ops/ai-review/fixtures)"
+          # Коммитим ТОЛЬКО данные обучения: чекаут движка лежит в рабочем дереве и в PR не идёт.
+          if [ -z "$CHANGES" ]; then
+            echo "No promote changes"
+            exit 0
+          fi
+          BRANCH="bot/fp-promote-$(date +%Y%m%d-%H%M)-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add ops/ai-review/feedback/fp-patterns.jsonl ops/ai-review/fixtures
+          git commit -m "chore(pr-review): promote recurring FP patterns and fixtures
+
+          Weekly aggregate from fp-feedback.jsonl (R8 → R1 loop)."
+          git push -u origin "$BRANCH"
+          # gh CLI на self-hosted раннере отсутствует — PR через REST API (как в harvest).
+          BRANCH="$BRANCH" node --input-type=module -e '
+            const res = await fetch(`${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}/pulls`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+                "Content-Type": "application/json",
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+              body: JSON.stringify({
+                title: "chore(pr-review): promote recurring FP patterns",
+                head: process.env.BRANCH,
+                base: "main",
+                body: "## Summary\n- Auto-promoted recurring false-positive patterns and eval fixtures from `fp-feedback.jsonl`\n- Eval harness green on promoted fixtures\n\n## Test plan\n- [x] eval harness on promoted fixtures",
+              }),
+            });
+            if (!res.ok) throw new Error(`create PR → ${res.status}: ${(await res.text()).slice(0, 300)}`);
+            const pr = await res.json();
+            console.log(`Created ${pr.html_url}`);
+          '

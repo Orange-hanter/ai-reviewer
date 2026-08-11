@@ -6,6 +6,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runFixtureCase } from '../lib/eval.mjs';
 import { loadReviewConfig } from '../lib/config.mjs';
+import { getProfile } from '../lib/profile.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_FIXTURES_DIR = resolve(__dir, '../fixtures');
@@ -28,8 +29,13 @@ export function resolveFixtureDir(fixturesDir, id) {
   return target;
 }
 
-export function matchPrFilePatch(files, file) {
-  const variants = new Set([file, file.replace(/^app\//, ''), `app/${file.replace(/^app\//, '')}`]);
+/**
+ * Путь находки → файл в PR. Один и тот же файл приходит и с префиксом appDir (от линтера),
+ * и без него (из diff) — сравниваем оба варианта, иначе патч не находится.
+ */
+export function matchPrFilePatch(files, file, appDir = getProfile().layout.appDir) {
+  const bare = appDir && file.startsWith(`${appDir}/`) ? file.slice(appDir.length + 1) : file;
+  const variants = new Set([file, bare, appDir ? `${appDir}/${bare}` : bare]);
   return files.find((f) => variants.has(f.filename));
 }
 

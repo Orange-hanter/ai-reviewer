@@ -1,0 +1,9 @@
+{
+  "id": "fp-metrics-absent-observability",
+  "description": "«метрики не существуют» при источнике textfile-collector/remote_write → фильтруется (PR #477 pattern)",
+  "expected": {
+    "shouldBlock": false,
+    "findingCount": 0,
+    "blockerCount": 0
+  }
+}

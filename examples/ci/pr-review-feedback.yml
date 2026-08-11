@@ -1,0 +1,285 @@
+name: PR Review Feedback (R8)
+# ШАБЛОН для репозитория-потребителя (скопируйте в .github/workflows/ и поправьте под себя).
+
+# Сбор 👍/👎 на inline + label ai-review-fp → versioned JSONL → bot PR.
+env:
+  REVIEW_FEEDBACK_LABEL: ai-review-fp
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Номер PR для точечного harvest (пусто = последние PR)'
+        required: false
+        default: ''
+
+# Одна группа на ВСЕ триггеры: harvest пишет в одну ветку bot/ai-review-feedback с force-push,
+# и cron в 05:00 не должен встретиться с labeled-событием на PR (оба прошли бы guard и
+# затёрли коммит друг друга). Не отменяем: harvest идемпотентен, пусть дожидается очереди.
+concurrency:
+  group: pr-review-feedback
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  harvest:
+    name: Harvest AI review feedback
+    runs-on: ${{ vars.SELF_HOSTED_CI == '1' && fromJSON('["self-hosted", "linux", "review"]') || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'ai-review-fp')
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      # Чекаут выше сделан с ref: main, поэтому пин читается прямо из рабочего дерева —
+      # версия движка одна и та же у ревью и у harvest (иначе схема лога разъедется).
+      - name: Read pinned engine ref
+        id: pin
+        run: |
+          REF="$(tr -d '[:space:]' < ops/ai-reviewer-ref)"
+          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pinned AI review engine
+        uses: actions/checkout@v6
+        with:
+          repository: Orange-hanter/ai-reviewer
+          ref: ${{ steps.pin.outputs.ref }}
+          path: .ai-reviewer-engine
+
+      - name: Guard against duplicate feedback PR
+        id: guard
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # gh CLI на self-hosted раннере отсутствует (exit 127) — используем node+REST API.
+          OPEN=$(node --input-type=module -e '
+            const api = process.env.GITHUB_API_URL, repo = process.env.GITHUB_REPOSITORY;
+            const h = { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, "X-GitHub-Api-Version": "2022-11-28" };
+            let open = 0;
+            for (let page = 1; ; page++) {
+              // Таймаут — иначе зависший GitHub API съедает весь 15-минутный job timeout
+              // без диагностики, вместо быстрого fallthrough с понятной ошибкой.
+              const res = await fetch(`${api}/repos/${repo}/pulls?state=open&per_page=100&page=${page}`, { headers: h, signal: AbortSignal.timeout(20_000) });
+              if (!res.ok) throw new Error(`pulls → ${res.status}`);
+              const prs = await res.json();
+              // Точное имя ветки + легаси-суффикс ${GITHUB_RUN_ID} (только цифры): по голому
+              // префиксу чужая ветка вида bot/ai-review-feedback-experiment навсегда
+              // заблокировала бы harvest.
+              open += prs.filter((p) => {
+                const ref = p.head?.ref || "";
+                return ref === "bot/ai-review-feedback" || /^bot\/ai-review-feedback-\d+$/.test(ref);
+              }).length;
+              if (prs.length < 100) break;
+            }
+            console.log(open);
+          ')
+          if [ "$OPEN" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Open feedback bot PR already exists; postpone harvest"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Migrate log + harvest feedback batch
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          REVIEW_FEEDBACK_LABEL: ${{ env.REVIEW_FEEDBACK_LABEL }}
+          REVIEW_FEEDBACK_TRUSTED_AUTHORS: github-actions[bot]
+          REVIEW_FEEDBACK_WRITE: '1'
+          REVIEW_PROFILE: ops/ai-review/profile.json
+          REVIEW_FEEDBACK_LOG: ops/ai-review/feedback/fp-feedback.jsonl
+          REVIEW_FEEDBACK_CANDIDATES: '0'
+          REVIEW_FEEDBACK_MD_APPEND: '0'
+          REVIEW_FEEDBACK_SINCE_DAYS: '14'
+          REVIEW_FEEDBACK_PR_LIMIT: '30'
+        run: |
+          # Движок — из отдельного репозитория по пину (шаг выше), код PR здесь не исполняется.
+          node .ai-reviewer-engine/feedback/migrate-feedback.mjs \
+            --file "$GITHUB_WORKSPACE/ops/ai-review/feedback/fp-feedback.jsonl" --write
+          node .ai-reviewer-engine/bin/pr-review-feedback-batch.mjs
+
+      # PR открываем ТОЛЬКО при новых записях. Байтовый `git diff` для этого не годится:
+      # migrate-feedback переупаковывает JSON (порядок ключей) и даёт дифф при нуле новых
+      # записей — из-за этого harvest каждый день плодил ветку и упирался в 403 на create-PR.
+      # Сравниваем канонизированные множества записей, а не байты.
+      - name: Create feedback data PR if new records
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          # PAT/app-токен, если repo-настройка «Allow GitHub Actions to create and approve
+          # pull requests» выключена. Секрета нет → выражение даёт '' → берём GITHUB_TOKEN.
+          GITHUB_TOKEN: ${{ secrets.FEEDBACK_PR_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          LOG="ops/ai-review/feedback/fp-feedback.jsonl"
+          # Обе стороны прогоняем через ту же миграцию: иначе смена схемы (новое/переименованное
+          # поле) сделала бы КАЖДУЮ старую запись «новой» и открыла бы PR с полным логом.
+          MIGRATE=".ai-reviewer-engine/feedback/migrate-feedback.mjs"
+          git show "HEAD:$LOG" > "$RUNNER_TEMP/head.jsonl" 2>/dev/null || : > "$RUNNER_TEMP/head.jsonl"
+          node "$MIGRATE" --file "$RUNNER_TEMP/head.jsonl" --write > /dev/null
+          # LC_ALL=C: сортировка и сравнение — побайтовые. В записях есть кириллица, и при
+          # локалезависимой сортировке смена раннера/локали переставила бы строки, а `comm`
+          # на переставленном входе снова насчитал бы «новые» записи на пустом месте.
+          # sort -u: сравниваем МНОЖЕСТВА записей — дубль в логе не должен считаться новой записью.
+          jq -cS . "$RUNNER_TEMP/head.jsonl" | LC_ALL=C sort -u > "$RUNNER_TEMP/before.jsonl"
+          jq -cS . "$LOG" | LC_ALL=C sort -u > "$RUNNER_TEMP/after.jsonl"
+          NEW=$(LC_ALL=C comm -13 "$RUNNER_TEMP/before.jsonl" "$RUNNER_TEMP/after.jsonl" | wc -l | tr -d ' ')
+          if [ "$NEW" -eq 0 ]; then
+            if ! git diff --quiet -- "$LOG"; then
+              echo "Новых записей нет; дифф — только миграция схемы, уедет со следующим feedback PR"
+            else
+              echo "Новых записей нет"
+            fi
+            exit 0
+          fi
+          echo "Новых записей: $NEW"
+          # Фиксированное имя ветки: раньше суффикс ${GITHUB_RUN_ID} копил по ветке в день
+          # (14 висячих веток к 2026-08-01). Одна ветка, force-push — накопления нет.
+          BRANCH="bot/ai-review-feedback"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add "$LOG"
+          git commit -m "chore(pr-review): persist harvested feedback"
+          git push -f -u origin "$BRANCH"
+          # gh CLI на self-hosted раннере отсутствует (exit 127) — PR + dispatch через REST API.
+          BRANCH="$BRANCH" node --input-type=module -e '
+            import { appendFileSync } from "node:fs";
+            const api = process.env.GITHUB_API_URL, repo = process.env.GITHUB_REPOSITORY, branch = process.env.BRANCH;
+            const owner = repo.split("/")[0];
+            const h = {
+              Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+              "Content-Type": "application/json",
+              "X-GitHub-Api-Version": "2022-11-28",
+            };
+            // Таймаут — иначе зависший GitHub API съедает весь 15-минутный job timeout
+            // без диагностики, вместо быстрого fallthrough с понятной ошибкой.
+            const request = (method, path, body) => fetch(`${api}${path}`, {
+              method, headers: h,
+              body: body ? JSON.stringify(body) : undefined,
+              signal: AbortSignal.timeout(20_000),
+            });
+            const post = async (path, body, { optional = false } = {}) => {
+              const res = await request("POST", path, body);
+              if (!res.ok) {
+                const text = (await res.text()).slice(0, 300);
+                // 403 «not permitted to create or approve pull requests» — не баг харвеста:
+                // выключена repo-настройка. Данные уже в ветке, объясняем как разблокировать.
+                if (res.status === 403 && /not permitted to create/i.test(text)) {
+                  const fix = [
+                    "### ⛔ Feedback PR не создан: Actions запрещено открывать PR",
+                    "",
+                    `Записи запушены в ветку \`${branch}\` — не потеряны. Разблокировать одним из двух:`,
+                    "",
+                    "1. Settings → Actions → General → **Allow GitHub Actions to create and approve pull requests**",
+                    "   (`gh api -X PUT repos/OWNER/REPO/actions/permissions/workflow -F can_approve_pull_request_reviews=true`)",
+                    "2. Либо добавить секрет `FEEDBACK_PR_TOKEN` (PAT/app с правом `pull_requests: write`) — workflow предпочтёт его.",
+                    "",
+                    "После этого перезапустить harvest: Actions → PR Review Feedback (R8) → Run workflow.",
+                  ].join("\n");
+                  console.error(fix);
+                  if (process.env.GITHUB_STEP_SUMMARY) {
+                    try {
+                      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${fix}\n`);
+                    } catch (writeErr) {
+                      console.error(`Не удалось дописать job summary: ${writeErr.message}`);
+                    }
+                  }
+                }
+                if (optional) {
+                  console.error(`POST ${path} → ${res.status}: ${text} (необязательный шаг, продолжаем)`);
+                  return null;
+                }
+                const err = new Error(`POST ${path} → ${res.status}: ${text}`);
+                err.status = res.status;
+                err.body = text;
+                throw err;
+              }
+              // 204 (dispatch) — тела нет; true, чтобы «успех без тела» отличался от null,
+              // который возвращает необязательный шаг при ошибке.
+              return res.status === 204 ? true : res.json();
+            };
+            // 422 «A pull request already exists for these branches» — не баг харвеста: ветка
+            // с данными уже запушена (прошлый прогон упал уже ПОСЛЕ create-PR, а guard смотрит
+            // только на момент старта job). Данные не потеряны — ищем существующий PR по head
+            // вместо падения шага.
+            let pr, reused = false;
+            try {
+              pr = await post(`/repos/${repo}/pulls`, {
+                title: "chore(pr-review): persist harvested feedback",
+                head: branch, base: "main",
+                body: "Automated schema-v1 feedback log update. Promotion runs after review and merge.",
+              });
+            } catch (err) {
+              if (err.status === 422 && /already exists/i.test(err.body || "")) {
+                console.error(`PR для ветки ${branch} уже существует, ищу его номер…`);
+                // state=open, не all: 422 «already exists» бывает ровно при ОТКРЫТОМ PR, а имя ветки
+                // теперь фиксированное — по state=all первым может прийти старый закрытый PR.
+                // Ограничение осознанное: другие 422 (например, «No commits between») сюда не
+                // попадают по тексту ошибки и валят шаг — так и задумано, это не «PR уже есть».
+                const head = `${encodeURIComponent(owner)}:${encodeURIComponent(branch)}`;
+                const res = await request("GET", `/repos/${repo}/pulls?state=open&head=${head}&base=main&per_page=1`);
+                if (!res.ok) {
+                  // Молчаливый [] здесь выдал бы наружу исходный 422, и оператор решил бы, что
+                  // PR уже открыт, хотя на деле упал сам поиск (протухший токен, права, 5xx).
+                  const why = (await res.text()).slice(0, 300);
+                  throw new Error(`Поиск существующего PR по ветке ${branch} не удался: GET → ${res.status}: ${why} (исходная ошибка: ${err.message})`);
+                }
+                const existing = await res.json();
+                // Пустой ответ на успешный поиск — не «PR уже есть»: между create и search PR
+                // закрыли/смёржили, либо GitHub ещё не отдал только что созданный. Бросать сюда
+                // исходный 422 значило бы отправить оператора искать PR, которого нет.
+                if (!existing[0]) {
+                  throw new Error(`GitHub ответил «PR уже существует» на create, но открытого PR по ветке ${branch} не нашлось — его закрыли между запросами либо это задержка репликации. Данные в ветке, шаг можно перезапустить. Исходная ошибка: ${err.message}`);
+                }
+                pr = existing[0];
+                reused = true;
+              } else {
+                throw err;
+              }
+            }
+            console.log(`${reused ? "Reused existing" : "Created"} ${pr.html_url}`);
+            // Статус по каждому dispatch отдельно: безусловное «Dispatched» врало бы, когда
+            // оба запроса упали (переименован workflow, 404) — feedback PR остался бы без
+            // CI и ревью, а в логе стояло бы «запущено».
+            const dispatches = [
+              ["ci.yml", `/repos/${repo}/actions/workflows/ci.yml/dispatches`, { ref: branch }],
+              ["pr-review.yml", `/repos/${repo}/actions/workflows/pr-review.yml/dispatches`, { ref: branch, inputs: { pr_number: String(pr.number) } }],
+            ];
+            const started = [], skipped = [];
+            for (const [name, path, body] of dispatches) {
+              const ok = await post(path, body, { optional: true });
+              (ok ? started : skipped).push(name);
+            }
+            console.log(`Dispatch: запущено ${started.join(", ") || "ничего"}${skipped.length ? `; НЕ запущено ${skipped.join(", ")} — см. предупреждения выше` : ""}`);
+          '
+
+      - name: Upload feedback harvest
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-review-feedback-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+          path: ops/ai-review/feedback/fp-feedback.jsonl
+          if-no-files-found: ignore
+          retention-days: 30

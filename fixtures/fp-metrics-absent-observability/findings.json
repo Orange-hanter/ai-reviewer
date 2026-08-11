@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "file": "ops/observability/hermes/prometheus.yml",
+      "line": 1,
+      "severity": "major",
+      "title": "Alert hermes-critical-container-down использует отсутствующие метрики Docker",
+      "body": "метрики hermes_docker_container_* нигде не определяются в prometheus.yml; noDataState: OK гарантирует молчание",
+      "model": "m1",
+      "confidence": 0.9
+    }
+  ]
+}

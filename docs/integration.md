@@ -1,103 +1,109 @@
 # Интеграция в репозиторий-потребитель
 
-## npm-пакет
+Движок живёт в отдельном репозитории и **никогда не берётся из кода PR**: CI выкачивает его
+по пину — так вредоносный PR не сможет выполнить свой код с секретами прогона.
 
-```json
-{
-  "dependencies": {
-    "@orakul/ai-reviewer": "github:Orange-hanter/ai-reviewer#v0.1.0"
-  }
-}
-```
+Готовые шаблоны workflow — в [`examples/ci/`](../examples/ci/).
 
-Локальная разработка в монорепо Mozarella:
-
-```json
-"@orakul/ai-reviewer": "file:../ai-reviewer"
-```
-
-Symlink для `file:../ai-reviewer` (Orakul):
-
-```bash
-./ops/link-ai-reviewer.sh   # Orakul/ai-reviewer → ../ai-reviewer
-cd ops && npm ci
-```
-
-## Pin версии (CI anti-pwn)
-
-Движок **не** берётся из кода PR — только из доверенного pin:
+## 1. Пин версии
 
 ```
-ops/ai-reviewer-ref   # одна строка: v0.1.0 или commit SHA
+ops/ai-reviewer-ref     # одна строка: тег (v0.2.0) или полный commit SHA
 ```
 
-GitHub Actions (Orakul):
+Обновление версии движка = правка одной строки в PR: видно в диффе, откатывается ревертом.
+
+## 2. Профиль проекта
+
+```
+ops/ai-review/profile.json      # см. docs/profiles.md
+ops/ai-review/repo-rules.md     # правила проекта для промпта
+```
+
+Данные обучения тоже живут у потребителя (движок их не хранит):
+
+```
+ops/ai-review/feedback/fp-feedback.jsonl     # журнал 👍/👎
+ops/ai-review/feedback/fp-patterns.jsonl     # промоутнутые паттерны FP
+ops/ai-review/fixtures/                      # fixtures, выросшие из своих FP
+```
+
+## 3. Workflow
 
 ```yaml
-- name: Read pin
-  id: pin
-  run: echo "ref=$(tr -d '[:space:]' < ops/ai-reviewer-ref)" >> "$GITHUB_OUTPUT"
+      - name: Read pinned engine ref
+        id: pin
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          BASE_REF="${BASE_REF:-main}"
+          [[ "$BASE_REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid BASE_REF"; exit 1; }
+          # Пин читаем из БАЗОВОЙ ветки: файл из кода PR позволил бы подменить движок.
+          REF="$(git show "origin/$BASE_REF:ops/ai-reviewer-ref" | tr -d '[:space:]')"
+          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref"; exit 1; }
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
-- uses: actions/checkout@v6
-  with:
-    repository: Orange-hanter/ai-reviewer
-    ref: ${{ steps.pin.outputs.ref }}
-    path: ai-reviewer
+      - name: Checkout pinned AI review engine
+        uses: actions/checkout@v6
+        with:
+          repository: Orange-hanter/ai-reviewer
+          ref: ${{ steps.pin.outputs.ref }}
+          path: .ai-reviewer-engine
 
-- working-directory: ops
-  run: npm ci
-
-- run: node ops/node_modules/@orakul/ai-reviewer/bin/pr-review.mjs
-  env:
-    OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    PR_NUMBER: ${{ github.event.pull_request.number }}
-    REVIEW_APP_DIR: app
-    GRAPHIFY_BIN: .graphify/venv/bin/graphify
-    GRAPH: .graphify/graphify-out/graph.json
+      - name: Run AI review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          REVIEW_PROFILE: ops/ai-review/profile.json
+        run: node .ai-reviewer-engine/bin/pr-review.mjs
 ```
 
-## Thin wrappers (опционально)
+Полный шаблон со всеми моделями, бюджетами и артефактами —
+[`examples/ci/pr-review.yml`](../examples/ci/pr-review.yml).
 
-Orakul сохраняет совместимость со старыми путями:
+Требования к правам job'а: `contents: read`, `pull-requests: write`. **Не** давайте
+`contents: write` job'у, который исполняет линтеры на коде PR (flat-config eslint — это
+исполняемый JS из чекаута PR).
 
-| Wrapper | Делегирует в |
-|---------|--------------|
-| `ops/pr-review.mjs` | `@orakul/ai-reviewer` |
-| `ops/pr-review.eval.mjs` | eval harness |
-| `ops/pr-review.feedback.mjs` | feedback harvest |
+## 4. Остальные workflow
 
-## Overlay feedback
+| Шаблон | Что делает |
+|--------|------------|
+| [`pr-review.yml`](../examples/ci/pr-review.yml) | Ревью PR (гейт) |
+| [`pr-review-feedback.yml`](../examples/ci/pr-review-feedback.yml) | Сбор 👍/👎 и метки → bot PR с журналом |
+| [`pr-review-feedback-promote.yml`](../examples/ci/pr-review-feedback-promote.yml) | Еженедельно: ≥2 одинаковых FP → паттерн + fixture |
+| [`pr-review-metrics.yml`](../examples/ci/pr-review-metrics.yml) | Сводка по observability-логам прогонов |
 
-Данные обучения (JSONL, patterns) могут жить в потребителе:
+Оба диспатчимых workflow потребителя (`ci.yml`, `pr-review.yml`) должны иметь
+`workflow_dispatch:` — feedback-бот дёргает их после мержа данных.
+
+## 5. Что нужно от репозитория
+
+| Компонент | Для чего | Если нет |
+|-----------|----------|----------|
+| `OLLAMA_API_KEY` | LLM-слой | ревью не запускается (`REVIEW_LLM_REQUIRED=1` → блок) |
+| `node_modules` c eslint в `layout.appDir` | eslint prescan | prescan пропускается |
+| `@ast-grep/cli` | ast-grep prescan | пропускается |
+| Граф graphify | blast-radius | пустой blast-radius |
+| Метка `ai-review-fp` | ручная разметка FP | harvest берёт только реакции |
+
+Всё, кроме ключа LLM, — fail-open: ревью деградирует, но не падает.
+
+## 6. Локальный прогон
 
 ```bash
-REVIEW_FEEDBACK_LOG=ops/ai-review/fp-feedback.jsonl
-REVIEW_FP_PATTERNS=ops/ai-review/fp-patterns.jsonl
+git diff origin/main... > /tmp/changes.patch
+OLLAMA_API_KEY=… REVIEW_PROFILE=ops/ai-review/profile.json \
+  node .ai-reviewer-engine/bin/pr-review.mjs --dry-run --diff /tmp/changes.patch
 ```
 
-Движок и golden fixtures — в пакете; project-specific FP log — в Orakul.
+В монорепо удобно держать клон движка рядом и запускать `node ../ai-reviewer/bin/pr-review.mjs`.
 
-## Локальный прогон (agent-verify слой 3)
+## 7. Обновление версии
 
-```bash
-export OLLAMA_API_KEY=...
-./ops/agent-verify.sh --uncommitted
-# или offline:
-node ops/pr-review.mjs --dry-run --diff /tmp/changes.patch
-```
-
-## Требования потребителя
-
-| Компонент | Нужен для |
-|-----------|-----------|
-| `app/` + `npm ci` | eslint prescan (R6) |
-| Graphify graph | blast-radius (fail-open без графа) |
-| GitHub secrets | CI review + feedback |
-| `@ast-grep/cli` | ast-grep prescan (fail-open без бинарника) |
-
-## Версионирование
-
-- Semver теги на `ai-reviewer` (`v0.1.0`, …)
-- Orakul bump: правка `ops/ai-reviewer-ref` + `npm ci` в PR
-- Eval fixtures в пакете — регрессия при bump pin
+1. В движке: зелёные `npm test` и `npm run eval`, тег `vX.Y.Z`.
+2. У потребителя: правка `ops/ai-reviewer-ref` → PR → ревью нового движка идёт **старым**
+   (пин читается из базовой ветки) → merge.
+3. Первый прогон после bump сравнить с предыдущим: Δ-блок в sticky показывает, что изменилось
+   в наборе находок на том же коде.

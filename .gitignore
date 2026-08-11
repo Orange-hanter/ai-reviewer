@@ -2,3 +2,5 @@ node_modules/
 .graphify/
 *.log
 .DS_Store
+# локальные прогоны движка в его же репозитории
+.ai-review/

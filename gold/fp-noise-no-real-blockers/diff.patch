@@ -1,0 +1,2302 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 0aef0bb..f982b6a 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -104,9 +104,10 @@ jobs:
+         run: bash -n ops/backup-store.sh
+ 
+       # Юнит-тесты движка авто-ревью (чистые функции: парсинг диффа, JSON-repair, чанкинг,
+-      # фильтр ложных находок, консенсус). Без npm-зависимостей — на встроенном node:test.
++      # фильтр ложных находок, консенсус; DI-тесты pipeline/engine/ollama без сети).
++      # Без npm-зависимостей — на встроенном node:test.
+       - name: Unit-test pr-review engine (node:test)
+-        run: node --test ops/pr-review.test.mjs ops/pr-review.eval.test.mjs
++        run: node --test ops/pr-review.test.mjs ops/pr-review.eval.test.mjs ops/pr-review.pipeline.test.mjs ops/pr-review.engine.test.mjs
+ 
+       - name: Eval harness pr-review fixtures (R1)
+         run: node ops/pr-review.eval.mjs
+diff --git a/.github/workflows/pr-review.yml b/.github/workflows/pr-review.yml
+index b36b6a0..28c62ba 100644
+--- a/.github/workflows/pr-review.yml
++++ b/.github/workflows/pr-review.yml
+@@ -88,7 +88,10 @@ jobs:
+           GRAPHIFY_NO_TIPS: '1'
+         run: |
+           set -e
+-          (cd app && npm ci --fund=false --audit=false) &
++          # --ignore-scripts: postinstall зависимостей ИЗ КОДА PR не исполняем — иначе вредоносный
++          # пакет, добавленный в PR, закрепился бы на персистентном self-hosted раннере / отравил кэш.
++          # eslint/ast-grep prescan — чистый JS, lifecycle-скрипты зависимостей ему не нужны.
++          (cd app && npm ci --ignore-scripts --fund=false --audit=false) &
+           NPM_PID=$!
+           if .graphify/venv/bin/graphify --version >/dev/null 2>&1; then
+             .graphify/venv/bin/graphify update app --force || true
+@@ -103,7 +106,9 @@ jobs:
+       # ЗАЩИТА ОТ pwn-request: исполняем ДОВЕРЕННУЮ версию скрипта из base-ветки (origin/<base>),
+       # а НЕ из кода PR — иначе вредоносный PR, правящий ops/pr-review.mjs, выполнил бы свой код с
+       # секретами в env. (Граф строится из кода PR, но graphify только ПАРСИТ AST, код не исполняет.)
+-      # Фолбэк на копию из PR — только для bootstrap-PR, где скрипта ещё нет в base.
++      # Код из чекаута PR с секретами НЕ исполняется никогда: если движка ещё нет в base
++      # (bootstrap-PR, который его добавляет) — ревью мягко пропускается (exit 0, merge не блокируется),
++      # движок из base отревьюит такой PR как обычный код.
+       - name: Run AI review
+         env:
+           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+@@ -127,36 +132,31 @@ jobs:
+           GRAPH: .graphify/graphify-out/graph.json
+           REVIEW_CONFIDENCE_MIN: '0.8'
+           REVIEW_VERIFIER: '1'             # R3: второй проход verifier для critical/major (0 = выкл.)
+-          REVIEW_VERIFIER_MODEL: deepseek-v4-pro
++          REVIEW_VERIFIER_MODEL: deepseek-v4-flash
++          REVIEW_VERIFIER_STRICT: '1'      # блок требует verdict verifier; нет verdict → minor (0 = fail-open)
+           REVIEW_ROUTER: '1'               # R4: skip/light/full по типу diff (0 = всегда full)
+           REVIEW_PRESCAN: '1'              # R6: eslint + ast-grep на changed files (нужен app/node_modules)
+           REVIEW_PRESCAN_ASTGREP: '1'      # R6+: ast-grep anti-patterns (fail-open без @ast-grep/cli)
+           REVIEW_OBSERVABILITY: '1'        # R7: JSONL run log (fail-open)
+-          REVIEW_EXPORT: '1'               # R9: JSON + SARIF artifact (fail-open; движок из base — после merge R9)
++          REVIEW_EXPORT: '1'               # R9: JSON + SARIF artifact (fail-open)
+           REVIEW_APP_DIR: app
+           REVIEW_CHUNK_BYTES: '56000'       # крупнее чанк → меньше LLM-вызовов (баланс recall/скорость)
+           REVIEW_CONCURRENCY: '10'            # параллельных chunk-pipeline (3 specialists + aggregator)
+           REVIEW_MAX_CHUNKS: '40'           # потолок числа чанков (гигантский PR → чанки крупнее, влезаем в timeout)
++          REVIEW_LLM_TIMEOUT_MS: '240000'   # таймаут одной попытки LLM (было 900с: ретраи взрывали 25-мин job)
++          REVIEW_TIME_BUDGET_MIN: '20'      # дедлайн LLM-фазы → частичный отчёт вместо убийства раннером
+           BASE_REF: ${{ github.base_ref }}   # через env, НЕ инлайнить ${{…}} в run: (script-injection)
+         run: |
+           REVIEW_RUN="$RUNNER_TEMP/review-run"
+           mkdir -p "$REVIEW_RUN"
+-          if [ -n "$BASE_REF" ] && git cat-file -e "origin/$BASE_REF:ops/pr-review/pipeline.mjs" 2>/dev/null \
+-            && { [ ! -f ops/pr-review/lib/export.mjs ] || git cat-file -e "origin/$BASE_REF:ops/pr-review/lib/export.mjs" 2>/dev/null; } \
+-            && { [ "${REVIEW_PRESCAN_ASTGREP:-1}" = "0" ] || git cat-file -e "origin/$BASE_REF:ops/pr-review/lib/astgrep.mjs" 2>/dev/null; } \
+-            && { [ "${REVIEW_AUTO_TRIAGE:-1}" = "0" ] || git cat-file -e "origin/$BASE_REF:ops/pr-review/lib/triage.mjs" 2>/dev/null; }; then
++          BASE_REF="${BASE_REF:-main}"   # workflow_dispatch: base_ref пуст — доверенный движок берём из main
++          if git cat-file -e "origin/$BASE_REF:ops/pr-review/pipeline.mjs" 2>/dev/null; then
+             echo "→ доверенный движок (entry + ops/pr-review/) из origin/$BASE_REF"
+             git archive "origin/$BASE_REF" ops/pr-review.mjs ops/pr-review | tar -x -C "$REVIEW_RUN"
+             node "$REVIEW_RUN/ops/pr-review.mjs"
+-          elif [ -f ops/pr-review/pipeline.mjs ]; then
+-            echo "→ bootstrap modular engine из checkout PR (новые модули или base без pipeline)"
+-            node ops/pr-review.mjs
+-          elif [ -n "$BASE_REF" ] && git show "origin/$BASE_REF:ops/pr-review.mjs" > "$REVIEW_RUN/review.mjs" 2>/dev/null; then
+-            echo "→ legacy monolith из origin/$BASE_REF (до модульного split)"
+-            node "$REVIEW_RUN/review.mjs"
+           else
+-            echo "→ bootstrap / dispatch — движок из чекаута PR"
+-            node ops/pr-review.mjs
++            echo "→ движок не найден в origin/$BASE_REF (bootstrap-PR) — пропускаем ревью:"
++            echo "  код из чекаута PR с секретами не исполняем (anti-pwn). Merge не блокируется."
+           fi
+ 
+       - name: Upload review observability log
+diff --git a/docs/08-technical/25-ai-code-review-pipeline-spec.md b/docs/08-technical/25-ai-code-review-pipeline-spec.md
+index f28c243..cbddc1d 100644
+--- a/docs/08-technical/25-ai-code-review-pipeline-spec.md
++++ b/docs/08-technical/25-ai-code-review-pipeline-spec.md
+@@ -41,7 +41,7 @@ Merge **блокируется** exit-кодом `1` только при под
+ |------|--------|-----------|
+ | 2026-07-10 | 1.14 | R8: versioned feedback schema, daily batch harvest, review-gated bot PR persistence |
+ | 2026-07-08 | 1.13 | Speed: parallel prep, CI npm∥graphify, chunk 56k, concurrency 10 |
+-| 2026-07-08 | 1.12 | Model role map: semantic specialists, minimax-m2.7 aggregator, deepseek-v4-pro verifier |
++| 2026-07-08 | 1.12 | Model role map: semantic specialists, minimax-m2.7 aggregator, deepseek-v4-flash verifier |
+ | 2026-07-07 | 1.11 | REVIEW_INLINE_ON; fp-patterns.jsonl; feedback promote loop; severity-aware merge-ready |
+ | 2026-07-06 | 1.10 | CI ↔ MoA defaults; ast-grep +5 rules; R11 auto-triage |
+ | 2026-07-06 | 1.9 | R6+ ast-grep prescan; R9 ✅; 15 eval fixtures |
+@@ -127,13 +127,14 @@ flowchart TB
+ 
+ ### 2.2 Поток данных
+ 
+-1. **Diff** — GitHub API или `--diff file`; аннотация RIGHT-side line numbers для inline.
+-2. **Контекст** — полное содержимое изменённых файлов (cap `REVIEW_MAX_FILE_LINES` / `REVIEW_MAX_CONTEXT_BYTES`).
++1. **Diff** — GitHub API или `--diff file`; аннотация RIGHT-side line numbers для inline. Quoted-пути с пробелами (`+++ "b/path with spaces"`) поддерживаются.
++2. **Контекст** — полное содержимое изменённых файлов (cap `REVIEW_MAX_FILE_LINES` / `REVIEW_MAX_CONTEXT_BYTES`); бинарь отсекается по расширению и NUL-byte sniffing. Контент файла прикрепляется **только к первому куску** файла (без дублей в каждом чанке).
+ 3. **Blast-radius** — экспортированные символы из diff → `graphify affected` (offline, до 25 символов).
+ 4. **Чанки** — жадная упаковка ~`REVIEW_CHUNK_BYTES` (recall > большой контекст); список всех changed files — **один раз** на первый чанк модели.
+ 5. **LLM** — см. §4.
+ 6. **Пост-обработка** — детерминированный FP-filter → кластеры ±3 строки → гейт → inline (cap `REVIEW_MAX_INLINE`) + sticky.
+ 7. **Сходимость** — скрытый блок `<!-- orakul-ai-review-data:… -->` в sticky; следующий прогон подмешивает prior findings в промпт.
++8. **Inline lifecycle** — post-then-delete: сначала новый review, потом удаление старых инлайнов (кроме запощенных и тредов с ответами — их резолвит auto-triage); «свой» комментарий определяется маркером в начале body (цитата маркера ≠ наш).
+ 
+ ---
+ 
+@@ -166,10 +167,10 @@ Exit-код: `1` только если есть кластер с `consensusBloc
+ | Bulk specialists | `MOA_SPECIALIST_MODELS` | `security:…,correctness:…,architecture:…` | Семантическая привязка (не порядок `MOA_REFERENCE_MODELS`) |
+ | Generic advisors (specialists off) | `MOA_REFERENCE_MODELS` | `kimi-k2.7-code,glm-5.2,deepseek-v4-flash` | Три независимых prose-ревьюера |
+ | Aggregator (JSON + jury) | `MOA_AGGREGATOR` | `minimax-m2.7` | Вне пула advisors; MiniMax M2.7 — batch code review, ~94% GLM-5 quality |
+-| Verifier (Pass B) | `REVIEW_VERIFIER_MODEL` | `deepseek-v4-pro` | Structured judge; глубже flash, вне advisors |
++| Verifier (Pass B) | `REVIEW_VERIFIER_MODEL` | `deepseek-v4-flash` | Structured judge, вне advisors |
+ | Fallback JSON | `OLLAMA_MODELS_FALLBACK` | `deepseek-v4-flash` | Дешёвый аварийный прогон без jury |
+ 
+-**Правило независимости:** aggregator и verifier ∉ моделей specialist-advisors (иначе jury refutation слабеет).
++**Правило независимости:** aggregator ∉ моделей specialist-advisors (иначе jury refutation слабеет). Verifier — `deepseek-v4-flash` с 2026-07-17: осознанно совпадает с security-specialist (cost/latency; независимость verifier принесена в жертву — см. класс A коррелированных ошибок в ai-review-false-positives.md).
+ 
+ Advisors: `stream: true`, **без** `json_object`, `MOA_REFERENCE_TEMPERATURE=0.6` (0 ломает kimi).  
+ Aggregator: JSON schema в промпте + `response_format: json_object`.  
+@@ -182,9 +183,9 @@ Aggregator: JSON schema в промпте + `response_format: json_object`.
+ ### 4.3 CI ↔ defaults
+ 
+ Workflow [pr-review.yml](../../.github/workflows/pr-review.yml) синхронизирован с MoA-defaults из `config.mjs` / `agent-verify.sh`:  
+-`REVIEW_MODE=moa`, specialists + `MOA_AGGREGATOR=minimax-m2.7`, `REVIEW_VERIFIER_MODEL=deepseek-v4-pro`, `REVIEW_CONSENSUS=1`, `REVIEW_AUTO_TRIAGE=1`.
++`REVIEW_MODE=moa`, specialists + `MOA_AGGREGATOR=minimax-m2.7`, `REVIEW_VERIFIER_MODEL=deepseek-v4-flash`, `REVIEW_CONSENSUS=1`, `REVIEW_AUTO_TRIAGE=1`.
+ 
+-**Trusted execution:** скрипт из **base branch** (`origin/$BASE_REF`), не из кода PR (anti-pwn). Модульный layout: entry + каталог `ops/pr-review/`.
++**Trusted execution:** скрипт из **base branch** (`origin/$BASE_REF`, для `workflow_dispatch` — `main`), не из кода PR (anti-pwn). Модульный layout: entry + каталог `ops/pr-review/`. Код из чекаута PR с секретами **не исполняется никогда**: если движка ещё нет в base (bootstrap-PR, который его добавляет) — ревью мягко пропускается (exit 0, merge не блокируется); движок из base ревьюит правки самого движка как обычный код.
+ 
+ ### 4.4 Скорость (latency)
+ 
+@@ -199,6 +200,9 @@ Workflow [pr-review.yml](../../.github/workflows/pr-review.yml) синхрони
+ | Пропуск LLM | `REVIEW_ROUTER=1` | lockfile/docs/config-only → skip/light | 0 LLM |
+ | Без verifier | `REVIEW_VERIFIER=0` | −1 LLM, +FP риск | |
+ | Без blast-radius | нет символов | graphify skip | мгновенно |
++| Тайм-бюджет LLM-фазы | `REVIEW_TIME_BUDGET_MIN` / `REVIEW_LLM_TIMEOUT_MS` | 20 мин / 240с | дедлайн → пропуск оставшихся чанков, частичный отчёт |
++
++**Таймаутная дисциплина.** Job в CI — 25 мин (`timeout-minutes`). Внутри: таймаут одной попытки LLM — `REVIEW_LLM_TIMEOUT_MS` (240с; ретрай только пока не израсходован бюджет одного таймаута → логический вызов ≤ ~2×240с), дедлайн всей LLM-фазы — `REVIEW_TIME_BUDGET_MIN` (20 мин от старта процесса). После дедлайна воркеры не берут новые чанки, fallback и verifier (при остатке <2 мин) пропускаются, отчёт постится частичный с пометкой «охват частичный» — процесс завершается штатно (sticky/export/observability flush), а не убивается раннером на 25-й минуте без отчёта.
+ 
+ **Не делаем:** «развернуть» MoA в две глобальные фазы (все specialists → все aggregators) — хуже pipeline-эффекта chunk-worker pool.
+ 
+@@ -213,8 +217,8 @@ Workflow [pr-review.yml](../../.github/workflows/pr-review.yml) синхрони
+ | Группа | Переменные |
+ |--------|------------|
+ | GitHub | `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `PR_NUMBER`, `GITHUB_API_URL` |
+-| Ollama | `OLLAMA_API_KEY`, `OLLAMA_BASE_URL`, `REVIEW_JSON_MODE`, `REVIEW_TEMPERATURE`, `REVIEW_SEED` |
+-| Бюджеты | `REVIEW_MAX_DIFF_BYTES`, `REVIEW_CHUNK_BYTES`, `REVIEW_MAX_CHUNKS`, `REVIEW_CONCURRENCY`, `REVIEW_MAX_INLINE` |
++| Ollama | `OLLAMA_API_KEY`, `OLLAMA_BASE_URL`, `REVIEW_JSON_MODE`, `REVIEW_TEMPERATURE`, `REVIEW_SEED`, `REVIEW_LLM_TIMEOUT_MS` |
++| Бюджеты | `REVIEW_MAX_DIFF_BYTES`, `REVIEW_CHUNK_BYTES`, `REVIEW_MAX_CHUNKS`, `REVIEW_CONCURRENCY`, `REVIEW_MAX_INLINE`, `REVIEW_MAX_SYMBOLS`, `REVIEW_MAX_DEPS_PER_SYMBOL`, `REVIEW_GOD_NODE_THRESHOLD`, `REVIEW_TIME_BUDGET_MIN` |
+ | Graphify | `GRAPHIFY_BIN`, `GRAPH` |
+ | HTTP | `REVIEW_HTTP_RETRIES` (GitHub + Ollama) |
+ | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (опц.) |
+@@ -269,9 +273,10 @@ Workflow [pr-review.yml](../../.github/workflows/pr-review.yml) синхрони
+ 
+ Pass A (review/MoA) → Pass B **verifier** только для `critical`/`major` кандидатов после FP-filter.
+ 
+-- `REVIEW_VERIFIER=1` (default), `REVIEW_VERIFIER_MODEL` (default `deepseek-v4-pro`), `REVIEW_VERIFIER_MAX=12`
++- `REVIEW_VERIFIER=1` (default), `REVIEW_VERIFIER_MODEL` (default `deepseek-v4-flash`), `REVIEW_VERIFIER_MAX=12`
+ - Verdict: `verified` | `rejected` | `downgrade` — rejected убирает finding; downgrade понижает severity
+-- Сбой verifier → **fail-open** (findings сохраняются)
++- `REVIEW_VERIFIER_STRICT=1` (default) — **fail-closed для блоков**: verifier отработал, но verdict по кандидату отсутствует → понижение до minor (блок требует подтверждения второй независимой моделью; `0` = fail-open). Сбой самого verifier → **fail-open** (findings сохраняются)
++- Контекст verifier — только файлы и секции диффа с кандидатами, а не весь PR
+ - Eval: fixtures с `verifier.json` без LLM
+ 
+ ### 8.4 P1 — Роутинг по типу изменений ✅ baseline
+@@ -301,7 +306,7 @@ Pass A (review/MoA) → Pass B **verifier** только для `critical`/`majo
+ 
+ ### 8.6 P2 — Гибрид LLM + детерминизм ✅ baseline (eslint + ast-grep)
+ 
+-- `REVIEW_PRESCAN=1` (default) — eslint + ast-grep на changed lintable paths (`app/**`); CI: `npm ci` в `app/` (`@ast-grep/cli` devDep)
++- `REVIEW_PRESCAN=1` (default) — eslint + ast-grep на changed lintable paths (`app/**`); CI: `npm ci --ignore-scripts` в `app/` (`@ast-grep/cli` devDep; `--ignore-scripts`: postinstall зависимостей из кода PR не исполняется на self-hosted раннере)
+ - Findings с `model: eslint-prescan` / `astgrep-prescan`, `confidence: 1` — **verifier skip**; **`prescanBlock`** + `REVIEW_PRESCAN_BLOCK` управляют merge-gate
+ - `finding.file` = путь **как в diff** (`app/…` или `server/…`) — inline + dedup с LLM
+ - `REVIEW_PRESCAN_BLOCK_RULES` (eslint) / `REVIEW_PRESCAN_ASTGREP_BLOCK_RULES` (default `raw-x-forwarded-for`) → severity **critical** + `prescanBlock`
+@@ -318,6 +323,7 @@ Pass A (review/MoA) → Pass B **verifier** только для `critical`/`majo
+ - Запись **сериализована** (очередь append) — `run_end` всегда последняя строка run; `flush` в `finally` при crash
+ - Findings в логе — slim (file/line/severity/title, без body); `prTitle` ≤80 символов
+ - Fail-open при ошибке записи; CI — artifact `pr-review-observability-*` (14 d)
++- Агрегация метрик: `node ops/pr-review.metrics.mjs [path.jsonl]` (`lib/metrics.mjs`) — runs/blocks, ok-rate и latency по моделям, FP-filter, verifier, тайм-бюджет
+ 
+ ### 8.8 P3 — Feedback loop из GitHub ✅ baseline (R8)
+ 
+diff --git a/docs/08-technical/ai-review-false-positives.md b/docs/08-technical/ai-review-false-positives.md
+index 185e466..f78d8ef 100644
+--- a/docs/08-technical/ai-review-false-positives.md
++++ b/docs/08-technical/ai-review-false-positives.md
+@@ -131,3 +131,29 @@ Append-only — новые записи снизу. R8 может дописыв
+   criticals 0 → … → 2), каждый прогон поднимал новые пункты в консенсус/critical.
+ - Решение: merge от админа, обход подтверждённо ложного гейта (реальный блок всё
+   равно ждёт GitHub Pro).
++
++### 2026-07-17 · PR #477 (pr-review engine hardening) — локальный прогон, 3 класса FP
++- Прогон движка на собственном диффе (`--dry-run`, MoA + strict verifier).
++  Вердикт «would block»: 1 critical + 3 major, все verifier-verified — и при этом
++  **3 из 4 ложные** (verifier подтвердил галлюцинации specialist'ов).
++- **Класс A — коррелированные ошибки знаний о семантике языка.** critical
++  «`export *` перед импортами — синтаксическая ошибка ESM» (импорты хоистятся,
++  код проходит `node --check` и 146 тестов) и major «пустые итерации из-за
++  leading whitespace в `$containers`» (word splitting схлопывает пробелы).
++  Корневая причина: модели разделяют одно неверное «знание» — verifier не
++  независим на спековой trivia. Regex-паттерном такое НЕ фильтруем (убьёт
++  настоящие syntax-findings) → правило (d) в промпте: spec/syntax-claims без
++  вывода интерпретатора → confidence <0.8.
++- **Класс B — absence-claim по частичному контексту.** major «метрики
++  `hermes_docker_container_*` нигде не определяются» — источник textfile-collector
++  (`systemd/hermes-docker-health-exporter` → node-exporter), не scrape_configs.
++  Модель искала определение только в prometheus.yml. → паттерн
++  `metrics-absent-observability` (requiresPath `ops/observability/`) +
++  fixture `fp-metrics-absent-observability`.
++- **Класс C — мисридинг литералов.** major «regex сломан: перед `"b/` стоит `"`,
++  а не пробел» — в диффе явно пробел; юнит-тест quoted-пути проходит. Модель
++  «доказала» по неверно прочитанной строке; verifier повторил.
++- Сделано: 5 записей в fp-feedback.jsonl (schema v1, source=label, pr 477);
++  паттерн `metrics-absent-observability`; правило (d) в промпте; sticky теперь
++  ПОКАЗЫВАЕТ снятые FP-паттернами находки (секция «Отфильтровано как известные
++  FP») — защита от молчаливого проглатывания верных замечаний широким паттерном.
+diff --git a/ops/agent-verify.sh b/ops/agent-verify.sh
+index 1d4a2df..aa89512 100755
+--- a/ops/agent-verify.sh
++++ b/ops/agent-verify.sh
+@@ -87,7 +87,7 @@ if [ "$DO_AI" = "1" ]; then
+     MOA_REFERENCE_TEMPERATURE="${MOA_REFERENCE_TEMPERATURE:-0.6}" \
+     MOA_AGGREGATOR_TEMPERATURE="${MOA_AGGREGATOR_TEMPERATURE:-0.4}" \
+     OLLAMA_MODELS_FALLBACK="${OLLAMA_MODELS_FALLBACK:-deepseek-v4-flash}" \
+-    REVIEW_VERIFIER_MODEL="${REVIEW_VERIFIER_MODEL:-deepseek-v4-pro}" \
++    REVIEW_VERIFIER_MODEL="${REVIEW_VERIFIER_MODEL:-deepseek-v4-flash}" \
+     REVIEW_INLINE_ON="${REVIEW_INLINE_ON:-critical,major}" \
+     GRAPHIFY_BIN="${GRAPHIFY_BIN:-$ENGINE_DIR/.graphify/gf}" GRAPH="$GRAPH" \
+       node "$ENGINE_DIR/ops/pr-review.mjs" --diff "$DIFF_FILE" --dry-run
+diff --git a/ops/observability/hermes/blackbox.yml b/ops/observability/hermes/blackbox.yml
+new file mode 100644
+index 0000000..c6f82e9
+--- /dev/null
++++ b/ops/observability/hermes/blackbox.yml
+@@ -0,0 +1,13 @@
++modules:
++  http_2xx:
++    prober: http
++    timeout: 5s
++    http:
++      preferred_ip_protocol: ip4
++      valid_status_codes: [200]
++  http_2xx_or_redirect:
++    prober: http
++    timeout: 5s
++    http:
++      preferred_ip_protocol: ip4
++      valid_status_codes: [200, 301, 302]
+diff --git a/ops/observability/hermes/docker-compose.yml b/ops/observability/hermes/docker-compose.yml
+index 8bb4df8..b9381bb 100644
+--- a/ops/observability/hermes/docker-compose.yml
++++ b/ops/observability/hermes/docker-compose.yml
+@@ -31,6 +31,27 @@ services:
+     ports: ["127.0.0.1:19090:9090"]
+     restart: unless-stopped
+ 
++  # Метрики самого Hermes. Доступны только внутри compose-сети Prometheus.
++  node-exporter:
++    image: prom/node-exporter:v1.8.2
++    command:
++      - --path.rootfs=/host
++      - --path.procfs=/host/proc
++      - --path.sysfs=/host/sys
++      - --collector.textfile.directory=/host/var/lib/node_exporter/textfile
++      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|host|etc)($$|/)
++    volumes:
++      - /:/host:ro,rslave
++    restart: unless-stopped
++
++  # HTTP-ready проверки UI и внутренних компонентов observability.
++  blackbox-exporter:
++    image: prom/blackbox-exporter:v0.25.0
++    command: ["--config.file=/config/blackbox.yml"]
++    volumes:
++      - ./blackbox.yml:/config/blackbox.yml:ro
++    restart: unless-stopped
++
+   grafana:
+     image: grafana/grafana:11.4.0
+     environment:
+diff --git a/ops/observability/hermes/grafana/provisioning/alerting/rules.yaml b/ops/observability/hermes/grafana/provisioning/alerting/rules.yaml
+index 1178301..2286389 100644
+--- a/ops/observability/hermes/grafana/provisioning/alerting/rules.yaml
++++ b/ops/observability/hermes/grafana/provisioning/alerting/rules.yaml
+@@ -121,3 +121,203 @@ groups:
+               expression: A
+               conditions:
+                 - evaluator: { type: lt, params: [15] }
++
++  - orgId: 1
++    name: hermes-vps
++    folder: Hermes
++    interval: 1m
++    rules:
++      - uid: hermes-disk-warning
++        title: 'Hermes: диск заполнен более чем на 70%'
++        condition: C
++        for: 10m
++        noDataState: Alerting
++        execErrState: Error
++        labels: { severity: warning }
++        annotations:
++          summary: 'Hermes root filesystem > 70%'
++        data:
++          - refId: A
++            relativeTimeRange: { from: 600, to: 0 }
++            datasourceUid: prometheus
++            model:
++              refId: A
++              instant: true
++              expr: '100 * (1 - node_filesystem_avail_bytes{job="hermes-node",mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{job="hermes-node",mountpoint="/",fstype!~"tmpfs|overlay"})'
++          - refId: C
++            relativeTimeRange: { from: 0, to: 0 }
++            datasourceUid: __expr__
++            model:
++              refId: C
++              type: threshold
++              expression: A
++              conditions:
++                - evaluator: { type: gt, params: [70] }
++
++      - uid: hermes-disk-critical
++        title: 'Hermes: диск заполнен более чем на 80%'
++        condition: C
++        for: 5m
++        noDataState: Alerting
++        execErrState: Error
++        labels: { severity: critical }
++        annotations:
++          summary: 'Hermes root filesystem > 80%; Langfuse circuit breaker will stop it'
++        data:
++          - refId: A
++            relativeTimeRange: { from: 300, to: 0 }
++            datasourceUid: prometheus
++            model:
++              refId: A
++              instant: true
++              expr: '100 * (1 - node_filesystem_avail_bytes{job="hermes-node",mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{job="hermes-node",mountpoint="/",fstype!~"tmpfs|overlay"})'
++          - refId: C
++            relativeTimeRange: { from: 0, to: 0 }
++            datasourceUid: __expr__
++            model:
++              refId: C
++              type: threshold
++              expression: A
++              conditions:
++                - evaluator: { type: gt, params: [80] }
++
++      - uid: hermes-memory-critical
++        title: 'Hermes: доступно менее 10% RAM'
++        condition: C
++        for: 5m
++        noDataState: Alerting
++        execErrState: Error
++        labels: { severity: critical }
++        annotations:
++          summary: 'Hermes available RAM < 10%'
++        data:
++          - refId: A
++            relativeTimeRange: { from: 300, to: 0 }
++            datasourceUid: prometheus
++            model:
++              refId: A
++              instant: true
++              expr: '100 * node_memory_MemAvailable_bytes{job="hermes-node"} / node_memory_MemTotal_bytes{job="hermes-node"}'
++          - refId: C
++            relativeTimeRange: { from: 0, to: 0 }
++            datasourceUid: __expr__
++            model:
++              refId: C
++              type: threshold
++              expression: A
++              conditions:
++                - evaluator: { type: lt, params: [10] }
++
++      - uid: hermes-node-exporter-down
++        title: 'Hermes: host metrics unavailable'
++        condition: C
++        for: 2m
++        noDataState: Alerting
++        execErrState: Error
++        labels: { severity: critical }
++        annotations:
++          summary: 'Node Exporter on Hermes is unavailable'
++        data:
++          - refId: A
++            relativeTimeRange: { from: 120, to: 0 }
++            datasourceUid: prometheus
++            model:
++              refId: A
++              instant: true
++              expr: 'up{job="hermes-node"}'
++          - refId: C
++            relativeTimeRange: { from: 0, to: 0 }
++            datasourceUid: __expr__
++            model:
++              refId: C
++              type: threshold
++              expression: A
++              conditions:
++                - evaluator: { type: lt, params: [1] }
++
++      - uid: hermes-observability-web-down
++        title: 'Hermes: observability endpoint unavailable'
++        condition: C
++        for: 2m
++        noDataState: Alerting
++        execErrState: Error
++        labels: { severity: critical }
++        annotations:
++          summary: 'Grafana, Loki, Prometheus or Uptime Kuma did not pass its ready probe'
++        data:
++          - refId: A
++            relativeTimeRange: { from: 120, to: 0 }
++            datasourceUid: prometheus
++            model:
++              refId: A
++              instant: true
++              expr: 'probe_success{job=~"hermes-web|hermes-uptime-kuma"}'
++          - refId: C
++            relativeTimeRange: { from: 0, to: 0 }
++            datasourceUid: __expr__
++            model:
++              refId: C
++              type: threshold
++              expression: A
++              conditions:
++                - evaluator: { type: lt, params: [1] }
++
++      - uid: hermes-critical-container-down
++        title: 'Hermes: critical container stopped or unhealthy'
++        condition: C
++        for: 2m
++        # При нормальной работе запрос не возвращает рядов: это не инцидент.
++        noDataState: OK
++        execErrState: Error
++        labels: { severity: critical }
++        annotations:
++          summary: 'Hermes: контейнер {{ $labels.container }} остановлен или unhealthy'
++          action: 'Если проблема не исчезла сама, проверить логи и состояние контейнера на Hermes.'
++        data:
++          - refId: A
++            relativeTimeRange: { from: 120, to: 0 }
++            datasourceUid: prometheus
++            model:
++              refId: A
++              instant: true
++              # Метрики пишет textfile-collector (systemd/hermes-docker-health-exporter)
++              # через node-exporter — docker-экспортер в стеке не нужен.
++              expr: '(hermes_docker_container_running == 0) or (hermes_docker_container_unhealthy == 1)'
++          - refId: C
++            relativeTimeRange: { from: 0, to: 0 }
++            datasourceUid: __expr__
++            model:
++              refId: C
++              type: threshold
++              expression: A
++              conditions:
++                - evaluator: { type: gt, params: [0] }
++
++      - uid: hermes-container-restart-loop
++        title: 'Hermes: container restart loop'
++        condition: C
++        for: 0s
++        noDataState: OK
++        execErrState: Error
++        labels: { severity: warning }
++        annotations:
++          summary: 'Hermes: контейнер {{ $labels.container }} перезапускался более трёх раз за 10 минут'
++          action: 'Проверить логи контейнера на Hermes и причину перезапусков.'
++        data:
++          - refId: A
++            relativeTimeRange: { from: 600, to: 0 }
++            datasourceUid: prometheus
++            model:
++              refId: A
++              instant: true
++              # RestartCount копится textfile-collector'ом (systemd/hermes-docker-health-exporter).
++              expr: 'increase(hermes_docker_container_restarts_total[10m])'
++          - refId: C
++            relativeTimeRange: { from: 0, to: 0 }
++            datasourceUid: __expr__
++            model:
++              refId: C
++              type: threshold
++              expression: A
++              conditions:
++                - evaluator: { type: gt, params: [3] }
+diff --git a/ops/observability/hermes/grafana/provisioning/alerting/telegram.yaml.example b/ops/observability/hermes/grafana/provisioning/alerting/telegram.yaml.example
+index 35778a6..a106957 100644
+--- a/ops/observability/hermes/grafana/provisioning/alerting/telegram.yaml.example
++++ b/ops/observability/hermes/grafana/provisioning/alerting/telegram.yaml.example
+@@ -11,6 +11,20 @@ contactPoints:
+         settings:
+           bottoken: 'REPLACE_WITH_BOT_TOKEN'
+           chatid: 'REPLACE_WITH_CHAT_ID'
++          # Убираем служебные labels Grafana из Telegram: владельцу нужны статус,
++          # затронутый контейнер и следующее действие.
++          message: |
++            {{ if eq .Status "firing" }}🚨 ПРОБЛЕМА{{ else }}✅ ВОССТАНОВЛЕНО{{ end }}
++            {{ range .Alerts }}
++
++            {{ if eq $.Status "firing" }}
++            {{ .Annotations.summary }}
++            {{ with .Labels.container }}Контейнер: {{ . }}
++            {{ end }}{{ with .Annotations.action }}Действие: {{ . }}
++            {{ end }}{{ else }}
++            Алерт снят: {{ .Labels.alertname }}
++            {{ with .Labels.container }}Контейнер: {{ . }}
++            {{ end }}{{ end }}{{ end }}
+         disableResolveMessage: false
+ policies:
+   - orgId: 1
+diff --git a/ops/observability/hermes/prometheus.yml b/ops/observability/hermes/prometheus.yml
+index 3904cff..c30af3f 100644
+--- a/ops/observability/hermes/prometheus.yml
++++ b/ops/observability/hermes/prometheus.yml
+@@ -12,3 +12,42 @@ scrape_configs:
+   - job_name: prometheus
+     static_configs:
+       - targets: ['localhost:9090']
++
++  - job_name: hermes-node
++    static_configs:
++      - targets: ['node-exporter:9100']
++
++  - job_name: hermes-blackbox
++    static_configs:
++      - targets: ['blackbox-exporter:9115']
++
++  - job_name: hermes-web
++    metrics_path: /probe
++    params:
++      module: [http_2xx]
++    static_configs:
++      - targets:
++          - http://grafana:3000/api/health
++          - http://loki:3100/ready
++          - http://prometheus:9090/-/ready
++    relabel_configs:
++      - source_labels: [__address__]
++        target_label: __param_target
++      - source_labels: [__param_target]
++        target_label: instance
++      - target_label: __address__
++        replacement: blackbox-exporter:9115
++
++  - job_name: hermes-uptime-kuma
++    metrics_path: /probe
++    params:
++      module: [http_2xx_or_redirect]
++    static_configs:
++      - targets: ['http://uptime-kuma:3001/']
++    relabel_configs:
++      - source_labels: [__address__]
++        target_label: __param_target
++      - source_labels: [__param_target]
++        target_label: instance
++      - target_label: __address__
++        replacement: blackbox-exporter:9115
+diff --git a/ops/observability/hermes/systemd/hermes-docker-health-exporter b/ops/observability/hermes/systemd/hermes-docker-health-exporter
+new file mode 100644
+index 0000000..dfc5cbb
+--- /dev/null
++++ b/ops/observability/hermes/systemd/hermes-docker-health-exporter
+@@ -0,0 +1,56 @@
++#!/bin/sh
++# Prometheus textfile collector: compact health/restart metrics for critical Hermes containers.
++set -eu
++
++metric_dir=/var/lib/node_exporter/textfile
++metric_file="$metric_dir/hermes_docker.prom"
++mkdir -p "$metric_dir"
++tmp_file=$(mktemp "$metric_dir/.hermes_docker.XXXXXX")
++trap 'rm -f "$tmp_file"' EXIT
++
++containers='
++observability-loki-1
++observability-prometheus-1
++observability-grafana-1
++  observability-uptime-kuma-1
++  langfuse-clickhouse-1
++  langfuse-langfuse-web-1
++  langfuse-langfuse-worker-1
++  langfuse-minio-1
++  langfuse-postgres-1
++  langfuse-redis-1
++  gw-replica-db
++  dev-minio
++dev-mailpit
++gateway-integrator-sandbox-caddy-1
++gateway-integrator-sandbox-api-gateway-1
++gateway-integrator-sandbox-gateway-core-1
++gateway-integrator-sandbox-timescaledb-1
++'
++
++{
++  echo '# HELP hermes_docker_container_running 1 when a monitored container is running.'
++  echo '# TYPE hermes_docker_container_running gauge'
++  echo '# HELP hermes_docker_container_unhealthy 1 when a monitored container healthcheck is unhealthy.'
++  echo '# TYPE hermes_docker_container_unhealthy gauge'
++  echo '# HELP hermes_docker_container_restarts_total Docker restart count for a monitored container.'
++  echo '# TYPE hermes_docker_container_restarts_total counter'
++
++  for container in $containers; do
++    state=$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || printf missing)
++    health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || printf missing)
++    restarts=$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || printf 0)
++
++    running=0
++    unhealthy=0
++    [ "$state" = running ] && running=1
++    [ "$health" = unhealthy ] && unhealthy=1
++
++    printf 'hermes_docker_container_running{container="%s"} %s\n' "$container" "$running"
++    printf 'hermes_docker_container_unhealthy{container="%s"} %s\n' "$container" "$unhealthy"
++    printf 'hermes_docker_container_restarts_total{container="%s"} %s\n' "$container" "$restarts"
++  done
++} > "$tmp_file"
++
++chmod 0644 "$tmp_file"
++mv "$tmp_file" "$metric_file"
+diff --git a/ops/observability/hermes/systemd/hermes-docker-health-exporter.service b/ops/observability/hermes/systemd/hermes-docker-health-exporter.service
+new file mode 100644
+index 0000000..e7f4a49
+--- /dev/null
++++ b/ops/observability/hermes/systemd/hermes-docker-health-exporter.service
+@@ -0,0 +1,8 @@
++[Unit]
++Description=Export critical Hermes Docker container health for Prometheus
++After=docker.service
++Requires=docker.service
++
++[Service]
++Type=oneshot
++ExecStart=/usr/local/sbin/hermes-docker-health-exporter
+diff --git a/ops/observability/hermes/systemd/hermes-docker-health-exporter.timer b/ops/observability/hermes/systemd/hermes-docker-health-exporter.timer
+new file mode 100644
+index 0000000..6baf5ec
+--- /dev/null
++++ b/ops/observability/hermes/systemd/hermes-docker-health-exporter.timer
+@@ -0,0 +1,10 @@
++[Unit]
++Description=Refresh Hermes Docker health metrics every 30 seconds
++
++[Timer]
++OnBootSec=30s
++OnUnitActiveSec=30s
++Persistent=true
++
++[Install]
++WantedBy=timers.target
+diff --git a/ops/pr-review.engine.test.mjs b/ops/pr-review.engine.test.mjs
+new file mode 100644
+index 0000000..8419964
+--- /dev/null
++++ b/ops/pr-review.engine.test.mjs
+@@ -0,0 +1,129 @@
++// Тесты engine (MoA/consensus оркестрация, fallback, deadline) и ollama-клиента
++// (SSE-парсинг, retry-бюджет) — с подменёнными ollama/prompt/fetch.
++// Запуск: node --test ops/pr-review.engine.test.mjs
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++
++const { createReviewEngine, createOllamaClient } = await import('./pr-review.mjs');
++
++// --- engine ---
++
++const ENGINE_CFG = {
++  reviewMode: 'consensus',
++  models: { list: ['m1'], fallback: [] },
++  moa: { aggregator: 'agg', label: 'moa', references: [], refMaxTokens: 100, refTemp: 0.6, aggTemp: 0.4 },
++  limits: { concurrency: 2 },
++  specialists: { enabled: false, assignments: [] },
++  ollama: { temperature: 0.4 },
++};
++const PROMPT = { buildMessages: () => [{ role: 'user', content: 'x' }] };
++const CHUNKS = [{ annotated: 'd1', fileContents: '' }, { annotated: 'd2', fileContents: '' }];
++
++const mkEngine = (ollama, cfg = ENGINE_CFG) =>
++  createReviewEngine(cfg, { ollama, prompt: PROMPT, log: () => {}, observability: null });
++
++test('engine: дедлайн истёк → чанки пропускаются, LLM не вызывается, fallback не запускается', async () => {
++  let llmCalls = 0;
++  const ollama = {
++    chatJson: async () => { llmCalls++; throw new Error('must not be called'); },
++  };
++  const engine = mkEngine(ollama);
++  const res = await engine.reviewAllModels(CHUNKS, { pr: {}, deadline: Date.now() - 1000 });
++  assert.equal(llmCalls, 0, 'ни одного LLM-вызова после дедлайна');
++  assert.equal(res[0].skippedChunks, 2);
++  assert.ok(res[0].skipped, 'aggregate помечен skipped (не «модель недоступна»)');
++  assert.ok(/тайм-бюджет/.test(res[0].error));
++});
++
++test('engine: primary недоступна → fallback-модель, fallbackFor выставлен', async () => {
++  const cfg = { ...ENGINE_CFG, models: { list: ['m1'], fallback: ['m2'] } };
++  const ollama = {
++    chatJson: async (_msgs, model) => {
++      if (model === 'm1') throw new Error('модель лежит');
++      return { summary: 'ok', verdict: 'approve', findings: [] };
++    },
++  };
++  const engine = mkEngine(ollama, cfg);
++  const res = await engine.reviewAllModels([CHUNKS[0]], { pr: {} });
++  assert.equal(res[0].model, 'm2');
++  assert.equal(res[0].fallbackFor, 'm1');
++  assert.ok(!res[0].error);
++});
++
++test('engine: findings нормализуются и агрегируются по чанкам', async () => {
++  const ollama = {
++    chatJson: async () => ({
++      summary: 's', verdict: 'comment',
++      findings: [{ file: 'a.ts', line: 1, severity: 'minor', title: 't', confidence: 0.5 }],
++    }),
++  };
++  const engine = mkEngine(ollama);
++  const res = await engine.reviewAllModels(CHUNKS, { pr: {} });
++  assert.equal(res[0].findings.length, 2, 'по finding с каждого из двух чанков');
++  assert.equal(res[0].findings[0].model, 'm1');
++});
++
++// --- ollama client ---
++
++const OLLAMA_CFG = {
++  ollama: {
++    base: 'http://ollama.test', key: 'k', seed: 1, jsonMode: false,
++    temperature: 0.4, httpRetries: 3, requestTimeoutMs: 100,
++  },
++  moa: { refMaxTokens: 100, refTemp: 0.6 },
++  httpRetries: 3,
++};
++
++const sse = (text) =>
++  `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`;
++
++async function withFetch(fn, run) {
++  const orig = globalThis.fetch;
++  globalThis.fetch = fn;
++  try { await run(); } finally { globalThis.fetch = orig; }
++}
++
++test('ollama: SSE-стрим собирается в content', async () => {
++  const client = createOllamaClient(OLLAMA_CFG, () => {});
++  await withFetch(async () => new Response(sse('привет мир'), { status: 200 }), async () => {
++    const text = await client.chatText([{ role: 'user', content: 'x' }], 'm1');
++    assert.equal(text, 'привет мир');
++  });
++});
++
++test('ollama: не-transient ошибка (400) — без ретраев', async () => {
++  let calls = 0;
++  const client = createOllamaClient(OLLAMA_CFG, () => {});
++  await withFetch(async () => { calls++; return new Response('bad', { status: 400 }); }, async () => {
++    await assert.rejects(() => client.chatText([], 'm1'), /Ollama 400/);
++    assert.equal(calls, 1);
++  });
++});
++
++test('ollama: retry-бюджет — при исчерпанном таймауте transient 500 не ретраится', async () => {
++  let calls = 0;
++  // requestTimeoutMs=1мс, а ответ занимает 5мс → бюджет израсходован → повтора быть не должно.
++  const cfg = { ...OLLAMA_CFG, ollama: { ...OLLAMA_CFG.ollama, requestTimeoutMs: 1 } };
++  const client = createOllamaClient(cfg, () => {});
++  await withFetch(async () => {
++    calls++;
++    await new Promise((r) => setTimeout(r, 5));
++    return new Response('err', { status: 500 });
++  }, async () => {
++    await assert.rejects(() => client.chatText([], 'm1'), /Ollama 500/);
++    assert.equal(calls, 1, 'ретрай подавлен бюджетом таймаута');
++  });
++});
++
++test('ollama: transient 500 → один ретрай с backoff, затем успех', async () => {
++  let calls = 0;
++  const client = createOllamaClient(OLLAMA_CFG, () => {});
++  await withFetch(async () => {
++    calls++;
++    return calls === 1 ? new Response('err', { status: 500 }) : new Response(sse('ok'), { status: 200 });
++  }, async () => {
++    const text = await client.chatText([], 'm1');
++    assert.equal(text, 'ok');
++    assert.equal(calls, 2);
++  });
++});
+diff --git a/ops/pr-review.eval.test.mjs b/ops/pr-review.eval.test.mjs
+index 4bdac14..04d8e6c 100644
+--- a/ops/pr-review.eval.test.mjs
++++ b/ops/pr-review.eval.test.mjs
+@@ -106,12 +106,12 @@ test('applyVerifierVerdicts: downgrade critical → minor, не блок', () =>
+ 
+ test('eval harness: все fixtures green', async () => {
+   const { ok, metrics, results } = await runEvalHarness();
+-  assert.equal(metrics.total, 15, 'ожидаем 15 seed fixtures');
++  assert.equal(metrics.total, 16, 'ожидаем 16 seed fixtures');
+   if (!ok) {
+     const failed = results.filter((r) => !r.pass).map((r) => `${r.id}: ${r.errors.join('; ')}`);
+     assert.fail(`eval fixtures failed:\n${failed.join('\n')}`);
+   }
+-  assert.equal(metrics.passed, 15);
++  assert.equal(metrics.passed, 16);
+ });
+ 
+ test('loadReviewConfig: REVIEW_VERIFIER off', () => {
+@@ -252,7 +252,7 @@ test('loadReviewConfig: MoA defaults', () => {
+   assert.equal(cfg.reviewMode, 'moa');
+   assert.deepEqual([...cfg.moa.references], ['kimi-k2.7-code', 'glm-5.2', 'deepseek-v4-flash']);
+   assert.equal(cfg.moa.aggregator, 'minimax-m2.7');
+-  assert.equal(cfg.verifier.model, 'deepseek-v4-pro');
++  assert.equal(cfg.verifier.model, 'deepseek-v4-flash');
+   assert.equal(cfg.gate.consensusMin, 1);
+   assert.equal(cfg.triage.enabled, true);
+   assert.deepEqual([...cfg.inlineOn], ['critical', 'major']);
+@@ -652,10 +652,11 @@ test('loadReviewConfig: specialist model mapping + independent aggregator/verifi
+     architecture: 'glm-5.2',
+   });
+   assert.equal(cfg.moa.aggregator, 'minimax-m2.7');
+-  assert.equal(cfg.verifier.model, 'deepseek-v4-pro');
++  assert.equal(cfg.verifier.model, 'deepseek-v4-flash');
++  // Независимость aggregator от advisors сохраняется; verifier=flash осознанно совпадает
++  // с security-specialist (решение 2026-07-17 — cost/latency вместо независимости verifier).
+   const advisorModels = new Set(cfg.specialists.assignments.map((x) => x.model));
+   assert.equal(advisorModels.has(cfg.moa.aggregator), false);
+-  assert.equal(advisorModels.has(cfg.verifier.model), false);
+ });
+ 
+ test('loadReviewConfig: REVIEW_SPECIALISTS off in moa', () => {
+diff --git a/ops/pr-review.metrics.mjs b/ops/pr-review.metrics.mjs
+new file mode 100644
+index 0000000..3123d9a
+--- /dev/null
++++ b/ops/pr-review.metrics.mjs
+@@ -0,0 +1,15 @@
++#!/usr/bin/env node
++// Агрегация метрик observability JSONL → stdout.
++// Запуск: node ops/pr-review.metrics.mjs [path.jsonl]
++// (default: .graphify/graphify-out/observability/pr-review-runs.jsonl — локально или из CI artifact)
++import { readFile } from 'node:fs/promises';
++import { parseJsonl, aggregateMetrics, formatMetricsReport } from './pr-review/lib/metrics.mjs';
++
++const path = process.argv[2] || '.graphify/graphify-out/observability/pr-review-runs.jsonl';
++try {
++  const text = await readFile(path, 'utf8');
++  console.log(formatMetricsReport(aggregateMetrics(parseJsonl(text)), path));
++} catch (e) {
++  console.error(`[pr-review.metrics] не удалось прочитать ${path}: ${e.message}`);
++  process.exit(1);
++}
+diff --git a/ops/pr-review.mjs b/ops/pr-review.mjs
+index 1b2464f..8c304e7 100644
+--- a/ops/pr-review.mjs
++++ b/ops/pr-review.mjs
+@@ -5,19 +5,8 @@
+ // Локально: node ops/pr-review.mjs --dry-run --diff path/to.patch
+ // Eval (R1): node ops/pr-review.eval.mjs
+ 
+-export {
+-  parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks, readChangedFiles,
+-  extractJsonObject,
+-  filterFalsePositiveFindings, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers,
+-  runEvalHarness, loadFixtures, runFixtureCase, formatEvalReport,
+-  buildMoAReferenceSection,
+-  loadReviewConfig, parseCli,
+-  createReviewEngine,
+-  buildSummary,
+-  buildReviewJson,
+-  buildSarif,
+-  createReviewPipeline, runReview,
+-} from './pr-review/index.mjs';
++// Единый источник экспортов — index.mjs (ручной дублирующий список здесь расходился и ломал тесты).
++export * from './pr-review/index.mjs';
+ 
+ import { pathToFileURL } from 'node:url';
+ import { runReview } from './pr-review/pipeline.mjs';
+diff --git a/ops/pr-review.pipeline.test.mjs b/ops/pr-review.pipeline.test.mjs
+new file mode 100644
+index 0000000..1ea099f
+--- /dev/null
++++ b/ops/pr-review.pipeline.test.mjs
+@@ -0,0 +1,131 @@
++// DI-тесты пайплайна pr-review: createReviewPipeline с подменёнными github/engine/prescan —
++// весь run() end-to-end без сети и LLM. Запуск: node --test ops/pr-review.pipeline.test.mjs
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { writeFile, rm } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++const { createReviewPipeline, loadReviewConfig } = await import('./pr-review.mjs');
++
++const ENV = {
++  OLLAMA_API_KEY: 'k',
++  GITHUB_TOKEN: 't',
++  REVIEW_MODE: 'consensus',
++  OLLAMA_MODELS: 'm1,m2',
++  REVIEW_OBSERVABILITY: '0',
++  REVIEW_EXPORT: '0',
++  REVIEW_AUTO_TRIAGE: '0',
++  REVIEW_VERIFIER: '0',
++};
++
++const CODE_DIFF = `diff --git a/foo.ts b/foo.ts
++--- a/foo.ts
+++++ b/foo.ts
++@@ -1,2 +1,3 @@
++ const a = 1;
++-const b = 2;
+++const b = 3;
+++export function foo() { return a; }
++`;
++
++const LOCK_DIFF = `diff --git a/package-lock.json b/package-lock.json
++--- a/package-lock.json
+++++ b/package-lock.json
++@@ -1,1 +1,1 @@
++-old
+++new
++`;
++
++function mkDeps({ reviews }) {
++  const calls = { order: [], postReview: [], upsertSticky: [], deleteStaleInline: [], engineRuns: 0 };
++  const deps = {
++    log: () => {},
++    die: (m) => { throw new Error(`die: ${m}`); },
++    graphify: { buildBlastRadius: async () => [] },
++    prescan: {
++      run: async () => ({
++        findings: [], scanned: 0, skipped: 0, truncated: false,
++        lintableTotal: 0, byTool: null, error: null, promptSection: '',
++      }),
++    },
++    engine: {
++      reviewAllModels: async () => { calls.engineRuns++; return reviews; },
++      verifyFindings: async () => [],
++    },
++    github: {
++      readPriorFindings: async () => [],
++      deleteStaleInline: async (opts) => { calls.order.push('delete'); calls.deleteStaleInline.push(opts); return 0; },
++      postReview: async (p) => { calls.order.push('post'); calls.postReview.push(p); return 555; },
++      upsertSticky: async (body) => { calls.order.push('sticky'); calls.upsertSticky.push(body); return 'created'; },
++    },
++  };
++  return { deps, calls };
++}
++
++async function runPipeline({ diff, reviews }) {
++  const tmp = join(tmpdir(), `pr-review-pipe-${process.pid}-${Math.random().toString(36).slice(2)}.patch`);
++  await writeFile(tmp, diff);
++  try {
++    const cfg = loadReviewConfig(ENV, { dryRun: false, diffFile: tmp, repo: 'o/r', prNumber: 1 });
++    const { deps, calls } = mkDeps({ reviews });
++    const code = await createReviewPipeline(cfg, deps).run();
++    return { code, calls };
++  } finally {
++    await rm(tmp, { force: true });
++  }
++}
++
++const criticalReview = {
++  model: 'm1', summary: 'нашёл баг', verdict: 'changes_requested',
++  findings: [{ file: 'foo.ts', line: 3, severity: 'critical', title: 'реальный баг', body: 'null pointer', confidence: 0.9, model: 'm1' }],
++};
++
++test('pipeline: critical с confidence≥0.8 → блок (exit 1), inline + sticky запощены', async () => {
++  const { code, calls } = await runPipeline({ diff: CODE_DIFF, reviews: [criticalReview] });
++  assert.equal(code, 1, 'блокирующий finding → exit 1');
++  assert.equal(calls.engineRuns, 1);
++  assert.equal(calls.postReview.length, 1);
++  assert.equal(calls.postReview[0].inline[0].path, 'foo.ts');
++  assert.equal(calls.postReview[0].inline[0].line, 3);
++  assert.ok(calls.upsertSticky[0].includes('Merge заблокирован'));
++});
++
++test('pipeline: post-then-delete — старые инлайны чистятся ПОСЛЕ постинга, новые исключены', async () => {
++  const { calls } = await runPipeline({ diff: CODE_DIFF, reviews: [criticalReview] });
++  assert.deepEqual(calls.order.slice(0, 2), ['post', 'delete'], 'порядок: postReview → deleteStaleInline');
++  assert.equal(calls.deleteStaleInline[0].exceptReviewId, 555, 'свежий review исключён из чистки');
++});
++
++test('pipeline: только minor → exit 0, merge не блокируется', async () => {
++  const minor = { ...criticalReview, findings: [{ ...criticalReview.findings[0], severity: 'minor' }] };
++  const { code, calls } = await runPipeline({ diff: CODE_DIFF, reviews: [minor] });
++  assert.equal(code, 0);
++  assert.ok(calls.upsertSticky[0].includes('есть замечания'));
++  assert.ok(!calls.upsertSticky[0].includes('Merge заблокирован'));
++});
++
++test('pipeline: все модели недоступны → мягкий пропуск (exit 0), sticky с меткой ошибки', async () => {
++  const reviews = [{ model: 'm1', error: 'Ollama 500: boom internal detail' }];
++  const { code, calls } = await runPipeline({ diff: CODE_DIFF, reviews });
++  assert.equal(code, 0, 'инфра-сбой merge не блокирует');
++  assert.equal(calls.postReview.length, 0, 'inline не постится');
++  assert.ok(calls.upsertSticky[0].includes('временно недоступно'));
++  assert.ok(calls.upsertSticky[0].includes('m1: HTTP 500'), 'санитизированная метка, без сырого текста');
++  assert.ok(!calls.upsertSticky[0].includes('boom internal detail'));
++});
++
++test('pipeline: дедлайн-пропуски чанков → пометка «охват частичный» в sticky', async () => {
++  const reviews = [{ model: 'm1', summary: '', verdict: 'comment', findings: [], skippedChunks: 2 }];
++  const { code, calls } = await runPipeline({ diff: CODE_DIFF, reviews });
++  assert.equal(code, 0);
++  assert.ok(calls.upsertSticky[0].includes('охват частичный'));
++});
++
++test('pipeline: router skip (lockfile-only) → LLM не вызывается, sticky «пропуск»', async () => {
++  const { code, calls } = await runPipeline({ diff: LOCK_DIFF, reviews: [criticalReview] });
++  assert.equal(code, 0);
++  assert.equal(calls.engineRuns, 0, 'engine не вызывался');
++  assert.equal(calls.postReview.length, 0);
++  assert.ok(calls.upsertSticky[0].includes('пропуск LLM'));
++});
+diff --git a/ops/pr-review.test.mjs b/ops/pr-review.test.mjs
+index a1e362c..bb5b55b 100644
+--- a/ops/pr-review.test.mjs
++++ b/ops/pr-review.test.mjs
+@@ -7,10 +7,15 @@ process.env.OLLAMA_MODELS = 'm1,m2';
+ 
+ import { test } from 'node:test';
+ import assert from 'node:assert/strict';
++import { writeFile, rm } from 'node:fs/promises';
+ 
+ const {
+   parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks,
+   extractJsonObject, filterFalsePositiveFindings, clusterFindings,
++  hasMarker, publicErrorLabel, loadReviewConfig, readChangedFiles,
++  extractFileDiffSections, selectVerifierCandidates, applyVerifierVerdicts,
++  parseJsonl, aggregateMetrics, formatMetricsReport,
++  parseDiffNewPath, parseDiffGitPath, unescapeGitPath, buildSummary,
+ } = await import('./pr-review.mjs');
+ 
+ const SAMPLE_DIFF = `diff --git a/foo.ts b/foo.ts
+@@ -143,3 +148,166 @@ test('clusterFindings: консенсус (2 модели) и single-блок д
+   assert.equal(byFile['b.ts'].consensusBlock, false, 'major×1 модель → не блок');
+   assert.equal(byFile['c.ts'].consensusBlock, true, 'critical×1 модель → блок (single-tier)');
+ });
++
++test('hasMarker: маркер только в начале body (цитата ≠ наш комментарий)', () => {
++  const marker = '<!-- orakul-ai-review -->';
++  assert.ok(hasMarker(`${marker}\n## отчёт`, marker), 'наш sticky — маркер в начале');
++  assert.ok(!hasMarker(`> ${marker}\nсогласен с ботом`, marker), 'процитированный маркер — не наш');
++  assert.ok(!hasMarker('', marker));
++  assert.ok(!hasMarker(undefined, marker));
++  assert.ok(!hasMarker(null, marker));
++});
++
++test('publicErrorLabel: только категория, без сырого текста API', () => {
++  assert.equal(publicErrorLabel('Ollama → 500: {"error":"sk-live-secret-token-123"}'), 'HTTP 500');
++  assert.equal(publicErrorLabel('Ollama → 429: rate limited'), 'HTTP 429 (rate limit)');
++  assert.equal(publicErrorLabel(new Error('This operation was aborted')), 'таймаут');
++  assert.equal(publicErrorLabel('fetch failed: socket hang up'), 'сеть');
++  assert.equal(publicErrorLabel('invalid json: Unexpected token <'), 'невалидный ответ');
++  assert.equal(publicErrorLabel('something weird'), 'ошибка вызова');
++  assert.equal(publicErrorLabel(undefined), 'ошибка вызова');
++});
++
++test('loadReviewConfig: тайм-бюджет и LLM-таймаут из env с безопасными дефолтами', () => {
++  const cli = { dryRun: true, diffFile: undefined, repo: '', prNumber: 0 };
++  const cfg = loadReviewConfig({ REVIEW_TIME_BUDGET_MIN: '7', REVIEW_LLM_TIMEOUT_MS: '123000' }, cli);
++  assert.equal(cfg.limits.timeBudgetMs, 7 * 60_000);
++  assert.equal(cfg.ollama.requestTimeoutMs, 123_000);
++  const def = loadReviewConfig({}, cli);
++  assert.equal(def.limits.timeBudgetMs, 20 * 60_000, 'дефолт дедлайна LLM-фазы — 20 мин');
++  assert.equal(def.ollama.requestTimeoutMs, 240_000, 'дефолт таймаута попытки — 240с, не 900с');
++});
++
++test('parseDiff: quoted-путь с пробелами', () => {
++  const d = 'diff --git "a/Price copy/f.ts" "b/Price copy/f.ts"\n--- "a/Price copy/f.ts"\n+++ "b/Price copy/f.ts"\n@@ -1,1 +1,1 @@\n-old\n+new\n';
++  const { files } = parseDiff(d);
++  assert.ok(files.has('Price copy/f.ts'), 'путь с пробелами распознан');
++  assert.ok(files.get('Price copy/f.ts').validLines.has(1));
++});
++
++test('extractFileDiffSections: quoted и обычные пути', () => {
++  const d = [
++    'diff --git "a/Price copy/f.ts" "b/Price copy/f.ts"', '@@ -1 +1 @@', '+x',
++    'diff --git a/plain.ts b/plain.ts', '@@ -1 +1 @@', '+y',
++  ].join('\n');
++  const s = extractFileDiffSections(d);
++  assert.ok(s.has('Price copy/f.ts'), 'quoted-путь — ключ секции');
++  assert.ok(s.has('plain.ts'), 'обычный путь — ключ секции');
++});
++
++test('buildChunks: контент файла — только в первом куске (без дублей)', () => {
++  const seg = [
++    'diff --git a/f.ts b/f.ts', '--- a/f.ts', '+++ b/f.ts',
++    '@@ -1,1 +1,1 @@', '+aaaaaaaaaaaaaaaaaaaa',
++    '@@ -5,1 +5,1 @@', '+bbbbbbbbbbbbbbbbbbbb',
++  ].join('\n');
++  const contentMap = new Map([['f.ts', '### f.ts\n```\nconst a=1;\n```']]);
++  const limits = { maxDiffBytes: 200_000, maxContextBytes: 180_000, chunkBytes: 100, maxChunks: 40 };
++  const chunks = buildChunks(seg, contentMap, limits);
++  assert.equal(chunks.length, 2, 'два куска → два чанка');
++  const withContent = chunks.filter((c) => c.fileContents.includes('### f.ts'));
++  assert.equal(withContent.length, 1, 'полный контент файла — ровно в одном чанке');
++});
++
++test('readChangedFiles: бинарный файл (NUL byte) пропускается', async () => {
++  const tmp = `.tmp-pr-review-bin-${process.pid}`;
++  await writeFile(tmp, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d]));
++  try {
++    const files = new Map([[tmp, { validLines: new Set([1]), changed: [] }]]);
++    const map = await readChangedFiles(files, { maxFileLines: 100 });
++    assert.equal(map.size, 0, 'бинарь не попадает в контекст модели');
++  } finally {
++    await rm(tmp, { force: true });
++  }
++});
++
++test('applyVerifierVerdicts: strict — нет verdict → minor (fail-closed блок)', () => {
++  const gate = { blockOn: ['critical', 'major'] };
++  const mk = () => [{ file: 'a.ts', line: 1, severity: 'critical', title: 'баг', confidence: 0.9, model: 'm' }];
++  const f1 = mk();
++  const strict = applyVerifierVerdicts(f1, selectVerifierCandidates(f1, gate, 12), [], () => {}, { strictUnverified: true });
++  assert.equal(strict.findings[0].severity, 'minor', 'без verdict блок снимается');
++  assert.equal(strict.stats.unverified, 1);
++  const f2 = mk();
++  const open = applyVerifierVerdicts(f2, selectVerifierCandidates(f2, gate, 12), []);
++  assert.equal(open.findings[0].severity, 'critical', 'без strict — fail-open, severity сохраняется');
++});
++
++test('parseJsonl: битые строки пропускаются', () => {
++  const recs = parseJsonl('{"type":"run_end"}\nне-json\n\n{"type":"router","route":"skip"}');
++  assert.equal(recs.length, 2);
++  assert.equal(recs[1].route, 'skip');
++});
++
++test('aggregateMetrics + formatMetricsReport: сводка по событиям прогонов', () => {
++  const records = [
++    { type: 'run_end', exitCode: 1, wouldBlock: true },
++    { type: 'run_end', exitCode: 0, llmFailed: true },
++    { type: 'router', route: 'skip' },
++    { type: 'llm_call', callType: 'specialist', model: 'm1', ok: true, duration_ms: 2000 },
++    { type: 'llm_call', callType: 'specialist', model: 'm1', ok: false, duration_ms: 4000 },
++    { type: 'fp_filter', removed: 3 },
++    { type: 'verifier', verified: 2, rejected: 1, downgraded: 0, unverified: 1 },
++    { type: 'verifier_skip' },
++    { type: 'time_budget', skippedChunks: 5 },
++  ];
++  const agg = aggregateMetrics(records);
++  assert.equal(agg.runs.total, 2);
++  assert.equal(agg.runs.blocked, 1);
++  assert.equal(agg.runs.llmFailed, 1);
++  assert.equal(agg.router.skip, 1);
++  assert.equal(agg.llm.total, 2);
++  assert.equal(agg.llm.byModel.get('specialist/m1').ok, 1);
++  assert.equal(agg.fpFilterRemoved, 3);
++  assert.equal(agg.verifier.unverified, 1);
++  assert.equal(agg.verifier.skipped, 1);
++  assert.equal(agg.timeBudget.skippedChunks, 5);
++  const report = formatMetricsReport(agg, 'test.jsonl');
++  assert.ok(report.includes('Прогоны: 2 · блоков 1'));
++  assert.ok(report.includes('specialist/m1: 2 вызов(ов), ok 50%, avg 3.0с'));
++  assert.ok(report.includes('чанков пропущено 5'));
++});
++
++test('parseDiffNewPath/parseDiffGitPath: unescape git C-quoting (octal UTF-8, \\\\, \\")', () => {
++  // git квотит не-ASCII октально: "Price/\320\237\321\200\320\260\320\271\321\201.xlsx" = Price/Прайс.xlsx
++  assert.equal(
++    parseDiffNewPath('+++ "b/Price/\\320\\237\\321\\200\\320\\260\\320\\271\\321\\201.xlsx"'),
++    'Price/Прайс.xlsx',
++  );
++  assert.equal(parseDiffNewPath('+++ "b/Price copy/f.ts"'), 'Price copy/f.ts', 'пробел без escapes');
++  assert.equal(
++    parseDiffGitPath('diff --git "a/Price/\\320\\237\\321\\200.xlsx" "b/Price/\\320\\237\\321\\200.xlsx"'),
++    'Price/Пр.xlsx',
++  );
++  assert.equal(parseDiffNewPath('+++ "b/dir\\\\sub/f.ts"'), 'dir\\sub/f.ts', '\\\\ → один бэкслеш');
++  assert.equal(parseDiffNewPath('+++ b/plain.ts'), 'plain.ts', 'unquoted — без изменений');
++  assert.equal(unescapeGitPath('no-escapes'), 'no-escapes');
++});
++
++test('parseDiffNewPath/parseDiffGitPath: trailing \\r (CRLF-дифф)', () => {
++  assert.equal(parseDiffNewPath('+++ b/f.ts\r'), 'f.ts');
++  assert.equal(parseDiffNewPath('+++ "b/Price copy/f.ts"\r'), 'Price copy/f.ts');
++  assert.equal(parseDiffGitPath('diff --git a/f.ts b/f.ts\r'), 'f.ts');
++});
++
++test('fp-pattern metrics-absent-observability: срабатывает только на observability-путях', () => {
++  const mk = () => [{
++    file: 'ops/observability/hermes/prometheus.yml', line: 1, severity: 'major',
++    title: 'Alert использует отсутствующие метрики Docker', body: '', model: 'm',
++  }];
++  const scoped = filterFalsePositiveFindings(mk(), ['ops/observability/hermes/prometheus.yml']);
++  assert.equal(scoped.length, 0, 'на observability-путях — отфильтровано');
++  const unscoped = filterFalsePositiveFindings(mk(), ['app/server/api.ts']);
++  assert.equal(unscoped.length, 1, 'вне observability — requiresPath не сработал, находка оставлена');
++});
++
++test('buildSummary: снятые FP-паттернами находки видны в sticky (не молчаливое удаление)', () => {
++  const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
++  const { md } = buildSummary(cfg, {
++    reviews: [], ok: [], allFindings: [], outside: [], blastBlocks: [], files: new Map(),
++    pr: { number: 1, title: 't' }, headSha: 'abcdef', note: '', blockerClusters: [],
++    fpRemoved: [{ file: 'x.ts', line: 3, severity: 'major', title: 'ложная находка', model: 'm1' }],
++  });
++  assert.ok(md.includes('Отфильтровано как известные FP (1)'));
++  assert.ok(md.includes('ложная находка'));
++});
+diff --git a/ops/pr-review/feedback/fp-feedback.jsonl b/ops/pr-review/feedback/fp-feedback.jsonl
+index e69de29..d8ec7db 100644
+--- a/ops/pr-review/feedback/fp-feedback.jsonl
++++ b/ops/pr-review/feedback/fp-feedback.jsonl
+@@ -0,0 +1,5 @@
++{"schemaVersion":1,"ts":"2026-07-18T08:47:10Z","repo":"Orange-hanter/Orakul","pr":477,"source":"label","signal":"fp","user":"local-review (manual)","finding":{"file":"ops/pr-review.mjs","line":9,"severity":"critical","title":"Синтаксическая ошибка ESM: export* перед импортами","model":"moa-specialist(minimax-m2.7←security+correctness+architecture)"}}
++{"schemaVersion":1,"ts":"2026-07-18T08:47:10Z","repo":"Orange-hanter/Orakul","pr":477,"source":"label","signal":"fp","user":"local-review (manual)","finding":{"file":"ops/observability/hermes/systemd/hermes-docker-health-exporter","line":38,"severity":"major","title":"Пустые итерации из-за leading whitespace в переменной containers","model":"moa-specialist(minimax-m2.7←security+correctness+architecture)"}}
++{"schemaVersion":1,"ts":"2026-07-18T08:47:10Z","repo":"Orange-hanter/Orakul","pr":477,"source":"label","signal":"fp","user":"local-review (manual)","finding":{"file":"ops/pr-review/lib/diff.mjs","line":35,"severity":"major","title":"parseDiffGitPath: сломанный регекс для quoted-формы (мертвый, но экспортированный код)","model":"moa-specialist(minimax-m2.7←security+correctness+architecture)"}}
++{"schemaVersion":1,"ts":"2026-07-18T08:47:10Z","repo":"Orange-hanter/Orakul","pr":477,"source":"label","signal":"fp","user":"local-review (manual)","finding":{"file":"ops/observability/hermes/grafana/provisioning/alerting/rules.yaml","line":283,"severity":"major","title":"Alert hermes-critical-container-down использует отсутствующие метрики Docker","model":"moa-specialist(minimax-m2.7←security+correctness+architecture)"}}
++{"schemaVersion":1,"ts":"2026-07-18T08:47:10Z","repo":"Orange-hanter/Orakul","pr":477,"source":"label","signal":"fp","user":"local-review (manual)","finding":{"file":"ops/observability/hermes/grafana/provisioning/alerting/rules.yaml","line":311,"severity":"major","title":"Alert hermes-container-restart-loop — метрика отсутствует и off-by-one в пороге","model":"moa-specialist(minimax-m2.7←security+correctness+architecture)"}}
+diff --git a/ops/pr-review/feedback/fp-patterns.jsonl b/ops/pr-review/feedback/fp-patterns.jsonl
+index c066a77..6ca7b2e 100644
+--- a/ops/pr-review/feedback/fp-patterns.jsonl
++++ b/ops/pr-review/feedback/fp-patterns.jsonl
+@@ -1,3 +1,4 @@
+ {"id":"e2e-in-diff","description":"e2e spec в диффе, но модель пишет «нет e2e»","regex":"(?:e2e|playwright)[^.]{0,25}(?:^|\\s)(?:нет|отсутствует|без|не\\s+добавлен[а-я]*)(?=\\s|$)|(?:^|\\s)(?:нет|отсутствует|без|не\\s+добавлен[а-я]*)(?=\\s)[^.]{0,25}(?:e2e|playwright)|\\b(?:no|missing)\\s+(?:e2e|playwright)(?:\\s+tests?)?\\b|\\b(?:e2e|playwright)\\s+tests?\\s+(?:not\\s+added|missing|absent)\\b","requiresPath":"(?:^|/)e2e/.*\\.spec\\.ts$"}
+ {"id":"file-absent-in-diff","description":"модель: файл не в PR, но basename есть в тексте и в changedPaths","regex":"(?:^|\\s)файл(?=\\s).{0,30}?(?:отсутствует\\s+в|не\\s+(?:входит\\s+в|найден\\s+в|в))\\s+(?:дифф\\w*|pr\\b)|\\bfile\\b.{0,30}?(?:(?:not\\s+in|absent\\s+from|not\\s+found\\s+in|missing\\s+from|missing\\s+in)\\s+(?:the\\s+)?(?:pr|diff))\\b","matchChangedBasename":true}
+ {"id":"gha-version-hallucination","description":"модель утверждает что пин GitHub Action не существует (устаревшие знания; ci.yml уже использует v6/v7)","regex":"(?:actions/(?:checkout|setup-node|setup-python|cache|upload-artifact)|github/codeql-action/upload-sarif)@v\\d+.{0,40}(?:версия\\s+не\\s+существует|не\\s+существует|workflow\\s+упад|может\\s+не\\s+существовать|does\\s+not\\s+exist)|(?:версия\\s+не\\s+существует|не\\s+существует|может\\s+не\\s+существовать).{0,30}(?:actions/(?:checkout|setup-node|setup-python|cache|upload-artifact)|github/codeql-action/upload-sarif)@v\\d+","requiresPath":"\\.github/workflows/"}
++{"id":"metrics-absent-observability","description":"модель: метрики не существуют/не определены — но источник textfile-collector/remote_write вне scrape_configs (PR #477, локальный прогон)","regex":"(?:метрик[а-яё]*|metrics).{0,50}(?:не\\s+(?:существует|определ[а-яё]*|найден[а-яё]*|приход[а-яё]*)|отсутству[а-яё]*)|отсутствующие\\s+(?:метрик[а-яё]*|metrics)|(?:метрик[а-яё]*|metrics)\\s+(?:does\\s+not\\s+exist|not\\s+defined)","requiresPath":"ops/observability/"}
+diff --git a/ops/pr-review/fixtures/fp-metrics-absent-observability/diff.patch b/ops/pr-review/fixtures/fp-metrics-absent-observability/diff.patch
+new file mode 100644
+index 0000000..bff6536
+--- /dev/null
++++ b/ops/pr-review/fixtures/fp-metrics-absent-observability/diff.patch
+@@ -0,0 +1,7 @@
++diff --git a/ops/observability/hermes/prometheus.yml b/ops/observability/hermes/prometheus.yml
++--- a/ops/observability/hermes/prometheus.yml
+++++ b/ops/observability/hermes/prometheus.yml
++@@ -1,2 +1,3 @@
++ global:
++   scrape_interval: 30s
+++  evaluation_interval: 30s
+diff --git a/ops/pr-review/fixtures/fp-metrics-absent-observability/findings.json b/ops/pr-review/fixtures/fp-metrics-absent-observability/findings.json
+new file mode 100644
+index 0000000..705931b
+--- /dev/null
++++ b/ops/pr-review/fixtures/fp-metrics-absent-observability/findings.json
+@@ -0,0 +1,13 @@
++{
++  "findings": [
++    {
++      "file": "ops/observability/hermes/prometheus.yml",
++      "line": 1,
++      "severity": "major",
++      "title": "Alert hermes-critical-container-down использует отсутствующие метрики Docker",
++      "body": "метрики hermes_docker_container_* нигде не определяются в prometheus.yml; noDataState: OK гарантирует молчание",
++      "model": "m1",
++      "confidence": 0.9
++    }
++  ]
++}
+diff --git a/ops/pr-review/fixtures/fp-metrics-absent-observability/meta.json b/ops/pr-review/fixtures/fp-metrics-absent-observability/meta.json
+new file mode 100644
+index 0000000..e595c47
+--- /dev/null
++++ b/ops/pr-review/fixtures/fp-metrics-absent-observability/meta.json
+@@ -0,0 +1,9 @@
++{
++  "id": "fp-metrics-absent-observability",
++  "description": "«метрики не существуют» при источнике textfile-collector/remote_write → фильтруется (PR #477 pattern)",
++  "expected": {
++    "shouldBlock": false,
++    "findingCount": 0,
++    "blockerCount": 0
++  }
++}
+diff --git a/ops/pr-review/index.mjs b/ops/pr-review/index.mjs
+index 248cb32..852680a 100644
+--- a/ops/pr-review/index.mjs
++++ b/ops/pr-review/index.mjs
+@@ -1,6 +1,6 @@
+ // Канонические re-export API pr-review (импорт: ops/pr-review/index.mjs или ops/pr-review.mjs).
+ 
+-export { parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks, readChangedFiles } from './lib/diff.mjs';
++export { parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, parseDiffNewPath, parseDiffGitPath, unescapeGitPath } from './lib/diff.mjs';
+ export { extractJsonObject } from './lib/json.mjs';
+ export { filterFalsePositiveFindings, matchesKnownFalsePositive, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers, applyPrescanBlockPolicy } from './lib/findings.mjs';
+ export { selectVerifierCandidates, applyVerifierVerdicts, createVerifierRunner } from './lib/verifier.mjs';
+@@ -31,12 +31,16 @@ export {
+ export { buildMoAReferenceSection } from './lib/prompt.mjs';
+ export { loadReviewConfig, parseCli } from './lib/config.mjs';
+ export { createReviewEngine } from './lib/engine.mjs';
++export { createOllamaClient } from './lib/ollama.mjs';
+ export {
+   buildReviewJson, buildSarif, writeReviewExports, selectSarifFindings,
+   extractReasoningEntries, sarifArtifactUri, sarifAutomationGuid,
+   EXPORT_VERSION, SARIF_SCHEMA, SARIF_GUID_RE, TOOL_NAME,
+ } from './lib/export.mjs';
+ export { buildSummary, buildRouterSummary, buildReasoningSection, buildStickyReasoningFooter } from './lib/report.mjs';
++export { MARKERS, hasMarker } from './lib/constants.mjs';
++export { publicErrorLabel } from './lib/util.mjs';
++export { parseJsonl, aggregateMetrics, formatMetricsReport } from './lib/metrics.mjs';
+ export { decideAutoTriage, buildTriageContext, runAutoTriage, findingLocationKey as triageLocationKey } from './lib/triage.mjs';
+ export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog } from './lib/router.mjs';
+ export { createReviewPipeline, runReview } from './pipeline.mjs';
+diff --git a/ops/pr-review/lib/config.mjs b/ops/pr-review/lib/config.mjs
+index d8d1745..0593260 100644
+--- a/ops/pr-review/lib/config.mjs
++++ b/ops/pr-review/lib/config.mjs
+@@ -100,6 +100,7 @@ export function loadReviewConfig(env = process.env, cli = parseCli()) {
+       jsonMode: env.REVIEW_JSON_MODE !== '0',
+       seed,
+       httpRetries,
++      requestTimeoutMs: numEnv('REVIEW_LLM_TIMEOUT_MS', 240_000, env),
+     }),
+     moa: Object.freeze({
+       references: moaReferences,
+@@ -120,6 +121,9 @@ export function loadReviewConfig(env = process.env, cli = parseCli()) {
+       model: verifierModel,
+       maxCandidates: numEnv('REVIEW_VERIFIER_MAX', 12, env),
+       temperature: verifierTemp,
++      // Fail-closed для блоков: verifier отработал, но verdict'а по кандидату нет → minor.
++      // Блок требует подтверждения второй независимой моделью (0 = fail-open, старое поведение).
++      strictBlocks: env.REVIEW_VERIFIER_STRICT !== '0',
+     }),
+     router: Object.freeze({ enabled: routerEnabled }),
+     specialists: Object.freeze({
+@@ -173,15 +177,18 @@ export function loadReviewConfig(env = process.env, cli = parseCli()) {
+     }),
+     limits: Object.freeze({
+       maxDiffBytes: numEnv('REVIEW_MAX_DIFF_BYTES', 200_000, env),
+-      maxSymbols: 25,
+-      maxDepsPerSymbol: 20,
+-      godNodeThreshold: 20,
++      maxSymbols: numEnv('REVIEW_MAX_SYMBOLS', 25, env),
++      maxDepsPerSymbol: numEnv('REVIEW_MAX_DEPS_PER_SYMBOL', 20, env),
++      godNodeThreshold: numEnv('REVIEW_GOD_NODE_THRESHOLD', 20, env),
+       maxFileLines: numEnv('REVIEW_MAX_FILE_LINES', 1500, env),
+       maxContextBytes: numEnv('REVIEW_MAX_CONTEXT_BYTES', 180_000, env),
+       chunkBytes: numEnv('REVIEW_CHUNK_BYTES', 56_000, env),
+       maxChunks: numEnv('REVIEW_MAX_CHUNKS', 40, env),
+       concurrency: numEnv('REVIEW_CONCURRENCY', 10, env),
+       maxInline: numEnv('REVIEW_MAX_INLINE', 50, env),
++      // Дедлайн LLM-фазы прогона: после него чанки пропускаем и постим частичный отчёт,
++      // чтобы процесс завершился штатно до убийства раннером (job timeout-minutes: 25).
++      timeBudgetMs: numEnv('REVIEW_TIME_BUDGET_MIN', 20, env) * 60_000,
+     }),
+     graphify: Object.freeze({
+       bin: env.GRAPHIFY_BIN || '.graphify/gf',
+diff --git a/ops/pr-review/lib/constants.mjs b/ops/pr-review/lib/constants.mjs
+index 1f5b550..3a2056c 100644
+--- a/ops/pr-review/lib/constants.mjs
++++ b/ops/pr-review/lib/constants.mjs
+@@ -11,8 +11,8 @@ export const DEFAULT_MOA_SPECIALIST_MODELS =
+ /** Jury aggregator (JSON + advisorClaims) — вне пула advisors (MiniMax: batch code review). */
+ export const DEFAULT_MOA_AGGREGATOR = 'minimax-m2.7';
+ 
+-/** Pass B verifier — глубокий structured judge, вне advisors (DeepSeek Pro). */
+-export const DEFAULT_REVIEW_VERIFIER_MODEL = 'deepseek-v4-pro';
++/** Pass B verifier — structured judge, вне advisors (DeepSeek Flash). */
++export const DEFAULT_REVIEW_VERIFIER_MODEL = 'deepseek-v4-flash';
+ 
+ export const DEFAULT_OLLAMA_MODELS_FALLBACK = 'deepseek-v4-flash';
+ 
+@@ -39,3 +39,10 @@ export const MARKERS = {
+   inline: '<!-- orakul-ai-review-inline -->',
+   dataRe: /<!--\s*orakul-ai-review-data:([\s\S]*?)-->/,
+ };
++
++/**
++ * Наш комментарий — маркер в НАЧАЛЕ body (все наши посты начинаются с маркера).
++ * includes() нельзя: процитированный маркер в чужом комментарии сделал бы его «нашим»
++ * (перезапись sticky / удаление inline).
++ */
++export const hasMarker = (body, marker) => typeof body === 'string' && body.startsWith(marker);
+diff --git a/ops/pr-review/lib/diff.mjs b/ops/pr-review/lib/diff.mjs
+index fcddc74..519ea69 100644
+--- a/ops/pr-review/lib/diff.mjs
++++ b/ops/pr-review/lib/diff.mjs
+@@ -1,6 +1,42 @@
+ import { readFile } from 'node:fs/promises';
+ import { resolve, sep } from 'node:path';
+ 
++/** Unescape git C-quoting внутри quoted-пути: \\ \" \n \t и октальные \ooo (байты UTF-8). */
++export function unescapeGitPath(s) {
++  if (!s.includes('\\')) return s;
++  const bytes = [];
++  const push = (ch) => bytes.push(...Buffer.from(ch, 'utf8'));
++  for (let i = 0; i < s.length; i++) {
++    if (s[i] !== '\\') { push(s[i]); continue; }
++    const n = s[i + 1];
++    if (n === '\\' || n === '"') { push(n); i++; continue; }
++    if (n === 'n') { bytes.push(10); i++; continue; }
++    if (n === 't') { bytes.push(9); i++; continue; }
++    const oct = s.slice(i + 1, i + 4);
++    if (/^[0-7]{1,3}$/.test(oct)) { bytes.push(parseInt(oct, 8)); i += oct.length; continue; }
++    push(s[i]); // неизвестный escape — оставляем как есть
++  }
++  return Buffer.from(bytes).toString('utf8');
++}
++
++const stripCr = (line) => (line.endsWith('\r') ? line.slice(0, -1) : line);
++
++/** Путь из строки `+++ b/path` (quoted-форма `+++ "b/path with spaces"` — с unescape). */
++export const parseDiffNewPath = (line) => {
++  const l = stripCr(line);
++  const q = l.match(/^\+\+\+ "b\/((?:[^"\\]|\\.)*)"$/);
++  if (q) return unescapeGitPath(q[1]);
++  return l.match(/^\+\+\+ b\/(.+)$/)?.[1] ?? null;
++};
++
++/** Путь (b-side) из строки `diff --git a/x b/y` (quoted-форма — с unescape). */
++export const parseDiffGitPath = (line) => {
++  const l = stripCr(line);
++  const q = l.match(/ "b\/((?:[^"\\]|\\.)*)"$/);
++  if (q) return unescapeGitPath(q[1]);
++  return l.match(/ b\/(.+)$/)?.[1] ?? null;
++};
++
+ export function parseDiff(diff) {
+   const files = new Map();
+   const annotatedParts = [];
+@@ -11,8 +47,7 @@ export function parseDiff(diff) {
+   for (const raw of diff.split('\n')) {
+     if (raw.startsWith('diff --git')) { curPath = null; annotatedParts.push(raw); continue; }
+     if (raw.startsWith('+++ ')) {
+-      const m = raw.match(/^\+\+\+ b\/(.+)$/);
+-      curPath = m ? m[1] : null;
++      curPath = parseDiffNewPath(raw);
+       if (curPath && !files.has(curPath)) files.set(curPath, { validLines: new Set(), changed: [] });
+       annotatedParts.push(raw);
+       continue;
+@@ -60,11 +95,14 @@ export async function readChangedFiles(files, limits, log = () => {}) {
+   const map = new Map();
+   const root = resolve(process.cwd());
+   for (const path of files.keys()) {
+-    if (/(^|\/)package-lock\.json$|\.(lock|png|jpe?g|gif|svg|ico|pdf|min\.js|map)$/i.test(path)) continue;
++    if (/(^|\/)package-lock\.json$|\.(lock|png|jpe?g|gif|svg|ico|pdf|min\.js|map|heic|heif|webp|avif|xlsx?|docx?|pptx?|zip|gz|tgz|bz2|7z|rar|mp[34]|mov|avi|woff2?|ttf|otf|eot|wasm|jar|pyc|so|dylib|dll|exe)$/i.test(path)) continue;
+     const abs = resolve(root, path);
+     if (abs !== root && !abs.startsWith(root + sep)) { log(`пропуск файла вне репо: ${path}`); continue; }
+-    let content;
+-    try { content = await readFile(abs, 'utf8'); } catch { continue; }
++    let buf;
++    try { buf = await readFile(abs); } catch { continue; }
++    // Страховка поверх списка расширений: бинарь определяем по NUL в первых 8КБ.
++    if (buf.subarray(0, 8192).includes(0)) { log(`пропуск бинарного файла (NUL byte): ${path}`); continue; }
++    const content = buf.toString('utf8');
+     const lines = content.split('\n');
+     let body = lines.slice(0, limits.maxFileLines).join('\n');
+     if (lines.length > limits.maxFileLines) {
+@@ -104,7 +142,7 @@ export function splitSegmentByHunks(seg, maxBytes) {
+ }
+ 
+ export function buildChunks(annotated, contentMap, limits) {
+-  const pathOf = (seg) => (seg.match(/^\+\+\+ b\/(.+)$/m)?.[1]) || '';
++  const pathOf = (seg) => parseDiffNewPath(seg.match(/^\+\+\+ .*$/m)?.[0] || '') || '';
+   const fileSegs = annotated.split(/(?=^diff --git )/m).filter((s) => s.trim());
+   let total = 0;
+   for (const seg of fileSegs) {
+@@ -120,8 +158,10 @@ export function buildChunks(annotated, contentMap, limits) {
+     if (content.length > limits.maxContextBytes) {
+       content = content.slice(0, limits.maxContextBytes) + '\n… (файл обрезан)';
+     }
+-    splitSegmentByHunks(diff, effChunk).forEach((s) => {
+-      items.push({ s, content, size: s.length + content.length });
++    splitSegmentByHunks(diff, effChunk).forEach((s, pieceIdx) => {
++      // Полный контент файла — только в ПЕРВОМ куске файла: не дублируем в каждый чанк
++      // (экономия токенов; у следующих кусков остаётся аннотированный дифф с номерами строк).
++      items.push({ s, content: pieceIdx === 0 ? content : '', size: s.length + (pieceIdx === 0 ? content.length : 0) });
+     });
+   }
+   const chunks = [];
+diff --git a/ops/pr-review/lib/engine.mjs b/ops/pr-review/lib/engine.mjs
+index 923b6fa..193c769 100644
+--- a/ops/pr-review/lib/engine.mjs
++++ b/ops/pr-review/lib/engine.mjs
+@@ -4,6 +4,10 @@ import { mergeSpecialistReferences } from './specialists.mjs';
+ import { normalizeFinding } from './findings.mjs';
+ import { createVerifierRunner } from './verifier.mjs';
+ 
++/** Маркер пропуска чанка по тайм-бюджету (не путать с недоступностью модели — fallback не нужен). */
++const TIME_SKIP = 'тайм-бюджет прогона исчерпан';
++const deadlineHit = (ctx) => Boolean(ctx?.deadline) && Date.now() > ctx.deadline;
++
+ /** MoA + consensus: прогон моделей по чанкам, fallback при сбое primary. */
+ export function createReviewEngine(cfg, { ollama, prompt, log, observability }) {
+   const obs = observability?.enabled ? observability : null;
+@@ -83,7 +87,10 @@ export function createReviewEngine(cfg, { ollama, prompt, log, observability })
+   function aggregateModel(model, done) {
+     const parts = done.filter((d) => d.model === model).map((d) => d.res);
+     const okParts = parts.filter((p) => !p.error);
+-    if (!okParts.length) return { model, error: parts[0]?.error || 'нет ответа' };
++    if (!okParts.length) {
++      const allSkipped = parts.length > 0 && parts.every((p) => p.skipped);
++      return { model, error: parts[0]?.error || 'нет ответа', ...(allSkipped ? { skipped: true } : {}) };
++    }
+     const verdict = okParts.map((p) => p.verdict)
+       .sort((a, b) => (VERDICT_RANK[b] ?? 0) - (VERDICT_RANK[a] ?? 0))[0];
+     return {
+@@ -100,6 +107,7 @@ export function createReviewEngine(cfg, { ollama, prompt, log, observability })
+       chunks.forEach((chunk, ci) => tasks.push({ model, chunk, first: ci === 0, ci }));
+     }
+     return mapLimit(tasks, limits.concurrency, async ({ model, chunk, first, ci }) => {
++      if (deadlineHit(ctx)) return { model, res: { model, error: TIME_SKIP, skipped: true } };
+       const messages = buildMessages({
+         annotated: chunk.annotated, blastBlocks: ctx.blastBlocks, pr: ctx.pr,
+         fileContents: chunk.fileContents, priorFindings: ctx.priorFindings,
+@@ -132,7 +140,7 @@ export function createReviewEngine(cfg, { ollama, prompt, log, observability })
+     }
+   }
+ 
+-  async function reviewChunkMoA(baseMessages, chunkIndex) {
++  async function reviewChunkMoA(baseMessages, chunkIndex, ctx) {
+     const references = useSpecialists
+       ? await Promise.all(
+         specialists.assignments.map(({ role, model }) => reviewSpecialist(role, model, baseMessages, chunkIndex)),
+@@ -146,6 +154,7 @@ export function createReviewEngine(cfg, { ollama, prompt, log, observability })
+         error: references.map((r) => `${r.role}/${r.model}: ${r.error || 'пусто'}`).join('; '),
+       };
+     }
++    if (deadlineHit(ctx)) return { model: moa.aggregator, error: TIME_SKIP, skipped: true, references };
+     const aggMessages = useSpecialists
+       ? buildSpecialistAggregatorMessages(baseMessages, references)
+       : buildAggregatorMessages(baseMessages, references);
+@@ -166,13 +175,14 @@ export function createReviewEngine(cfg, { ollama, prompt, log, observability })
+ 
+   async function runMoAOverChunks(chunks, ctx) {
+     return mapLimit(chunks.map((chunk, ci) => ({ chunk, first: ci === 0, ci })), limits.concurrency, async ({ chunk, first, ci }) => {
++      if (deadlineHit(ctx)) return { model: moa.aggregator, res: { model: moa.aggregator, error: TIME_SKIP, skipped: true } };
+       const messages = buildMessages({
+         annotated: chunk.annotated, blastBlocks: ctx.blastBlocks, pr: ctx.pr,
+         fileContents: chunk.fileContents, priorFindings: ctx.priorFindings,
+         changedFilesSection: first ? ctx.changedFilesSection : '',
+         prescanSection: first ? ctx.prescanSection : '',
+       });
+-      return { model: moa.aggregator, res: await reviewChunkMoA(messages, ci) };
++      return { model: moa.aggregator, res: await reviewChunkMoA(messages, ci, ctx) };
+     });
+   }
+ 
+@@ -183,13 +193,15 @@ export function createReviewEngine(cfg, { ollama, prompt, log, observability })
+     agg.aggregator = moa.aggregator;
+     agg.moaReferences = moa.references;
+     agg.references = mergeSpecialistReferences(done.map((d) => d.res));
++    agg.skippedChunks = done.filter((d) => d.res?.skipped).length;
+     return [agg];
+   }
+ 
+   async function applyFallback(results, chunks, ctx, { labelAs }) {
+     const spare = [...models.fallback];
+     for (let i = 0; i < results.length; i++) {
+-      if (!results[i].error) continue;
++      if (!results[i].error || results[i].skipped) continue;
++      if (deadlineHit(ctx)) { log('тайм-бюджет исчерпан — fallback не запускаем'); break; }
+       const fb = spare.shift();
+       if (!fb) break;
+       log(`${labelAs} недоступен (${results[i].error}) → резерв ${fb}`);
+@@ -218,11 +230,16 @@ export function createReviewEngine(cfg, { ollama, prompt, log, observability })
+     }
+ 
+     const done = await runModelsOverChunks(models.list, chunks, ctx);
+-    const results = models.list.map((model) => aggregateModel(model, done));
++    const results = models.list.map((model) => {
++      const agg = aggregateModel(model, done);
++      agg.skippedChunks = done.filter((d) => d.model === model && d.res?.skipped).length;
++      return agg;
++    });
+ 
+     const spare = [...models.fallback];
+     for (let i = 0; i < results.length; i++) {
+-      if (!results[i].error) continue;
++      if (!results[i].error || results[i].skipped) continue;
++      if (deadlineHit(ctx)) { log('тайм-бюджет исчерпан — fallback не запускаем'); break; }
+       const fb = spare.shift();
+       if (!fb) break;
+       log(`primary ${results[i].model} недоступна (${results[i].error}) → резервная модель ${fb}`);
+diff --git a/ops/pr-review/lib/feedback.mjs b/ops/pr-review/lib/feedback.mjs
+index bb72fcb..949502a 100644
+--- a/ops/pr-review/lib/feedback.mjs
++++ b/ops/pr-review/lib/feedback.mjs
+@@ -3,7 +3,7 @@
+ import { createHash } from 'node:crypto';
+ import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+ import { dirname, resolve } from 'node:path';
+-import { MARKERS } from './constants.mjs';
++import { MARKERS, hasMarker } from './constants.mjs';
+ import { FEEDBACK_SCHEMA_VERSION, normalizeFeedbackEntry } from './feedback-schema.mjs';
+ 
+ export const DEFAULT_FP_LABEL = 'ai-review-fp';
+@@ -36,7 +36,7 @@ export function isTrustedReviewAuthor(login, trustedAuthors, user) {
+ 
+ /** Все findings из grouped inline comment body. */
+ export function parseReviewCommentFindings(comment) {
+-  if (!comment?.body?.includes(MARKERS.inline)) return [];
++  if (!hasMarker(comment?.body, MARKERS.inline)) return [];
+   const file = comment.path || '';
+   const line = Number(comment.line || comment.original_line) || 0;
+   const out = [];
+@@ -101,7 +101,7 @@ export function collectFeedbackEntries(input) {
+   }
+ 
+   for (const c of inlineComments) {
+-    if (!c.body?.includes(MARKERS.inline)) continue;
++    if (!hasMarker(c.body, MARKERS.inline)) continue;
+     if (!isTrustedReviewAuthor(c.user?.login, trustedAuthors, c.user)) continue;
+     const findings = parseReviewCommentFindings(c);
+     if (!findings.length) continue;
+@@ -359,7 +359,7 @@ export async function harvestFeedback(cfg, github, { log = () => {} } = {}) {
+   }
+ 
+   const trustedInline = inlineComments.filter(
+-    (c) => c.body?.includes(MARKERS.inline) && isTrustedReviewAuthor(c.user?.login, trustedAuthors, c.user),
++    (c) => hasMarker(c.body, MARKERS.inline) && isTrustedReviewAuthor(c.user?.login, trustedAuthors, c.user),
+   );
+   const reactionsByCommentId = await fetchReactionsPool(
+     trustedInline, github, feedback.reactionConcurrency, { log },
+diff --git a/ops/pr-review/lib/findings.mjs b/ops/pr-review/lib/findings.mjs
+index c299a83..1fde7ba 100644
+--- a/ops/pr-review/lib/findings.mjs
++++ b/ops/pr-review/lib/findings.mjs
+@@ -2,6 +2,35 @@ import { SEV, MARKERS } from './constants.mjs';
+ import { DEFAULT_FP_PATTERNS_PATH, getFpPatterns, matchFpPatterns } from './fp-patterns.mjs';
+ import { normalizeAdvisorClaims } from './specialists.mjs';
+ 
++/**
++ * @typedef {Object} Finding — единая структура находки; поля нарастают по стадиям пайплайна.
++ *
++ * Базовые (normalizeFinding, из ответа модели или prescan):
++ * @property {string} file
++ * @property {number} line
++ * @property {'critical'|'major'|'minor'|'nit'} severity
++ * @property {string} title
++ * @property {string} body
++ * @property {string} [suggestion]
++ * @property {number} confidence — 0..1 (отсутствующий → 1.0)
++ * @property {string} model — лейбл модели/агрегатора
++ * @property {Array}  [advisorClaims] — jury-разбор advisor'ов (MoA specialists)
++ *
++ * Prescan (eslint / ast-grep):
++ * @property {boolean} [prescan]
++ * @property {boolean} [prescanBlock] — rule входит в blockRules
++ *
++ * Гейт (clusterFindings, мутация):
++ * @property {boolean} [consensus] — ≥2 модели в кластере
++ * @property {string[]} [clusterModels]
++ * @property {boolean} [confidenceBlock]
++ * @property {boolean} [consensusBlock] — итоговое решение блокировки merge
++ *
++ * Verifier Pass B (applyVerifierVerdicts, мутация):
++ * @property {'verified'|'rejected'|'downgraded'|'unverified'} [verifierStatus]
++ * @property {string} [verifierReason]
++ */
++
+ export function normalizeConfidence(raw) {
+   if (raw == null || raw === '') return 1;
+   const n = Number(raw);
+@@ -9,7 +38,8 @@ export function normalizeConfidence(raw) {
+   return Math.min(1, Math.max(0, n));
+ }
+ 
+-/** Нормализация одной находки из JSON модели (включая confidence 0–1). */
++/** Нормализация одной находки из JSON модели (включая confidence 0–1).
++ * @returns {Finding|null} */
+ export function normalizeFinding(f, model) {
+   if (!f || typeof f !== 'object') return null;
+   return {
+diff --git a/ops/pr-review/lib/github.mjs b/ops/pr-review/lib/github.mjs
+index fe95d39..f517032 100644
+--- a/ops/pr-review/lib/github.mjs
++++ b/ops/pr-review/lib/github.mjs
+@@ -1,5 +1,5 @@
+ import { sleep, isTransient, backoffMs } from './util.mjs';
+-import { MARKERS } from './constants.mjs';
++import { MARKERS, hasMarker } from './constants.mjs';
+ 
+ export function createGithubClient(cfg, log) {
+   const { github: ghCfg, httpRetries } = cfg;
+@@ -78,7 +78,7 @@ export function createGithubClient(cfg, log) {
+     if (!repo || !prNumber || !token) return [];
+     try {
+       const comments = await ghList(`/repos/${repo}/issues/${prNumber}/comments?per_page=100`);
+-      const mine = [...comments].reverse().find((c) => typeof c.body === 'string' && c.body.includes(MARKERS.review));
++      const mine = [...comments].reverse().find((c) => hasMarker(c.body, MARKERS.review));
+       const m = mine && MARKERS.dataRe.exec(mine.body);
+       if (!m) return [];
+       const data = JSON.parse(m[1].trim());
+@@ -88,7 +88,7 @@ export function createGithubClient(cfg, log) {
+ 
+   async function upsertSticky(body) {
+     const comments = await ghList(`/repos/${repo}/issues/${prNumber}/comments?per_page=100`);
+-    const mine = [...comments].reverse().find((c) => typeof c.body === 'string' && c.body.includes(MARKERS.review));
++    const mine = [...comments].reverse().find((c) => hasMarker(c.body, MARKERS.review));
+     if (mine) {
+       await gh(`/repos/${repo}/issues/comments/${mine.id}`, { method: 'PATCH', body: { body } });
+       return 'updated';
+@@ -97,17 +97,22 @@ export function createGithubClient(cfg, log) {
+     return 'created';
+   }
+ 
+-  async function deleteStaleInline() {
+-    let removed = 0;
++  async function deleteStaleInline({ exceptReviewId = null } = {}) {
++    let removed = 0, kept = 0;
+     try {
+       const comments = await ghList(`/repos/${repo}/pulls/${prNumber}/comments?per_page=100`);
++      const hasReplies = new Set(comments.map((c) => c.in_reply_to_id).filter(Boolean));
+       for (const c of comments) {
+-        if (typeof c.body === 'string' && c.body.includes(MARKERS.inline)) {
+-          await gh(`/repos/${repo}/pulls/comments/${c.id}`, { method: 'DELETE' });
+-          removed++;
+-        }
++        if (!hasMarker(c.body, MARKERS.inline)) continue;
++        // Только что запощенный review (post-then-delete: при сбое постинга старые не теряем).
++        if (exceptReviewId && c.pull_request_review_id === exceptReviewId) continue;
++        // Тред с ответами не трогаем — удаление корня рвёт обсуждение (разрулит auto-triage).
++        if (hasReplies.has(c.id)) { kept++; continue; }
++        await gh(`/repos/${repo}/pulls/comments/${c.id}`, { method: 'DELETE' });
++        removed++;
+       }
+     } catch (e) { log('очистка старых инлайнов не удалась (не критично):', e.message); }
++    if (kept) log(`старых инлайн-тредов с ответами оставлено: ${kept}`);
+     return removed;
+   }
+ 
+@@ -117,7 +122,8 @@ export function createGithubClient(cfg, log) {
+       : '🤖 Авто-ревью: инлайн-замечаний нет, общий вывод — в закреплённом комментарии.';
+     const payload = { event: 'COMMENT', body, comments: inline };
+     if (headSha) payload.commit_id = headSha;
+-    await gh(`/repos/${repo}/pulls/${prNumber}/reviews`, { method: 'POST', body: payload });
++    const res = await gh(`/repos/${repo}/pulls/${prNumber}/reviews`, { method: 'POST', body: payload });
++    return res?.id || null;
+   }
+ 
+   async function listInlineComments() {
+@@ -133,7 +139,7 @@ export function createGithubClient(cfg, log) {
+   async function readStickyReview() {
+     if (!repo || !prNumber || !token) return null;
+     const comments = await ghList(`/repos/${repo}/issues/${prNumber}/comments?per_page=100`);
+-    return [...comments].reverse().find((c) => typeof c.body === 'string' && c.body.includes(MARKERS.review)) || null;
++    return [...comments].reverse().find((c) => hasMarker(c.body, MARKERS.review)) || null;
+   }
+ 
+   async function graphql(query, variables = {}) {
+diff --git a/ops/pr-review/lib/metrics.mjs b/ops/pr-review/lib/metrics.mjs
+new file mode 100644
+index 0000000..2329be5
+--- /dev/null
++++ b/ops/pr-review/lib/metrics.mjs
+@@ -0,0 +1,98 @@
++/** R7+: агрегация метрик из observability JSONL (pr-review-runs.jsonl). Чистые функции. */
++
++/** JSONL → records; битые строки пропускаем. */
++export function parseJsonl(text) {
++  return String(text || '')
++    .split('\n')
++    .map((l) => l.trim())
++    .filter(Boolean)
++    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
++    .filter(Boolean);
++}
++
++/** Сводка по событиям прогонов: runs, router, llm_call per model, fp_filter, verifier, time_budget. */
++export function aggregateMetrics(records) {
++  const agg = {
++    runs: { total: 0, blocked: 0, llmFailed: 0, crashed: 0 },
++    router: {},
++    llm: { total: 0, ok: 0, byModel: new Map() },
++    fpFilterRemoved: 0,
++    verifier: { verified: 0, rejected: 0, downgraded: 0, unverified: 0, skipped: 0, errors: 0 },
++    timeBudget: { hits: 0, skippedChunks: 0 },
++  };
++  for (const r of records || []) {
++    switch (r?.type) {
++      case 'run_end':
++        agg.runs.total++;
++        if (r.wouldBlock) agg.runs.blocked++;
++        if (r.llmFailed) agg.runs.llmFailed++;
++        if (r.crashed) agg.runs.crashed++;
++        break;
++      case 'router':
++        if (r.route) agg.router[r.route] = (agg.router[r.route] || 0) + 1;
++        break;
++      case 'llm_call': {
++        agg.llm.total++;
++        if (r.ok) agg.llm.ok++;
++        const key = `${r.callType || '?'}/${r.model || '?'}`;
++        const m = agg.llm.byModel.get(key) || { calls: 0, ok: 0, ms: 0 };
++        m.calls++;
++        if (r.ok) m.ok++;
++        m.ms += Number(r.duration_ms) || 0;
++        agg.llm.byModel.set(key, m);
++        break;
++      }
++      case 'fp_filter':
++        agg.fpFilterRemoved += Number(r.removed) || 0;
++        break;
++      case 'verifier':
++        agg.verifier.verified += Number(r.verified) || 0;
++        agg.verifier.rejected += Number(r.rejected) || 0;
++        agg.verifier.downgraded += Number(r.downgraded) || 0;
++        agg.verifier.unverified += Number(r.unverified) || 0;
++        break;
++      case 'verifier_skip':
++        agg.verifier.skipped++;
++        break;
++      case 'verifier_error':
++        agg.verifier.errors++;
++        break;
++      case 'time_budget':
++        agg.timeBudget.hits++;
++        agg.timeBudget.skippedChunks += Number(r.skippedChunks) || 0;
++        break;
++      default:
++        break;
++    }
++  }
++  return agg;
++}
++
++const pct = (ok, total) => (total ? `${Math.round((ok / total) * 100)}%` : '—');
++
++/** Текстовый отчёт по сводке (для stdout / CI log). */
++export function formatMetricsReport(agg, source = '') {
++  const { runs, router, llm, fpFilterRemoved, verifier, timeBudget } = agg;
++  const lines = [
++    `=== pr-review metrics${source ? ` (${source})` : ''} ===`,
++    `Прогоны: ${runs.total} · блоков ${runs.blocked} · llm-fail ${runs.llmFailed} · crash ${runs.crashed}`,
++  ];
++  const routerParts = Object.entries(router).map(([k, v]) => `${k} ${v}`).join(', ');
++  if (routerParts) lines.push(`Router: ${routerParts}`);
++  lines.push(`LLM вызовы: ${llm.total}, ok ${pct(llm.ok, llm.total)}`);
++  const models = [...llm.byModel.entries()].sort((a, b) => b[1].calls - a[1].calls);
++  for (const [key, m] of models) {
++    const avg = m.calls ? (m.ms / m.calls / 1000).toFixed(1) : '—';
++    lines.push(`  ${key}: ${m.calls} вызов(ов), ok ${pct(m.ok, m.calls)}, avg ${avg}с`);
++  }
++  lines.push(`FP-filter: снято ${fpFilterRemoved} находок`);
++  lines.push(
++    `Verifier: verified ${verifier.verified}, rejected ${verifier.rejected}, ` +
++    `downgraded ${verifier.downgraded}, unverified ${verifier.unverified}, ` +
++    `skipped ${verifier.skipped}, errors ${verifier.errors}`,
++  );
++  if (timeBudget.hits) {
++    lines.push(`⏱ Тайм-бюджет: ${timeBudget.hits} прогон(ов) с пропусками, чанков пропущено ${timeBudget.skippedChunks}`);
++  }
++  return lines.join('\n');
++}
+diff --git a/ops/pr-review/lib/ollama.mjs b/ops/pr-review/lib/ollama.mjs
+index 2ed5184..d3ad34f 100644
+--- a/ops/pr-review/lib/ollama.mjs
++++ b/ops/pr-review/lib/ollama.mjs
+@@ -43,9 +43,15 @@ export function createOllamaClient(cfg, log) {
+       reasoning_effort: effort, seed: o.seed,
+       ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+     });
++    // Таймаут попытки из конфига (было 900с хардкод: httpRetries × 15 мин взрывали 25-мин CI job).
++    // Ретрай — только пока не израсходован бюджет одного таймаута: после полного висения
++    // повторять бессмысленно, худший случай логического вызова ≈ 2 × timeoutMs.
++    const timeoutMs = o.requestTimeoutMs || 240_000;
++    const t0 = Date.now();
++    const budgetLeft = () => Date.now() - t0 < timeoutMs;
+     for (let attempt = 0; ; attempt++) {
+       const ctrl = new AbortController();
+-      const t = setTimeout(() => ctrl.abort(), 900_000);
++      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+       try {
+         const res = await fetch(`${o.base}/chat/completions`, {
+           method: 'POST',
+@@ -55,7 +61,7 @@ export function createOllamaClient(cfg, log) {
+         });
+         if (!res.ok) {
+           const body = await res.text().catch(() => '');
+-          if (isTransient(res.status) && attempt < httpRetries) {
++          if (isTransient(res.status) && attempt < httpRetries && budgetLeft()) {
+             const wait = backoffMs(attempt, res.headers.get('retry-after'));
+             log(`[${model}] Ollama ${res.status} → повтор через ${wait}мс (${attempt + 1}/${httpRetries})`);
+             await sleep(wait);
+@@ -67,7 +73,7 @@ export function createOllamaClient(cfg, log) {
+       } catch (e) {
+         const networky = e.status === undefined && !e.empty && !e.truncated &&
+           /fetch failed|network|socket|ECONN|ETIMEDOUT|EAI_AGAIN|terminated|aborted/i.test(e.message || '');
+-        if (networky && attempt < httpRetries) {
++        if (networky && attempt < httpRetries && budgetLeft()) {
+           const wait = backoffMs(attempt);
+           log(`[${model}] сетевой сбой (${e.message}) → повтор через ${wait}мс (${attempt + 1}/${httpRetries})`);
+           await sleep(wait);
+diff --git a/ops/pr-review/lib/prompt.mjs b/ops/pr-review/lib/prompt.mjs
+index fef78a4..5b7277a 100644
+--- a/ops/pr-review/lib/prompt.mjs
++++ b/ops/pr-review/lib/prompt.mjs
+@@ -139,8 +139,12 @@ knowledge may be stale, the versions in the repo are working; (b) deliberate pro
+ the diff to the configured Ollama Cloud (it is the owner's subscription) and the very fact of blocking
+ merge on critical/major; (c) a symbol/function/constant/import as "undefined"/"not imported"/"missing"
+ just because you do not SEE its declaration in the shown fragment — a large file is split into chunks and
+-the declaration very likely lives in another chunk. Only report a truly LOCAL logic error you can prove
+-from the shown code. Look for real defects in the PR code, don't argue with architectural decisions.
++the declaration very likely lives in another chunk; (d) claims that code is a "syntax error" or violates
++language/shell/ESM/regex semantics (word splitting, hoisting, import order, escape rules) — you cannot run
++an interpreter here, and such claims are wrong disproportionately often; if you still suspect one, verify
++it against the shown code character-by-character and set confidence below 0.8. Only report a truly LOCAL
++logic error you can prove from the shown code. Look for real defects in the PR code, don't argue with
++architectural decisions.
+ 
+ CONTEXT AND "NO OPEN QUESTIONS": you have the FULL content of the changed files (not only the diff) and
+ the blast-radius of their dependencies. USE this to RESOLVE your doubts instead of leaving them open. Each
+diff --git a/ops/pr-review/lib/report.mjs b/ops/pr-review/lib/report.mjs
+index 336a9c9..2fb24c6 100644
+--- a/ops/pr-review/lib/report.mjs
++++ b/ops/pr-review/lib/report.mjs
+@@ -1,5 +1,6 @@
+ import { SEV, MARKERS } from './constants.mjs';
+ import { extractReasoningEntries } from './export.mjs';
++import { publicErrorLabel } from './util.mjs';
+ 
+ const REASONING_ADVISOR_MAX = 1800;
+ const REASONING_SECTION_MAX = 10_000;
+@@ -41,7 +42,7 @@ export function buildReasoningSection(reviews, allFindings, { enabled = true, re
+     const label = ref.role ? `${ref.role} · ${ref.model}` : ref.model;
+     let chunk = '';
+     if (ref.error) {
+-      chunk = `⚠️ ${ref.error.slice(0, 300)}`;
++      chunk = `⚠️ ${publicErrorLabel(ref.error)}`;
+     } else {
+       const raw = String(ref.text || '');
+       chunk = raw.slice(0, REASONING_ADVISOR_MAX);
+@@ -143,22 +144,23 @@ export function buildSummary(cfg, input) {
+   md += `### Оценки моделей\n`;
+   for (const r of reviews) {
+     const fbNote = r.fallbackFor ? ` _(резерв вместо ${r.fallbackFor})_` : '';
+-    if (r.error) { md += `- **${r.model}**${fbNote} — ⚠️ недоступна (${r.error.slice(0, 120)})\n`; continue; }
++    if (r.error) { md += `- **${r.model}**${fbNote} — ⚠️ недоступна (${publicErrorLabel(r.error)})\n`; continue; }
+     const c = { critical: 0, major: 0, minor: 0, nit: 0 };
+     for (const f of r.findings) if (c[f.severity] != null) c[f.severity]++;
+     md += `- **${r.model}**${fbNote} — ${r.findings.length} (${SEV.critical}${c.critical} ${SEV.major}${c.major} ${SEV.minor}${c.minor} ${SEV.nit}${c.nit}): ${r.summary || ''}\n`;
+     if (r.references?.length) {
+       for (const ref of r.references) {
+         const label = ref.role ? `${ref.role}/${ref.model}` : ref.model;
+-        if (ref.error) md += `  - specialist **${label}** — ⚠️ ${ref.error.slice(0, 80)}\n`;
++        if (ref.error) md += `  - specialist **${label}** — ⚠️ ${publicErrorLabel(ref.error)}\n`;
+         else md += `  - specialist **${label}** — ok (${(ref.text || '').length} симв.)\n`;
+       }
+     }
+   }
+ 
+   md += `\n**Итого:** ${total} замечаний — ${SEV.critical}${counts.critical} ${SEV.major}${counts.major} ${SEV.minor}${counts.minor} ${SEV.nit}${counts.nit}. Файлов в диффе: ${files.size}.\n`;
+-  if (verifierStats && verifier.enabled && (verifierStats.rejected || verifierStats.downgraded || verifierStats.verified)) {
+-    md += `\n> 🔎 Verifier (Pass B, ${verifier.model}): подтверждено ${verifierStats.verified}, отклонено FP ${verifierStats.rejected}, понижено ${verifierStats.downgraded}.\n`;
++  if (verifierStats && verifier.enabled && (verifierStats.rejected || verifierStats.downgraded || verifierStats.verified || verifierStats.unverified)) {
++    const unv = verifierStats.unverified ? `, без подтверждения → minor ${verifierStats.unverified}` : '';
++    md += `\n> 🔎 Verifier (Pass B, ${verifier.model}): подтверждено ${verifierStats.verified}, отклонено FP ${verifierStats.rejected}, понижено ${verifierStats.downgraded}${unv}.\n`;
+   }
+   if (refutationStats && specialists.enabled && (refutationStats.dropped || refutationStats.downgraded)) {
+     const nc = refutationStats.downgradedNoClaims ? `, noClaims→minor ${refutationStats.downgradedNoClaims}` : '';
+@@ -181,6 +183,16 @@ export function buildSummary(cfg, input) {
+       md += `- ${SEV[f.severity] || '⚪'} **${f.title || 'замечание'}** _(${f.model})_${loc} — ${f.body || ''}\n`;
+     }
+   }
++  // Снятые FP-паттернами находки — видимая секция, а не молчаливое удаление:
++  // ошибочно широкий паттерн иначе незаметно проглотил бы верное замечание.
++  if (input.fpRemoved?.length) {
++    const rows = input.fpRemoved.slice(0, 10).map((f) => {
++      const loc = f.file ? ` (\`${f.file}${f.line ? `:${f.line}` : ''}\`)` : '';
++      return `- ${SEV[f.severity] || '⚪'} **${f.title || 'замечание'}** _(${f.model})_${loc}`;
++    }).join('\n');
++    md += `\n<details><summary>🗑 Отфильтровано как известные FP (${input.fpRemoved.length})</summary>\n\n${rows}\n\n`;
++    md += '> _Скрыто FP-паттернами из feedback (`ops/pr-review/feedback/fp-patterns.jsonl`). Если среди них есть верное замечание — это ошибка паттерна, поправьте его._\n\n</details>\n';
++  }
+   if (blastBlocks.length) {
+     md += `\n<details><summary>📡 Blast-radius (Graphify)</summary>\n\n${blastBlocks.join('\n')}\n\n</details>\n`;
+   }
+diff --git a/ops/pr-review/lib/router.mjs b/ops/pr-review/lib/router.mjs
+index cef48be..8818ad7 100644
+--- a/ops/pr-review/lib/router.mjs
++++ b/ops/pr-review/lib/router.mjs
+@@ -1,5 +1,7 @@
+ /** R4: классификация diff и роутинг (skip / light / full). */
+ 
++import { parseDiffGitPath } from './diff.mjs';
++
+ const LOCKFILE = /(?:^|\/)?(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml|composer\.lock|Cargo\.lock|poetry\.lock|Gemfile\.lock)$/i;
+ const GENERATED = /(?:^|\/)(?:dist|graphify-out|node_modules|\.next|coverage|build)\/|\.(?:min\.js|map|d\.ts\.map)$|[-.]generated\.|\/__generated__\//i;
+ const DOCS = /\.(?:md|mdx|rst|txt)$|(?:^|\/)docs\//i;
+@@ -17,7 +19,7 @@ export function classifyFilePath(path) {
+   return 'other';
+ }
+ 
+-/** Вырезает unified-diff секции по пути `+++ b/path`. */
++/** Вырезает unified-diff секции по пути `+++ b/path` (учитывает quoted-пути с пробелами). */
+ export function extractFileDiffSections(diff) {
+   const sections = new Map();
+   let cur = null;
+@@ -25,8 +27,7 @@ export function extractFileDiffSections(diff) {
+   for (const line of diff.split('\n')) {
+     if (line.startsWith('diff --git')) {
+       if (cur) sections.set(cur, buf.join('\n'));
+-      const m = line.match(/ b\/(.+?)(?:\s|$)/);
+-      cur = m?.[1] || null;
++      cur = parseDiffGitPath(line);
+       buf = [line];
+     } else if (cur) {
+       buf.push(line);
+diff --git a/ops/pr-review/lib/triage.mjs b/ops/pr-review/lib/triage.mjs
+index 363790e..ff5bf75 100644
+--- a/ops/pr-review/lib/triage.mjs
++++ b/ops/pr-review/lib/triage.mjs
+@@ -1,6 +1,6 @@
+ /** R11: auto-triage unresolved AI review threads (known FP + superseded findings). */
+ 
+-import { MARKERS } from './constants.mjs';
++import { MARKERS, hasMarker } from './constants.mjs';
+ import { matchesKnownFalsePositive } from './findings.mjs';
+ import { DEFAULT_TRUSTED_AUTHORS, isTrustedReviewAuthor, parseTrustedAuthors } from './feedback.mjs';
+ 
+@@ -24,7 +24,7 @@ export function parseInlineReviewTitle(body) {
+ export function decideAutoTriage(thread, ctx) {
+   const firstComment = thread.comments?.[0];
+   const first = firstComment?.body || '';
+-  if (!first.includes(MARKERS.inline)) {
++  if (!hasMarker(first, MARKERS.inline)) {
+     return { action: 'skip', reason: 'not_ai_inline' };
+   }
+   const trustedAuthors = ctx.trustedAuthors?.length
+diff --git a/ops/pr-review/lib/util.mjs b/ops/pr-review/lib/util.mjs
+index 7c6f54a..6a40755 100644
+--- a/ops/pr-review/lib/util.mjs
++++ b/ops/pr-review/lib/util.mjs
+@@ -30,3 +30,19 @@ export async function mapLimit(items, limit, fn) {
+ export function createLogger(prefix = '[pr-review]') {
+   return (...a) => console.log(prefix, ...a);
+ }
++
++/**
++ * Безопасная короткая метка ошибки для ПУБЛИЧНОГО sticky-комментария.
++ * Сырой текст ошибки (фрагменты ответа API, URL, возможные секреты) остаётся
++ * в CI-логе и observability JSONL — в PR уходит только категория.
++ */
++export function publicErrorLabel(err) {
++  const m = String(err?.message || err || '');
++  if (/aborted|timed?\s*out|ETIMEDOUT/i.test(m)) return 'таймаут';
++  if (/fetch failed|network|socket|ECONN|EAI_AGAIN|terminated/i.test(m)) return 'сеть';
++  const http = /\b([45]\d{2})\b/.exec(m)?.[1];
++  if (http === '429') return 'HTTP 429 (rate limit)';
++  if (http) return `HTTP ${http}`;
++  if (/json|parse|unexpected token/i.test(m)) return 'невалидный ответ';
++  return 'ошибка вызова';
++}
+diff --git a/ops/pr-review/lib/verifier.mjs b/ops/pr-review/lib/verifier.mjs
+index cfe6642..d7234e4 100644
+--- a/ops/pr-review/lib/verifier.mjs
++++ b/ops/pr-review/lib/verifier.mjs
+@@ -14,15 +14,16 @@ export function selectVerifierCandidates(findings, gate, max = 12) {
+ /**
+  * Применяет verdicts verifier к findings.
+  * rejected → убираем из списка; downgrade → понижаем severity; verified → оставляем.
+- * Нет verdict для кандидата → fail-open (оставляем как есть).
++ * Нет verdict для кандидата → fail-open (оставляем как есть), а при strictUnverified —
++ * fail-closed для блоков: понижаем до minor (блок требует подтверждения verifier).
+  */
+-export function applyVerifierVerdicts(allFindings, candidates, verdicts, log = () => {}) {
++export function applyVerifierVerdicts(allFindings, candidates, verdicts, log = () => {}, { strictUnverified = false } = {}) {
+   const verdictMap = new Map();
+   for (const v of verdicts || []) {
+     if (v && Number.isInteger(v.candidateIndex)) verdictMap.set(v.candidateIndex, v);
+   }
+   const toRemove = new Set();
+-  const stats = { verified: 0, rejected: 0, downgraded: 0, missing: 0 };
++  const stats = { verified: 0, rejected: 0, downgraded: 0, missing: 0, unverified: 0 };
+ 
+   for (let i = 0; i < candidates.length; i++) {
+     const f = candidates[i];
+@@ -30,6 +31,13 @@ export function applyVerifierVerdicts(allFindings, candidates, verdicts, log = (
+     const decision = v?.decision;
+     if (!decision) {
+       stats.missing++;
++      if (strictUnverified) {
++        f.severity = 'minor';
++        f.verifierStatus = 'unverified';
++        f.verifierReason = 'verifier не подтвердил — понижено до minor (REVIEW_VERIFIER_STRICT)';
++        stats.unverified++;
++        log(`verifier unverified → minor: [${f.file}:${f.line}] «${f.title}»`);
++      }
+       continue;
+     }
+     if (decision === 'rejected') {
+diff --git a/ops/pr-review/pipeline.mjs b/ops/pr-review/pipeline.mjs
+index 0a1535a..1afde6d 100644
+--- a/ops/pr-review/pipeline.mjs
++++ b/ops/pr-review/pipeline.mjs
+@@ -1,7 +1,7 @@
+ import { readFile } from 'node:fs/promises';
+ import { MARKERS } from './lib/constants.mjs';
+ import { loadReviewConfig, parseCli } from './lib/config.mjs';
+-import { createLogger } from './lib/util.mjs';
++import { createLogger, publicErrorLabel } from './lib/util.mjs';
+ import { parseDiff, extractChangedSymbols, readChangedFiles, buildChunks } from './lib/diff.mjs';
+ import { createOllamaClient } from './lib/ollama.mjs';
+ import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs';
+@@ -12,7 +12,7 @@ import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings }
+ import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
+ import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
+ import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
+-import { routeDiff, formatRouteLog } from './lib/router.mjs';
++import { routeDiff, formatRouteLog, extractFileDiffSections } from './lib/router.mjs';
+ import { createObservability, slimFindings, countBySeverity, PR_TITLE_LOG_MAX } from './lib/observability.mjs';
+ import { buildSummary, buildRouterSummary } from './lib/report.mjs';
+ import { buildReviewJson, writeReviewExports } from './lib/export.mjs';
+@@ -47,6 +47,65 @@ async function persistExports(cfg, payload, log, obs) {
+   }
+ }
+ 
++/** Стадия verifier Pass B: кандидаты critical/major → второй проход. Fail-open при сбое LLM. */
++async function runVerifierStage(allFindings, { engine, gate, verifier, deadline, contentMap, annotated, blastBlocks, pr, changedFilesSection }, log, obs) {
++  const empty = { findings: allFindings, stats: null };
++  if (!verifier.enabled) return empty;
++  if (deadline && deadline - Date.now() < 120_000) {
++    log('verifier pass B пропущен: тайм-бюджет на исходе (<2 мин в запасе)');
++    obs.logEvent('verifier_skip', { reason: 'time_budget' });
++    return empty;
++  }
++  const candidates = selectVerifierCandidates(allFindings, gate, verifier.maxCandidates);
++  if (!candidates.length) {
++    obs.logEvent('verifier_skip', { reason: 'no_candidates' });
++    return empty;
++  }
++  log(`verifier pass B: ${candidates.length} кандидат(ов) ${gate.blockOn.join('/')} · модель ${verifier.model}`);
++  try {
++    // Verifier получает только файлы/секции диффа с кандидатами, а не весь PR —
++    // иначе на большом PR это самый жирный промпт пайплайна.
++    const candFiles = new Set(candidates.map((c) => c.file).filter(Boolean));
++    const fileContents = [...contentMap.entries()]
++      .filter(([p]) => candFiles.has(p))
++      .map(([, v]) => v)
++      .join('\n');
++    const sections = [...extractFileDiffSections(annotated).entries()]
++      .filter(([p]) => candFiles.has(p))
++      .map(([, s]) => s);
++    const annotatedScoped = sections.length ? sections.join('\n') : annotated;
++    log(`verifier ctx: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, дифф ${annotatedScoped.length}/${annotated.length} симв.`);
++    const verdicts = await engine.verifyFindings(candidates, {
++      annotated: annotatedScoped, fileContents, blastBlocks, pr, changedFilesSection,
++    });
++    const applied = applyVerifierVerdicts(allFindings, candidates, verdicts, log, {
++      strictUnverified: verifier.strictBlocks,
++    });
++    log(`verifier итог: verified=${applied.stats.verified} rejected=${applied.stats.rejected} downgraded=${applied.stats.downgraded} missing=${applied.stats.missing}`);
++    obs.logEvent('verifier', applied.stats);
++    logFindingsStage(obs, 'after_verifier', applied.findings);
++    return { findings: applied.findings, stats: applied.stats };
++  } catch (e) {
++    log('verifier pass failed (fail-open, findings сохранены):', e.message);
++    obs.logEvent('verifier_error', { error: e.message?.slice(0, 200) });
++    return empty;
++  }
++}
++
++/** Стадия публикации: post-then-delete inline → upsert sticky. */
++async function publishReview(github, { inline, md, headSha, maxInline }, log) {
++  const inlineToPost = inline.slice(0, maxInline);
++  if (inline.length > inlineToPost.length) {
++    log(`inline-комментов ${inline.length} > лимита ${maxInline} — постим первые ${maxInline} (полные счётчики в sticky)`);
++  }
++  // post-then-delete: сначала новый review, потом чистка старых инлайнов (кроме только что
++  // запощенного) — при сбое постинга старые комментарии не теряются.
++  const reviewId = await github.postReview({ inline: inlineToPost, headSha });
++  const cleared = await github.deleteStaleInline({ exceptReviewId: reviewId });
++  const op = await github.upsertSticky(md);
++  return { posted: inlineToPost.length, total: inline.length, cleared, op };
++}
++
+ async function notifyTelegram(cfg, log, { pr, counts, total, htmlUrl }) {
+   const { token, chat } = cfg.telegram;
+   if (!token || !chat) return;
+@@ -164,9 +223,12 @@ export function createReviewPipeline(cfg, deps = {}) {
+ 
+       const changedFilesSection = buildChangedFilesSection(changedPaths);
+       const chunks = buildChunks(annotated, contentMap, limits);
+-      const note = chunks.length > 1
++      const note0 = chunks.length > 1
+         ? `PR большой — разбит на ${chunks.length} частей для полного охвата (каждая ревьюится отдельно).`
+         : '';
++      // Дедлайн LLM-фазы: после него новые чанки пропускаем и постим частичный отчёт —
++      // процесс завершается штатно (sticky/export/observability) до убийства job раннером.
++      const deadline = limits.timeBudgetMs > 0 ? Date.now() + limits.timeBudgetMs : 0;
+       log(`blast-radius блоков: ${blastBlocks.length} · файлов с контекстом: ${contentMap.size} · чанков: ${chunks.length}`);
+       obs.logEvent('plan', {
+         chunks: chunks.length,
+@@ -197,7 +259,16 @@ export function createReviewPipeline(cfg, deps = {}) {
+ 
+       const reviews = await engine.reviewAllModels(chunks, {
+         blastBlocks, pr, priorFindings, changedFilesSection, prescanSection: prescanResult.promptSection,
++        deadline,
+       });
++      const skippedChunks = reviews.reduce((n, r) => n + (r.skippedChunks || 0), 0);
++      if (skippedChunks) {
++        log(`⏱ тайм-бюджет: ${skippedChunks} из ${chunks.length} чанков пропущены — отчёт частичный`);
++        obs.logEvent('time_budget', { skippedChunks, totalChunks: chunks.length, budgetMs: limits.timeBudgetMs });
++      }
++      const note = [note0, skippedChunks
++        ? `⏱ Тайм-бюджет исчерпан: ${skippedChunks} из ${chunks.length} частей не ревьюились — охват частичный, перезапустите ревью.`
++        : ''].filter(Boolean).join(' ');
+       const ok = reviews.filter((r) => !r.error);
+       const llmFindings = ok.flatMap((r) => r.findings);
+       let allFindings = [
+@@ -208,6 +279,7 @@ export function createReviewPipeline(cfg, deps = {}) {
+ 
+       if (!ok.length && !allFindings.length) {
+         const why = reviews.map((r) => `${r.model}: ${r.error}`).join('; ');
++        const whyPublic = reviews.map((r) => `${r.model}: ${publicErrorLabel(r.error)}`).join('; ');
+         log('все модели недоступны:', why);
+         await persistExports(cfg, buildReviewJson({
+           pr, headSha, reviewMode, route, wouldBlock: false,
+@@ -220,7 +292,7 @@ export function createReviewPipeline(cfg, deps = {}) {
+           finalObs = { exitCode: 1, llmFailed: true, dryRun: true, wouldBlock: false };
+           return 1;
+         }
+-        const body = `${MARKERS.review}\n## 🤖 Авто код-ревью\n\n⚠️ ИИ-ревью временно недоступно (${why.slice(0, 200)}).\n\n<sub>Модели: ${models.list.join(', ')}. Это не блокирует merge.</sub>`;
++        const body = `${MARKERS.review}\n## 🤖 Авто код-ревью\n\n⚠️ ИИ-ревью временно недоступно (${whyPublic}).\n\n<sub>Модели: ${models.list.join(', ')}. Это не блокирует merge. Детали — в логе CI job.</sub>`;
+         try { await github.upsertSticky(body); } catch (e2) { log('и заметку не запостили:', e2.message); }
+         finalObs = { exitCode: 0, llmFailed: true, wouldBlock: false };
+         return 0;
+@@ -241,39 +313,24 @@ export function createReviewPipeline(cfg, deps = {}) {
+       }
+ 
+       const beforeFilter = allFindings.length;
+-      allFindings = filterFalsePositiveFindings(allFindings, changedPaths, log, {
++      const beforeFp = allFindings;
++      allFindings = filterFalsePositiveFindings(beforeFp, changedPaths, log, {
+         patternsFile: cfg.feedback?.patternsFile,
+       });
+-      if (allFindings.length < beforeFilter) {
+-        log(`ложных находок отфильтровано: ${beforeFilter - allFindings.length}`);
++      // Снятые FP-паттернами находки показываем в sticky (а не удаляем молча) —
++      // иначе ошибочно широкий паттерн незаметно проглотит верное замечание.
++      const fpRemoved = beforeFp.filter((f) => !allFindings.includes(f));
++      if (fpRemoved.length) {
++        log(`ложных находок отфильтровано: ${fpRemoved.length}`);
+       }
+       obs.logEvent('fp_filter', { before: beforeFilter, after: allFindings.length, removed: beforeFilter - allFindings.length });
+       logFindingsStage(obs, 'after_fp_filter', allFindings);
+ 
+-      let verifierStats = null;
+-      if (verifier.enabled) {
+-        const candidates = selectVerifierCandidates(allFindings, gate, verifier.maxCandidates);
+-        if (candidates.length) {
+-          log(`verifier pass B: ${candidates.length} кандидат(ов) ${gate.blockOn.join('/')} · модель ${verifier.model}`);
+-          try {
+-            const fileContents = [...contentMap.values()].join('\n');
+-            const verdicts = await engine.verifyFindings(candidates, {
+-              annotated, fileContents, blastBlocks, pr, changedFilesSection,
+-            });
+-            const applied = applyVerifierVerdicts(allFindings, candidates, verdicts, log);
+-            allFindings = applied.findings;
+-            verifierStats = applied.stats;
+-            log(`verifier итог: verified=${verifierStats.verified} rejected=${verifierStats.rejected} downgraded=${verifierStats.downgraded} missing=${verifierStats.missing}`);
+-            obs.logEvent('verifier', verifierStats);
+-            logFindingsStage(obs, 'after_verifier', allFindings);
+-          } catch (e) {
+-            log('verifier pass failed (fail-open, findings сохранены):', e.message);
+-            obs.logEvent('verifier_error', { error: e.message?.slice(0, 200) });
+-          }
+-        } else {
+-          obs.logEvent('verifier_skip', { reason: 'no_candidates' });
+-        }
+-      }
++      const verifierStage = await runVerifierStage(allFindings, {
++        engine, gate, verifier, deadline, contentMap, annotated, blastBlocks, pr, changedFilesSection,
++      }, log, obs);
++      allFindings = verifierStage.findings;
++      const verifierStats = verifierStage.stats;
+ 
+       const resolved = resolveBlockers(allFindings, changedPaths, gate, log, {
+         skipFpFilter: true, prescan: cfg.prescan,
+@@ -291,7 +348,7 @@ export function createReviewPipeline(cfg, deps = {}) {
+       const { inline, outside } = findingsFmt.classify(allFindings, files);
+       const { md, counts, total } = buildSummary(cfg, {
+         reviews, ok, allFindings, outside, blastBlocks, files, pr, headSha, note, blockerClusters,
+-        verifierStats, refutationStats, prescanResult,
++        verifierStats, refutationStats, prescanResult, fpRemoved,
+       });
+ 
+       await persistExports(cfg, buildReviewJson({
+@@ -314,14 +371,8 @@ export function createReviewPipeline(cfg, deps = {}) {
+         return exitCode;
+       }
+ 
+-      const cleared = await github.deleteStaleInline();
+-      const inlineToPost = inline.slice(0, limits.maxInline);
+-      if (inline.length > inlineToPost.length) {
+-        log(`inline-комментов ${inline.length} > лимита ${limits.maxInline} — постим первые ${limits.maxInline} (полные счётчики в sticky)`);
+-      }
+-      await github.postReview({ inline: inlineToPost, headSha });
+-      const op = await github.upsertSticky(md);
+-      log(`review запощен (${inlineToPost.length}/${inline.length} inline, очищено старых ${cleared}) · summary ${op}`);
++      const pub = await publishReview(github, { inline, md, headSha, maxInline: limits.maxInline }, log);
++      log(`review запощен (${pub.posted}/${pub.total} inline, очищено старых ${pub.cleared}) · summary ${pub.op}`);
+ 
+       if (cfg.triage?.enabled) {
+         try {

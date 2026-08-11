@@ -18,7 +18,10 @@ async function main() {
   const repo = cfg.github.repo || process.env.GITHUB_REPOSITORY;
   const token = cfg.github.token || process.env.GITHUB_TOKEN;
   const pr = cfg.github.prNumber;
-  const fixturesDir = resolve(process.cwd(), process.env.REVIEW_FIXTURES_DIR || pkgPath('fixtures'));
+  // Fixtures по умолчанию — из пакета: golden-набор движка, а не файл проекта.
+  const fixturesDir = process.env.REVIEW_FIXTURES_DIR
+    ? resolve(process.cwd(), process.env.REVIEW_FIXTURES_DIR)
+    : pkgPath('fixtures');
   const candidatesDir = resolve(process.cwd(), cfg.feedback.candidatesDir);
   const logFile = resolve(process.cwd(), cfg.feedback.logFile);
   const patternsFile = resolve(process.cwd(), cfg.feedback.patternsFile);

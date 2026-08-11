@@ -1,0 +1,202 @@
+name: PR Review (AI)
+
+# ШАБЛОН для репозитория-потребителя (скопируйте в .github/workflows/ и поправьте под себя).
+# Авто код-ревью PR: Ollama Cloud (MoA specialists → aggregator → verifier) + Graphify blast-radius.
+# Ревью постится как event=COMMENT, но БЛОКИРУЕТ merge через exit 1 на консенсус-блокерах
+# critical/major (red required-check). Чтобы блок был обязательным — сделать этот job required-check.
+# Инфра-сбои по умолчанию не блокируют, но полный LLM-аутедж блокирует merge при REVIEW_LLM_REQUIRED=1 (default).
+# Движок — внешний пакет ai-reviewer, пин версии лежит в ops/ai-reviewer-ref (см. docs/integration.md).
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize, reopened]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Номер PR для ручного ревью'
+        required: true
+
+# Новый push в PR отменяет прошлый прогон ревью (не жжём токены на гонке).
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  # Только read. Write здесь был бы опасен: prescan запускает eslint на коде PR, а flat-config
+  # `app/eslint.config.js` — исполняемый JS из чекаута PR. Отмена гейтов живёт в ci.yml,
+  # в job'е без кода PR.
+  actions: read            # артефакты/метрики (workflow-runs API)
+
+jobs:
+  review:
+    name: AI code review
+    # SELF_HOSTED_CI=1 → hermes-review-1; отдельный runner не блокирует CI build.
+    runs-on: ${{ vars.SELF_HOSTED_CI == '1' && fromJSON('["self-hosted", "linux", "review"]') || 'ubuntu-latest' }}
+    timeout-minutes: 25   # мелкие чанки → больше (модель×чанк)-вызовов на крупных PR; запас под gigant-PR
+    # Пропускаем черновики (кроме явного ready_for_review через тип события) и PR от ботов.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.draft == false && github.event.pull_request.user.type != 'Bot')
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # полный граф; теги не нужны, но дешевле не урезать
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      # venv кэшируется по пину версии — на повторных прогонах pip install пропускается.
+      # .graphify/ gitignored и в CI отсутствует → ставим graphifyy из PyPI (пин версии), а не из
+      # локального wheel. Нужны только update/affected (без fastembed/scipy — это extras для sem).
+      # v2: инвалидирует venv с битым shebang после restore (self-hosted path drift).
+      - name: Cache graphify venv
+        id: gfcache
+        uses: actions/cache@v5
+        with:
+          path: .graphify/venv
+          key: gf-venv-${{ runner.os }}-py311-graphifyy-0.9.31-v3
+
+      - name: Install graphify (pinned, from PyPI)
+        run: |
+          install_graphify() {
+            python -m venv .graphify/venv
+            .graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.31
+          }
+          if [ -x .graphify/venv/bin/graphify ] && .graphify/venv/bin/graphify --version >/dev/null 2>&1; then
+            echo "graphify venv OK: $(.graphify/venv/bin/graphify --version 2>&1 | head -1)"
+          else
+            if [ -d .graphify/venv ]; then
+              echo "graphify venv из кэша неработоспособен (shebang/path) — пересоздаём"
+              rm -rf .graphify/venv
+            fi
+            install_graphify
+          fi
+
+      # R6: eslint prescan + код-граф — независимы, гоняем параллельно (~15–40с экономии).
+      # continue-on-error на graphify: сбой графа не блокирует merge (пустой blast-radius).
+      - name: Install app deps + build code graph (parallel)
+        continue-on-error: true
+        env:
+          GRAPHIFY_OUT: .graphify/graphify-out
+          GRAPHIFY_MAX_WORKERS: '4'
+          GRAPHIFY_NO_TIPS: '1'
+        run: |
+          set -e
+          # --ignore-scripts: postinstall зависимостей ИЗ КОДА PR не исполняем — иначе вредоносный
+          # пакет, добавленный в PR, закрепился бы на персистентном self-hosted раннере / отравил кэш.
+          # eslint/ast-grep prescan — чистый JS, lifecycle-скрипты зависимостей ему не нужны.
+          (cd app && npm ci --ignore-scripts --fund=false --audit=false) &
+          NPM_PID=$!
+          if .graphify/venv/bin/graphify --version >/dev/null 2>&1; then
+            .graphify/venv/bin/graphify update app --force || true
+          else
+            echo "graphify недоступен — пропускаем build code graph"
+          fi
+          wait "$NPM_PID"
+
+      # ЗАЩИТА ОТ pwn-request: движок берём из ОТДЕЛЬНОГО репозитория по пину, а сам пин читаем
+      # из base-ветки — код из чекаута PR с секретами в env не исполняется никогда. PR, правящий
+      # ops/ai-reviewer-ref, поменяет движок только ПОСЛЕ мержа (и это видно в диффе).
+      - name: Read pinned engine ref
+        id: pin
+        env:
+          BASE_REF: ${{ github.base_ref }}   # через env, НЕ инлайнить ${{…}} в run: (script-injection)
+        run: |
+          BASE_REF="${BASE_REF:-main}"   # workflow_dispatch: base_ref пуст — пин берём из main
+          [[ "$BASE_REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid BASE_REF"; exit 1; }
+          REF="$(git show "origin/$BASE_REF:ops/ai-reviewer-ref" 2>/dev/null | tr -d '[:space:]' || true)"
+          if [ -z "$REF" ]; then
+            echo "→ пин ops/ai-reviewer-ref отсутствует в origin/$BASE_REF (bootstrap-PR) — ревью пропускаем"
+            echo "ref=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
+          echo "→ движок ai-reviewer@$REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout pinned AI review engine
+        if: steps.pin.outputs.ref != ''
+        uses: actions/checkout@v6
+        with:
+          repository: Orange-hanter/ai-reviewer
+          ref: ${{ steps.pin.outputs.ref }}
+          path: .ai-reviewer-engine
+
+      # БЕЗ continue-on-error: скрипт выходит 1 ТОЛЬКО на находках critical/major (REVIEW_BLOCK_ON)
+      # внутри скрипта (die/throw), джоб зелёный, merge не блокируется.
+      - name: Run AI review
+        if: steps.pin.outputs.ref != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          REVIEW_MODE: moa
+          MOA_REFERENCE_MODELS: kimi-k2.7-code,glm-5.2,deepseek-v4-flash
+          MOA_SPECIALIST_MODELS: security:deepseek-v4-flash,correctness:kimi-k2.7-code,architecture:glm-5.2
+          MOA_AGGREGATOR: minimax-m3
+          MOA_REFERENCE_TEMPERATURE: '0.3'   # меньше находок, плотнее по существу (см. docs/model-tuning.md движка)
+          MOA_AGGREGATOR_TEMPERATURE: '0.4'
+          OLLAMA_MODELS_FALLBACK: deepseek-v4-flash
+          REVIEW_AUTO_TRIAGE: '1'
+          REVIEW_INLINE_ON: critical,major
+          REVIEW_BLOCK_ON: critical,major
+          REVIEW_BLOCK_SINGLE: critical
+          REVIEW_CONSENSUS: '1'
+          # REVIEW_LLM_REQUIRED не указываем: default в config.mjs = '1' (fail-closed).
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GRAPHIFY_BIN: .graphify/venv/bin/graphify
+          # graphify update app --force пишет в app/.graphify/graphify-out (аудит §3.1:
+          # раньше GRAPH указывал в корень — blast-radius был мёртв, 0/20 symbols).
+          GRAPH: app/.graphify/graphify-out/graph.json
+          GRAPHIFY_REPORT: app/.graphify/graphify-out/GRAPH_REPORT.md
+          REVIEW_CONFIDENCE_MIN: '0.8'
+          REVIEW_VERIFIER: '1'             # R3: второй проход verifier для critical/major (0 = выкл.)
+          REVIEW_VERIFIER_MODEL: deepseek-v4-pro
+          REVIEW_VERIFIER_STRICT: '1'      # блок требует verdict verifier; нет verdict → minor (0 = fail-open)
+          REVIEW_ROUTER: '1'               # R4: skip/light/full по типу diff (0 = всегда full)
+          REVIEW_PRESCAN: '1'              # R6: eslint + ast-grep на changed files (нужен app/node_modules)
+          REVIEW_PRESCAN_ASTGREP: '1'      # R6+: ast-grep anti-patterns (fail-open без @ast-grep/cli)
+          REVIEW_OBSERVABILITY: '1'        # R7: JSONL run log (fail-open)
+          REVIEW_EXPORT: '1'               # R9: JSON + SARIF artifact (fail-open)
+          REVIEW_APP_DIR: app
+          # Профиль проекта: маркеры комментариев, правила репозитория для промпта, раскладка
+          # каталогов, scope ast-grep правил и пути feedback (см. docs/profiles.md движка).
+          REVIEW_PROFILE: ops/ai-review/profile.json
+          REVIEW_CHUNK_BYTES: '56000'       # крупнее чанк → меньше LLM-вызовов (баланс recall/скорость)
+          REVIEW_CONCURRENCY: '10'            # параллельных chunk-pipeline (3 specialists + aggregator)
+          REVIEW_MAX_CHUNKS: '40'           # потолок числа чанков (гигантский PR → чанки крупнее, влезаем в timeout)
+          REVIEW_LLM_TIMEOUT_MS: '240000'   # таймаут одной попытки LLM (было 900с: ретраи взрывали 25-мин job)
+          REVIEW_TIME_BUDGET_MIN: '20'      # дедлайн LLM-фазы → частичный отчёт вместо убийства раннером
+          REVIEW_PROVIDER_CONCURRENCY: '12' # глобальный cap LLM-вызовов + AIMD при 429 (бэклог #5)
+          REVIEW_PROVIDER_PER_MODEL: '6'    # cap одновременных вызовов на модель
+        run: node .ai-reviewer-engine/bin/pr-review.mjs
+
+      - name: Upload review observability log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-review-observability-${{ github.event.pull_request.number || inputs.pr_number }}
+          path: .graphify/graphify-out/observability/pr-review-runs.jsonl
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload review machine-readable export
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-review-export-${{ github.event.pull_request.number || inputs.pr_number }}
+          path: .graphify/graphify-out/review-export/
+          if-no-files-found: ignore
+          retention-days: 30
