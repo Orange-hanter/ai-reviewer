@@ -1,0 +1,18 @@
+{
+  "id": "fp-absence-doc-claims-not-in-diff",
+  "type": "fp",
+  "description": "PR #520 (починка петли feedback) — вручную опровергнутый major «Документация заявляет фиксы кода, которых нет в diff»: все три фикса лежат в .github/workflows/pr-review-feedback.yml прямо в этом же диффе, моделям показали только markdown-чанк",
+  "source": {
+    "pr": 520,
+    "diff": "gh pr diff 520",
+    "evidence": [
+      "ops/pr-review/feedback/fp-feedback.jsonl, запись pr=520 source=manual signal=fp, reason: «absence-claim: gh pr diff 520 --name-only показывает .github/workflows/pr-review-feedback.yml, все три фикса (comm -13, FEEDBACK_PR_TOKEN, фиксированная ветка) есть в диффе; артефакт чанкинга»",
+      "sticky PR #520: 11 находок, 0 critical/major, merge не блокировался; PR смержен"
+    ]
+  },
+  "expect": {
+    "wouldBlock": false,
+    "mustNotFindTitles": ["которых нет в diff"],
+    "note": "Регрессионный контроль на FP-класс absence-claim, который #530 обязан был закрыть (карта PR в каждом чанке). Диффа с этим классом в наборе три — 516, 520, 530."
+  }
+}

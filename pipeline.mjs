@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
-import { parseDiff, extractChangedSymbols, readChangedFiles, buildChunks } from './lib/diff.mjs';
+import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks } from './lib/diff.mjs';
 import { createOllamaClient } from './lib/ollama.mjs';
 import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs';
 import { createGraphifyClient } from './lib/graphify.mjs';
@@ -308,14 +308,10 @@ export function createReviewPipeline(cfg, deps = {}) {
         return 0;
       }
 
-      const symbols = extractChangedSymbols(changedText, limits.maxSymbols);
-      log(`файлов: ${files.size} · символов под blast-radius: ${symbols.length}`, symbols);
-
       const prepT0 = Date.now();
-      const [blastResult, contentMap, rawPriorFindings, prescanResult] = await Promise.all([
-        // Freshness измеряем даже если diff не содержит экспортов: иначе `graph_fresh`
-        // был бы неизвестен именно в тех review-plans, где blast-radius пустой.
-        graphify.buildBlastRadius(symbols),
+      // Сначала читаем файлы: collectBlastSymbols добирает exports из полного текста,
+      // а не только из hunk-строк (иначе правка тела функции → 0 symbols → пустой blast).
+      const [contentMap, rawPriorFindings, prescanResult] = await Promise.all([
         readChangedFiles(files, limits, log),
         (github.readPriorStickyData
           ? github.readPriorStickyData()
@@ -327,6 +323,11 @@ export function createReviewPipeline(cfg, deps = {}) {
         }),
         prescan.run(changedPaths),
       ]);
+      const symbols = collectBlastSymbols(changedText, contentMap, limits.maxSymbols);
+      log(`файлов: ${files.size} · символов под blast-radius: ${symbols.length}`, symbols);
+      // Freshness измеряем даже если diff не содержит экспортов: иначе `graph_fresh`
+      // был бы неизвестен именно в тех review-plans, где blast-radius пустой.
+      const blastResult = await graphify.buildBlastRadius(symbols);
       const { blocks: blastBlocks, metrics: blastMetrics } = normalizeBlastRadius(blastResult, symbols);
       log(`prep parallel: ${Date.now() - prepT0}мс (graphify+files+prior+prescan)`);
       // Fingerprint-инвалидация carry-over ДО LLM: устаревшие prior findings не подмешиваем.
@@ -560,16 +561,25 @@ export function createReviewPipeline(cfg, deps = {}) {
       logFindingsStage(obs, 'after_gate', allFindings);
 
       const { inline, outside } = findingsFmt.classify(allFindings, files, actionabilityCtx);
-      const { md, counts, total } = buildSummary(cfg, {
-        reviews, ok, allFindings, outside, blastBlocks, files, pr, headSha, note, blockerClusters,
+      const { md, counts, total, delta, verdict } = buildSummary(cfg, {
+        reviews, ok, allFindings, outside, blastBlocks, blastMetrics, files, pr, headSha, note, blockerClusters,
         verifierStats, refutationStats, prescanResult, fpRemoved,
         // Δ считаем против ПОЛНОГО набора прошлого прогона, а не против отфильтрованного
         // carry-over: «закрыто» — это то, что ушло из отчёта, включая снятое инвалидацией.
         priorFindings: priorSticky.findings, priorRuns: priorSticky.runs, priorSha: priorSticky.sha,
       });
+      // Дисперсия набора находок — измеримая величина, а не впечатление от чтения sticky:
+      // в JSONL уходит Jaccard по точкам кода и его слагаемые, по ним недельный отчёт строит
+      // тренд (бэклог P1 #8). Размеры списков Δ-блока — в `delta.findings`, они считаются по
+      // другому ключу (находка = точка + формулировка) и метрику не задают.
+      obs.logEvent('stability', delta);
+      // Вердикт со sha — отдельным событием: `gate` не знает коммита, а без него нельзя отличить
+      // «на разных диффах решения разные» (норма) от «на одном диффе решения разные» (гейт
+      // недетерминирован, замер #533: блокер в 4 прогонах из 6 при неизменном диффе).
+      obs.logEvent('verdict', verdict);
 
       await persistExports(cfg, buildReviewJson({
-        pr, headSha, reviewMode, route, wouldBlock: blockers.length > 0,
+        pr, headSha, reviewMode, route, wouldBlock: blockers.length > 0, verdict,
         counts, total, findings: allFindings, blockers, reviews,
         verifierStats, refutationStats, prescanResult,
       }), log, obs);

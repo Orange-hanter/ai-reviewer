@@ -1,6 +1,6 @@
 // Канонический публичный API движка (import 'ai-reviewer' / 'ai-reviewer/lib/*').
 
-export { parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, parseDiffNewPath, parseDiffGitPath, unescapeGitPath } from './lib/diff.mjs';
+export { parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, parseDiffNewPath, parseDiffGitPath, unescapeGitPath } from './lib/diff.mjs';
 export { extractJsonObject } from './lib/json.mjs';
 export { filterFalsePositiveFindings, matchesKnownFalsePositive, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers, applyPrescanBlockPolicy, filterStalePriorFindings, dedupeSameModelFindings } from './lib/findings.mjs';
 export { selectVerifierCandidates, applyVerifierVerdicts, createVerifierRunner } from './lib/verifier.mjs';
@@ -37,7 +37,7 @@ export {
   extractReasoningEntries, sarifArtifactUri, sarifAutomationGuid,
   EXPORT_VERSION, SARIF_SCHEMA, SARIF_GUID_RE, TOOL_VERSION, toolName,
 } from './lib/export.mjs';
-export { buildSummary, buildRouterSummary, buildLlmUnavailableSummary, buildReasoningSection, buildStickyReasoningFooter } from './lib/report.mjs';
+export { buildSummary, buildRouterSummary, buildLlmUnavailableSummary, buildReasoningSection, buildStickyReasoningFooter, diffFindings, findingIdentity, findingPointDelta, findingsStability, verdictReproducibility } from './lib/report.mjs';
 export { MARKERS, hasMarker, extractStickyFooterRaw, repoRules, SEV } from './lib/constants.mjs';
 export {
   DEFAULT_PROFILE, PROFILE_FILENAMES, createMarkers, normalizeProfile, loadProfileFile,

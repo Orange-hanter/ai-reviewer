@@ -1,5 +1,6 @@
 {
   "id": "tp-real-bugs-unescape",
+  "type": "tp",
   "description": "PR #477 pre-fix: реальные major (unescape git C-quoting в parseDiffNewPath/parseDiffGitPath) среди FP-шума — recall-контроль: пайплайн обязан заблокировать",
   "expect": {
     "wouldBlock": true,

@@ -8,7 +8,7 @@
 verifier → inline-замечания и один живой sticky-отчёт в PR.
 
 [![CI](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml)
-![version](https://img.shields.io/badge/version-0.2.0-blue)
+![version](https://img.shields.io/badge/version-0.2.1-blue)
 ![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)
 ![deps](https://img.shields.io/badge/зависимостей-0-success)
 ![license](https://img.shields.io/badge/license-UNLICENSED-lightgrey)

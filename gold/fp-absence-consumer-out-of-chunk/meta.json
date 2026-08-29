@@ -1,0 +1,18 @@
+{
+  "id": "fp-absence-consumer-out-of-chunk",
+  "type": "fp",
+  "description": "PR #530 (карта PR в каждом чанке) — вручную опровергнутая находка «Контракт buildMessages изменён, consumer не в диффе»: pipeline.mjs есть в диффе этого же PR, и изменение контракта ровно там",
+  "source": {
+    "pr": 530,
+    "diff": "gh pr diff 530",
+    "evidence": [
+      "ops/pr-review/feedback/fp-feedback.jsonl, запись pr=530 source=manual signal=fp, reason: «absence-claim: pipeline.mjs есть в диффе #530, изменение контракта ровно там; артефакт чанкинга»",
+      "sticky PR #530: 18 находок, 0 critical/major; в комментариях PR — ручной разбор прогонов («Прогон на b934ea5f … verdict approve … Принято (5)»)"
+    ]
+  },
+  "expect": {
+    "wouldBlock": false,
+    "mustNotFindTitles": ["consumer не в диффе"],
+    "note": "Находка была minor, то есть сама по себе merge не блокировала — размечена как FP-контроль формулировки, а wouldBlock=false опирается на смерженный PR с 0 critical/major в футере."
+  }
+}

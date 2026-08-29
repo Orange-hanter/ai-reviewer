@@ -1,0 +1,577 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index f4a1b020..1e6ba923 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -158,7 +158,7 @@ jobs:
+       # фильтр ложных находок, консенсус; DI-тесты pipeline/engine/ollama без сети) и
+       # graphify work-memory guard. Без npm-зависимостей — на встроенном node:test.
+       - name: Unit-test pr-review engine (node:test)
+-        run: node --test ops/pr-review.test.mjs ops/pr-review.eval.test.mjs ops/pr-review.pipeline.test.mjs ops/pr-review.engine.test.mjs ops/graphify-memory.test.mjs ops/pr-review.fp-mark.test.mjs ops/ai-review-status.test.mjs ops/pr-review.stale-threads.test.mjs
++        run: node --test ops/pr-review.test.mjs ops/pr-review.eval.test.mjs ops/pr-review.pipeline.test.mjs ops/pr-review.engine.test.mjs ops/graphify-memory.test.mjs ops/pr-review.fp-mark.test.mjs ops/ai-review-status.test.mjs ops/pr-review.stale-threads.test.mjs ops/gen-api-routes-doc.test.mjs
+ 
+       - name: Eval harness pr-review fixtures (R1)
+         run: node ops/pr-review.eval.mjs
+diff --git a/docs/dev/reference/cli-and-quality-gates.md b/docs/dev/reference/cli-and-quality-gates.md
+index dfe760d9..b98105c8 100644
+--- a/docs/dev/reference/cli-and-quality-gates.md
++++ b/docs/dev/reference/cli-and-quality-gates.md
+@@ -1,6 +1,6 @@
+ ---
+ Документ: CLI и quality gates
+-Версия: 1.12
++Версия: 1.13
+ Дата: 2026-08-10
+ Статус: Активен
+ Владелец: Tech Lead
+@@ -131,10 +131,23 @@ PreToolUse-хук `ops/hooks/deny-raw-pr-merge.sh` из `.claude/settings.json`)
+ 
+ Pre-commit сам делает write+stage при изменении `app/server/**/*.ts` (см. таблицу hooks).
+ 
++Индекс — документ корпуса, поэтому генератор **сам ведёт его `Версия:`**: читает версию и
++накопленный changelog из лежащего на диске файла, и поднимает минор (`1.0` → `1.1`) ровно
++тогда, когда пересобранное тело отличается от файла; строка changelog пишется с фактической
++версией, прежние строки переносятся. Иначе литеральная `Версия: 1.0` делала бы любой PR с
++новым роутом красным на `check-doc-version-bump.sh` без способа починить: ручной бамп
++затирался бы следующей регенерацией, и гейт увидел бы уже понижение. Смена суток версию не
++двигает и файл не переписывает — даты вне сравнения, иначе `--check` краснел бы каждую полночь.
++Если строка `Версия:` в шапке индекса стёрта или не число, генератор **падает**, а не назначает
++версию сам: подстановка `1.0` была бы понижением, и разбираться пришлось бы уже по невнятному
++«версия понижена» из гейта. Поведение закреплено `node --test ops/gen-api-routes-doc.test.mjs`
++(тот же шаг есть в CI).
++
+ ## Changelog
+ 
+ | Версия | Дата | Изменение |
+ |--------|------|-----------|
++| 1.13 | 2026-08-10 | `gen-api-routes-doc.mjs` сам ведёт `Версия:` индекса (минор +1 только при изменении тела) — литеральная `1.0` делала PR с новым роутом красным на гейте версий намертво (PR #516) |
+ | 1.12 | 2026-08-10 | `ops/check-doc-version-bump.sh` — гейт CI на правку документа без бампа `Версия:` (правило корпуса нарушили шесть PR подряд, #527/#529…#534; на 60 последних merge-коммитов гейт был бы красным на 20 PR из 32, тронувших документы с версией) |
+ | 1.11 | 2026-08-10 | `ops/check-conflict-markers.sh` — гейт CI на маркеры незавершённого merge (в main уехал бэклог с сырыми `<<<<<<<`; ни тесты, ни линт, ни AI-ревью этого не поймали) |
+ | 1.10 | 2026-08-09 | `ops/pr-merge.sh` — merge только через гейт; прямой `gh pr merge` блокируется хуками |
+diff --git a/ops/gen-api-routes-doc.mjs b/ops/gen-api-routes-doc.mjs
+index fa382223..030a6143 100644
+--- a/ops/gen-api-routes-doc.mjs
++++ b/ops/gen-api-routes-doc.mjs
+@@ -4,18 +4,29 @@
+  *   node ops/gen-api-routes-doc.mjs          # write
+  *   node ops/gen-api-routes-doc.mjs --check  # exit 1 if stale (CI)
+  * Pre-commit (.githooks/pre-commit) вызывает write+stage при staged app/server TS.
++ *
++ * Версия документа считается генератором, а не пишется литералом (см. planDoc):
++ * `ops/check-doc-version-bump.sh` требует, чтобы правка документа корпуса поднимала
++ * `Версия:` в шапке, и обхода у гейта нет намеренно. Литерал `Версия: 1.0` означал бы,
++ * что любой PR с новым роутом меняет тело индекса при неизменной версии — красный гейт
++ * без способа починить (ручной бамп следующая регенерация затирала бы обратно, и гейт
++ * увидел бы уже понижение). Поэтому инвариант «тело изменилось → версия выросла»
++ * выполняется по построению: версия и накопленный changelog читаются из существующего
++ * файла, минор растёт ровно тогда, когда пересобранное тело отличается от лежащего на диске.
+  */
+ import fs from 'node:fs';
+ import path from 'node:path';
+-import { fileURLToPath } from 'node:url';
++import { fileURLToPath, pathToFileURL } from 'node:url';
+ 
+ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+ const SERVER = path.join(ROOT, 'app/server');
+ const OUT = path.join(ROOT, 'docs/dev/reference/api-endpoints-index.md');
+-const CHECK = process.argv.includes('--check');
+ 
+ const ROUTE_RE = /app\.(get|post|put|patch|delete)\(\s*['"`]([^'"`]+)/g;
+ 
++/** Версия первого поколения документа — когда файла ещё нет и наследовать нечего. */
++export const INITIAL_VERSION = '1.0';
++
+ function walk(dir, acc = []) {
+   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+     const p = path.join(dir, ent.name);
+@@ -25,13 +36,13 @@ function walk(dir, acc = []) {
+   return acc;
+ }
+ 
+-function buildDoc() {
+-  /** @type {Map<string, { methods: Set<string>, files: Set<string> }>} */
++/** @returns {Map<string, { methods: Set<string>, files: Set<string> }>} route → методы и модули */
++export function collectRoutes(serverDir) {
+   const byRoute = new Map();
+ 
+-  for (const file of walk(SERVER)) {
++  for (const file of walk(serverDir)) {
+     const text = fs.readFileSync(file, 'utf8');
+-    const rel = path.relative(SERVER, file);
++    const rel = path.relative(serverDir, file);
+     let m;
+     while ((m = ROUTE_RE.exec(text))) {
+       const method = m[1].toUpperCase();
+@@ -43,14 +54,17 @@ function buildDoc() {
+       entry.files.add(rel);
+     }
+   }
++  return byRoute;
++}
+ 
+-  function prefixOf(route) {
+-    const parts = route.split('/').filter(Boolean);
+-    if (parts.length < 2) return '/api';
+-    if (parts.length === 2) return `/${parts[0]}/${parts[1]}`;
+-    return `/${parts[0]}/${parts[1]}/${parts[2]}`;
+-  }
++function prefixOf(route) {
++  const parts = route.split('/').filter(Boolean);
++  if (parts.length < 2) return '/api';
++  if (parts.length === 2) return `/${parts[0]}/${parts[1]}`;
++  return `/${parts[0]}/${parts[1]}/${parts[2]}`;
++}
+ 
++export function renderDoc({ byRoute, today, version, changelogRows }) {
+   /** @type {Map<string, string[]>} */
+   const groups = new Map();
+   for (const route of [...byRoute.keys()].sort()) {
+@@ -59,11 +73,10 @@ function buildDoc() {
+     groups.get(p).push(route);
+   }
+ 
+-  const today = new Date().toISOString().slice(0, 10);
+   const lines = [
+     '---',
+     'Документ: API endpoints index (generated)',
+-    'Версия: 1.0',
++    `Версия: ${version}`,
+     `Дата: ${today}`,
+     'Статус: Активен',
+     'Владелец: Tech Lead',
+@@ -98,36 +111,176 @@ function buildDoc() {
+     lines.push('');
+   }
+ 
+-  lines.push('## Changelog', '', '| Версия | Дата | Изменение |', '|--------|------|-----------|', `| 1.0 | ${today} | Phase 3+ — generated index |`, '');
++  lines.push('## Changelog', '', '| Версия | Дата | Изменение |', '|--------|------|-----------|', ...changelogRows, '');
++
++  return lines.join('\n');
++}
++
++/**
++ * Версия из ГОЛОВНОГО frontmatter-блока — те же правила, что у ops/check-doc-version-bump.sh:
++ * читаем только до закрывающего `---`, иначе за версию документа сойдёт строка таблицы changelog.
++ * Формат строго числовой (`1`, `1.2`, `1.2.3`): `1.x` и `1.0-rc` — не версия, а мусор, и
++ * тихо нормализовать его нельзя, потому что арифметика бампа тогда молча перепишет чужое.
++ */
++export function parseFrontmatterVersion(text) {
++  const lines = String(text).split('\n');
++  if (lines[0]?.replace(/\r$/, '') !== '---') return null;
++  for (const raw of lines.slice(1)) {
++    const line = raw.replace(/\r$/, '');
++    if (/^---\s*$/.test(line)) return null;
++    const m = /^Версия:\s*(\d+(?:\.\d+)*)\s*$/.exec(line);
++    if (m) return m[1];
++  }
++  return null;
++}
++
++/**
++ * Строки накопленного changelog (без шапки и разделителя), как они лежат в файле.
++ * Генератор перезаписывает документ целиком, поэтому историю надо не сочинить заново,
++ * а перенести дословно — иначе каждая регенерация стирала бы прошлые записи.
++ *
++ * Границей секции считается СЛЕДУЮЩИЙ заголовок, а не первая пустая строка: пустая строка
++ * или абзац между группами записей — законное оформление, а обрыв на ней означал бы тихую
++ * потерю половины истории при ближайшей регенерации.
++ */
++export function parseChangelogRows(text) {
++  const lines = String(text).split('\n');
++  const start = lines.findIndex((l) => l.replace(/\r$/, '').trim() === '## Changelog');
++  if (start === -1) return [];
++
++  const rows = [];
++  for (const raw of lines.slice(start + 1)) {
++    const line = raw.replace(/\r$/, '').trim();
++    if (/^#{1,6}\s/.test(line)) break; // следующая секция
++    if (!line.startsWith('|')) continue;
++    if (/^\|\s*Версия\s*\|/.test(line)) continue; // шапка таблицы
++    if (/^\|[\s|:-]+\|$/.test(line)) continue; // разделитель
++    rows.push(line);
++  }
++  return rows;
++}
++
++/**
++ * Минор +1. Числами покомпонентно, как сравнивает гейт: 1.9 → 1.10 (а не 1.91 и не 2.0),
++ * потому что version_cmp в check-doc-version-bump.sh считает 10 > 9. Хвост длиннее минора
++ * отбрасывается осознанно (1.2.3 → 1.3): корпус живёт в `major.minor`, а результат всё равно
++ * строго больше исходной версии по тому же покомпонентному сравнению, что и у гейта.
++ */
++export function bumpMinor(version) {
++  const [major, minor] = String(version).split('.');
++  const maj = Number.parseInt(major, 10);
++  const min = Number.parseInt(minor ?? '0', 10);
++  return `${Number.isFinite(maj) ? maj : 1}.${(Number.isFinite(min) ? min : 0) + 1}`;
++}
+ 
+-  return { content: lines.join('\n'), routeCount: byRoute.size };
++export function changelogRow(version, today, routeCount) {
++  return `| ${version} | ${today} | Регенерация из \`app/server/**\` — ${routeCount} уникальных path |`;
+ }
+ 
+-function normalizeForCheck(text) {
+-  // Ignore calendar dates so CI/--check and pre-commit don't churn on day rollover.
+-  return text
++/**
++ * Календарные даты вне сравнения: `--check` в CI и pre-commit не должны краснеть просто
++ * потому, что сутки сменились. Версию НЕ маскируем — она берётся из существующего файла,
++ * поэтому при неизменном теле совпадает и без нормализации, а при изменённом обязана отличаться.
++ */
++export function normalizeForCheck(text) {
++  return String(text)
+     .replace(/Дата: \d{4}-\d{2}-\d{2}/g, 'Дата: DATE')
+     .replace(/\*\*СТАТУС \(\d{4}-\d{2}-\d{2}\):?\*\*/g, '**СТАТУС (DATE)**')
+-    .replace(/\| 1\.0 \| \d{4}-\d{2}-\d{2} \|/g, '| 1.0 | DATE |');
++    .replace(/^\| (\d+(?:\.\d+)*) \| \d{4}-\d{2}-\d{2} \|/gm, '| $1 | DATE |');
+ }
+ 
+-const { content, routeCount } = buildDoc();
++/**
++ * Что писать на диск и какой версией.
++ *   status 'created'   — файла не было: версия 1.0, changelog с одной строкой;
++ *   status 'unchanged' — тело совпало: версия и changelog ровно те же (в т.ч. поднятые руками);
++ *   status 'updated'   — тело изменилось: минор +1, новая строка changelog поверх старых.
++ * @param {{ existing: string|null, byRoute: Map<string, { methods: Set<string>, files: Set<string> }>, today: string }} input
++ */
++export function planDoc({ existing, byRoute, today }) {
++  const routeCount = byRoute.size;
++
++  if (!existing) {
++    const version = INITIAL_VERSION;
++    return {
++      status: 'created',
++      version,
++      content: renderDoc({ byRoute, today, version, changelogRows: [changelogRow(version, today, routeCount)] }),
++    };
++  }
+ 
+-if (CHECK) {
+-  if (!fs.existsSync(OUT)) {
++  // Версию и историю наследуем у файла: ручной бамп не откатывается, монотонность вверх сохраняется.
++  // Если версии в шапке нет или она не число — падаем здесь, а не подставляем 1.0: подстановка
++  // была бы понижением (в main версия могла уйти далеко вперёд), и диагностику пришлось бы
++  // читать из чужого гейта в CI («версия понижена») вместо внятного сообщения на месте.
++  const version = parseFrontmatterVersion(existing);
++  if (!version) {
++    throw new Error(
++      'в шапке api-endpoints-index.md нет числовой строки `Версия:` — восстановите её ' +
++        '(генератор наследует версию у файла и не имеет права назначить её сам)',
++    );
++  }
++  const rows = parseChangelogRows(existing);
++  const asIs = renderDoc({
++    byRoute,
++    today,
++    version,
++    changelogRows: rows.length ? rows : [changelogRow(version, today, routeCount)],
++  });
++
++  if (normalizeForCheck(existing) === normalizeForCheck(asIs)) {
++    return { status: 'unchanged', version, content: asIs };
++  }
++
++  const next = bumpMinor(version);
++  return {
++    status: 'updated',
++    version: next,
++    content: renderDoc({
++      byRoute,
++      today,
++      version: next,
++      changelogRows: [changelogRow(next, today, routeCount), ...rows],
++    }),
++  };
++}
++
++function main(argv) {
++  const check = argv.includes('--check');
++  const byRoute = collectRoutes(SERVER);
++  const existing = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : null;
++
++  if (check && !existing) {
+     console.error(`Missing ${OUT} — run: node ops/gen-api-routes-doc.mjs`);
+-    process.exit(1);
++    return 1;
++  }
++
++  let plan;
++  try {
++    plan = planDoc({ existing, byRoute, today: new Date().toISOString().slice(0, 10) });
++  } catch (err) {
++    console.error(`${OUT}: ${err.message}`);
++    return 1;
++  }
++  const tail = `(${byRoute.size} routes, версия ${plan.version})`;
++
++  if (check) {
++    if (plan.status !== 'unchanged') {
++      console.error(`Stale ${OUT} ${tail} — run: node ops/gen-api-routes-doc.mjs`);
++      return 1;
++    }
++    console.log(`OK ${OUT} ${tail}`);
++    return 0;
+   }
+-  const existing = fs.readFileSync(OUT, 'utf8');
+-  if (normalizeForCheck(existing) !== normalizeForCheck(content)) {
+-    console.error(`Stale ${OUT} (${routeCount} routes) — run: node ops/gen-api-routes-doc.mjs`);
+-    process.exit(1);
++
++  if (plan.status === 'unchanged') {
++    console.log(`Unchanged ${OUT} ${tail}`);
++    return 0;
+   }
+-  console.log(`OK ${OUT} (${routeCount} routes)`);
+-} else if (fs.existsSync(OUT) &&
+-           normalizeForCheck(fs.readFileSync(OUT, 'utf8')) === normalizeForCheck(content)) {
+-  console.log(`Unchanged ${OUT} (${routeCount} routes)`);
+-} else {
+-  fs.writeFileSync(OUT, content);
+-  console.log(`Wrote ${OUT} (${routeCount} routes)`);
++  fs.writeFileSync(OUT, plan.content);
++  console.log(`Wrote ${OUT} ${tail}`);
++  return 0;
++}
++
++if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
++  process.exit(main(process.argv.slice(2)));
+ }
+diff --git a/ops/gen-api-routes-doc.test.mjs b/ops/gen-api-routes-doc.test.mjs
+new file mode 100644
+index 00000000..18ab9b55
+--- /dev/null
++++ b/ops/gen-api-routes-doc.test.mjs
+@@ -0,0 +1,233 @@
++/**
++ * Инвариант генератора индекса роутов: «тело документа изменилось → `Версия:` выросла».
++ * Он не косметический — ops/check-doc-version-bump.sh валит PR, где документ корпуса
++ * изменён без подъёма версии, и обхода у гейта нет. Пока генератор печатал `Версия: 1.0`
++ * литералом, любой PR с новым роутом был красным намертво (PR #516), а ручной бамп
++ * затирался следующей регенерацией — гейт видел уже понижение.
++ *
++ * Второй охраняемый инвариант: смена суток не должна ничего трогать, иначе `--check`
++ * в CI и pre-commit краснели бы каждую полночь.
++ */
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import { spawnSync } from 'node:child_process';
++import { fileURLToPath } from 'node:url';
++
++const HERE = path.dirname(fileURLToPath(import.meta.url));
++const GEN_SRC = path.join(HERE, 'gen-api-routes-doc.mjs');
++
++const { planDoc, bumpMinor, parseFrontmatterVersion, parseChangelogRows, normalizeForCheck } =
++  await import('./gen-api-routes-doc.mjs');
++
++/** @param {Record<string, [string[], string[]]>} spec route → [методы, модули] */
++function routes(spec) {
++  return new Map(
++    Object.entries(spec).map(([route, [methods, files]]) => [
++      route,
++      { methods: new Set(methods), files: new Set(files) },
++    ]),
++  );
++}
++
++const BASE_ROUTES = routes({
++  '/api/records': [['GET', 'POST'], ['records.ts']],
++  '/api/records/:id': [['PUT'], ['records.ts']],
++});
++
++// ---------------------------------------------------------------- чистые функции
++
++test('gen-api-doc: файла нет → версия 1.0 и одна строка changelog', () => {
++  const plan = planDoc({ existing: null, byRoute: BASE_ROUTES, today: '2026-01-01' });
++
++  assert.equal(plan.status, 'created');
++  assert.equal(plan.version, '1.0');
++  assert.equal(parseFrontmatterVersion(plan.content), '1.0');
++  assert.equal(parseChangelogRows(plan.content).length, 1);
++});
++
++test('gen-api-doc: тело не изменилось → версия та же и файл байт в байт', () => {
++  const existing = planDoc({ existing: null, byRoute: BASE_ROUTES, today: '2026-01-01' }).content;
++
++  const plan = planDoc({ existing, byRoute: BASE_ROUTES, today: '2026-01-01' });
++
++  assert.equal(plan.status, 'unchanged');
++  assert.equal(plan.version, '1.0');
++  assert.equal(plan.content, existing);
++});
++
++test('gen-api-doc: поднятую руками версию регенерация не откатывает', () => {
++  const existing = planDoc({ existing: null, byRoute: BASE_ROUTES, today: '2026-01-01' })
++    .content.replace('Версия: 1.0', 'Версия: 1.7');
++
++  const plan = planDoc({ existing, byRoute: BASE_ROUTES, today: '2026-01-01' });
++
++  assert.equal(plan.status, 'unchanged');
++  assert.equal(plan.version, '1.7');
++  assert.equal(parseFrontmatterVersion(plan.content), '1.7');
++});
++
++test('gen-api-doc: тело изменилось → минор ровно +1, прежние строки changelog целы', () => {
++  const existing = planDoc({ existing: null, byRoute: BASE_ROUTES, today: '2026-01-01' }).content;
++  const oldRows = parseChangelogRows(existing);
++
++  const withNewRoute = routes({
++    '/api/records': [['GET', 'POST'], ['records.ts']],
++    '/api/records/:id': [['PUT'], ['records.ts']],
++    '/api/voucher/summary': [['GET'], ['voucher.ts']],
++  });
++  const plan = planDoc({ existing, byRoute: withNewRoute, today: '2026-02-02' });
++
++  assert.equal(plan.status, 'updated');
++  assert.equal(plan.version, '1.1');
++  assert.equal(parseFrontmatterVersion(plan.content), '1.1');
++
++  const rows = parseChangelogRows(plan.content);
++  assert.equal(rows.length, oldRows.length + 1);
++  assert.match(rows[0], /^\| 1\.1 \| 2026-02-02 \|/); // новая запись сверху, как в остальном корпусе
++  assert.deepEqual(rows.slice(1), oldRows); // история дословно перенесена
++  assert.ok(plan.content.includes('`/api/voucher/summary`'));
++});
++
++test('gen-api-doc: сменились только сутки → версия не растёт', () => {
++  const existing = planDoc({ existing: null, byRoute: BASE_ROUTES, today: '2026-01-01' }).content;
++
++  const plan = planDoc({ existing, byRoute: BASE_ROUTES, today: '2026-12-31' });
++
++  assert.equal(plan.status, 'unchanged');
++  assert.equal(plan.version, '1.0');
++  assert.equal(normalizeForCheck(plan.content), normalizeForCheck(existing));
++});
++
++test('gen-api-doc: минор считается числом — 1.9 → 1.10 (гейт сравнивает покомпонентно)', () => {
++  assert.equal(bumpMinor('1.0'), '1.1');
++  assert.equal(bumpMinor('1.9'), '1.10');
++  assert.equal(bumpMinor('1.10'), '1.11');
++  assert.equal(bumpMinor('2'), '2.1');
++});
++
++test('gen-api-doc: версия читается только из головного frontmatter, не из таблицы changelog', () => {
++  const noHeader = ['# Doc', '', '## Changelog', '', '| Версия | Дата | Изменение |', '| 1.5 | 2026-01-01 | x |'].join('\n');
++  assert.equal(parseFrontmatterVersion(noHeader), null);
++  assert.equal(parseFrontmatterVersion('---\nДокумент: x\n---\nВерсия: 9.9\n'), null);
++  assert.equal(parseFrontmatterVersion('---\nВерсия: 1.x\n---\n'), null); // не число — не версия
++  assert.equal(parseFrontmatterVersion('---\nВерсия: 1.2.3\n---\n'), '1.2.3');
++});
++
++test('gen-api-doc: шапка без числовой версии — ошибка, а не молчаливый откат к 1.0', () => {
++  const broken = planDoc({ existing: null, byRoute: BASE_ROUTES, today: '2026-01-01' })
++    .content.replace('Версия: 1.0\n', '');
++
++  assert.throws(() => planDoc({ existing: broken, byRoute: BASE_ROUTES, today: '2026-01-01' }), /Версия:/);
++});
++
++test('gen-api-doc: пустая строка внутри таблицы changelog не теряет прежние записи', () => {
++  const withGap = [
++    '## Changelog',
++    '',
++    '| Версия | Дата | Изменение |',
++    '|--------|------|-----------|',
++    '| 1.1 | 2026-02-02 | вторая |',
++    '',
++    '| 1.0 | 2026-01-01 | первая |',
++    '',
++  ].join('\n');
++
++  assert.deepEqual(parseChangelogRows(withGap), ['| 1.1 | 2026-02-02 | вторая |', '| 1.0 | 2026-01-01 | первая |']);
++});
++
++// ------------------------------------------------------- сквозной прогон скрипта
++
++function makeTree() {
++  // realpath: на macOS os.tmpdir() — симлинк /var → /private/var, и запуск скрипта по
++  // несимлинкнутому пути разошёлся бы с его же import.meta.url (main просто не стартовал бы).
++  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'gen-api-doc-')));
++  fs.mkdirSync(path.join(dir, 'ops'), { recursive: true });
++  fs.mkdirSync(path.join(dir, 'app/server'), { recursive: true });
++  fs.mkdirSync(path.join(dir, 'docs/dev/reference'), { recursive: true });
++  // ROOT генератора выводится из его собственного пути — копии в дереве-макете хватает.
++  fs.copyFileSync(GEN_SRC, path.join(dir, 'ops/gen-api-routes-doc.mjs'));
++  fs.writeFileSync(path.join(dir, 'app/server/records.ts'), "app.get('/api/records', h);\napp.post('/api/records', h);\n");
++  return dir;
++}
++
++function run(dir, ...args) {
++  const res = spawnSync(process.execPath, [path.join(dir, 'ops/gen-api-routes-doc.mjs'), ...args], {
++    encoding: 'utf8',
++  });
++  return { code: res.status, out: res.stdout ?? '', err: res.stderr ?? '' };
++}
++
++const readDoc = (dir) => fs.readFileSync(path.join(dir, 'docs/dev/reference/api-endpoints-index.md'), 'utf8');
++const writeDoc = (dir, text) => fs.writeFileSync(path.join(dir, 'docs/dev/reference/api-endpoints-index.md'), text);
++
++// Сквозные проверки читают документ своими руками, а не парсерами генератора: иначе на
++// сломанном генераторе они падали бы «функции нет», а должны падать на самом поведении.
++const versionOf = (text) => /^Версия:[ \t]*(\S+)[ \t]*$/m.exec(text)?.[1] ?? null;
++const rowsOf = (text) => text.split('\n').filter((l) => /^\| \d+(\.\d+)* \| \d{4}-\d{2}-\d{2} \|/.test(l));
++
++test('gen-api-doc e2e: новый роут → --check красный, регенерация поднимает версию и снова зелено', (t) => {
++  const dir = makeTree();
++  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
++
++  assert.equal(run(dir).code, 0);
++  assert.equal(versionOf(readDoc(dir)), '1.0');
++
++  const fresh = run(dir, '--check');
++  assert.equal(fresh.code, 0, fresh.err);
++  assert.equal(run(dir).out.startsWith('Unchanged'), true);
++
++  fs.writeFileSync(path.join(dir, 'app/server/voucher.ts'), "app.get('/api/voucher/summary', h);\n");
++
++  const stale = run(dir, '--check');
++  assert.equal(stale.code, 1);
++  assert.match(stale.err, /Stale/);
++
++  assert.equal(run(dir).code, 0);
++  const bumped = readDoc(dir);
++  assert.equal(versionOf(bumped), '1.1');
++  assert.equal(rowsOf(bumped).length, 2);
++  assert.ok(bumped.includes('`/api/voucher/summary`'));
++
++  const after = run(dir, '--check');
++  assert.equal(after.code, 0, after.err);
++});
++
++test('gen-api-doc e2e: устаревшие даты в файле не делают --check красным и не переписывают файл', (t) => {
++  const dir = makeTree();
++  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
++
++  run(dir);
++  const stale = readDoc(dir).replace(/\d{4}-\d{2}-\d{2}/g, '2020-01-01');
++  writeDoc(dir, stale);
++
++  const check = run(dir, '--check');
++  assert.equal(check.code, 0, check.err);
++
++  assert.match(run(dir).out, /^Unchanged/);
++  assert.equal(readDoc(dir), stale); // ни версии, ни даты не тронуты — иначе гейт краснел бы на пустом месте
++});
++
++test('gen-api-doc e2e: стёртая строка `Версия:` — красный выход с внятным сообщением', (t) => {
++  const dir = makeTree();
++  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
++
++  run(dir);
++  writeDoc(dir, readDoc(dir).replace('Версия: 1.0\n', ''));
++
++  const res = run(dir);
++  assert.equal(res.code, 1);
++  assert.match(res.err, /Версия:/);
++  assert.doesNotMatch(readDoc(dir), /^Версия:/m); // файл не переписан «на глазок»
++});
++
++test('gen-api-doc e2e: --check без файла — красный', (t) => {
++  const dir = makeTree();
++  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
++
++  const res = run(dir, '--check');
++  assert.equal(res.code, 1);
++  assert.match(res.err, /Missing/);
++});

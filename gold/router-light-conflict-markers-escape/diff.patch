@@ -1,0 +1,373 @@
+diff --git a/.claude/settings.json b/.claude/settings.json
+new file mode 100644
+index 00000000..48bcee39
+--- /dev/null
++++ b/.claude/settings.json
+@@ -0,0 +1,15 @@
++{
++  "hooks": {
++    "PreToolUse": [
++      {
++        "matcher": "Bash",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "bash \"$CLAUDE_PROJECT_DIR/ops/hooks/deny-raw-pr-merge.sh\""
++          }
++        ]
++      }
++    ]
++  }
++}
+diff --git a/.cursor/hooks/_selftest_guard.py b/.cursor/hooks/_selftest_guard.py
+index 984c9406..ef9aa0c0 100644
+--- a/.cursor/hooks/_selftest_guard.py
++++ b/.cursor/hooks/_selftest_guard.py
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env python3
+-"""Local self-test for guard-shell (not in CI). Run: python3 .cursor/hooks/_selftest_guard.py"""
++"""Self-test for guard-shell. CI: шаг «Test merge gate». Локально: python3 .cursor/hooks/_selftest_guard.py"""
+ import importlib.util
+ import os
+ import sys
+@@ -68,6 +68,15 @@ def t(cmd, exp):
+ t("git clean -fd", True)
+ t("mkfs.ext4 /dev/sda", True)
+ 
++print("-- merge только через врапер с гейтом (аудит #504 P0-C) --")
++t("gh pr merge 519 --squash", True)
++t("gh pr merge", True)
++t("cd Orakul && gh pr merge 519 --merge --delete-branch", True)
++t("./ops/pr-merge.sh 519 --merge", False)
++t("gh pr view 519 --json state", False)
++t("gh pr checks 519", False)
++t("echo gh pr mergers", False)
++
+ print("-- git boolean flags allow safe commands --")
+ t("git --no-pager status", False)
+ t("git --quiet log -1", False)
+diff --git a/.cursor/hooks/guard-shell.py b/.cursor/hooks/guard-shell.py
+index 323050f3..0df48e19 100755
+--- a/.cursor/hooks/guard-shell.py
++++ b/.cursor/hooks/guard-shell.py
+@@ -32,6 +32,16 @@
+         "docker system prune --force blocked.",
+         "Bulk removal of docker artifacts — only manually by the user.",
+     ),
++    # Аудит #504 §6.3: правило «не мержить без pr-merge-ready» жило только в скиллах,
++    # и PR уезжали в main с открытыми blocking-тредами. Теперь merge — только через врапер,
++    # который сам гоняет гейт (его строка под это правило не попадает).
++    (
++        re.compile(r"(?:^|[;&|\s])gh\s+pr\s+merge(?:\s|$)", re.I),
++        "gh pr merge blocked — use Orakul/ops/pr-merge.sh.",
++        "Прямой merge запрещён. Мержить только через ./ops/pr-merge.sh <PR>, внутри которого "
++        "исполняется ./ops/pr-merge-ready.sh (CI green + 0 unresolved blocking threads). "
++        "Красный гейт — разбирай находки, а не обходи проверку.",
++    ),
+ ]
+ 
+ # SQL DDL — over the ORIGINAL (usually inside quotes psql -c "…"). A rare FP on prose is acceptable.
+diff --git a/.cursor/skills/orakul-babysit/SKILL.md b/.cursor/skills/orakul-babysit/SKILL.md
+index ba63c517..91a2517f 100644
+--- a/.cursor/skills/orakul-babysit/SKILL.md
++++ b/.cursor/skills/orakul-babysit/SKILL.md
+@@ -50,8 +50,8 @@ push → Orakul/ops/ci-watch.sh [N]     # wait CI (--watch, no sleep)
+ ## Merge
+ 
+ ```bash
+-Orakul/ops/pr-merge-ready.sh "$PR"    # MUST pass
+-gh pr merge "$PR" --squash         # or user-preferred method
++Orakul/ops/pr-merge.sh "$PR"          # гейт внутри; без зелёного merge не произойдёт
++Orakul/ops/pr-merge.sh "$PR" --squash # or user-preferred method
+ ```
+ 
+ If `gh pr merge` fails locally (worktree), use GitHub API merge after gate passes.
+@@ -59,5 +59,6 @@ If `gh pr merge` fails locally (worktree), use GitHub API merge after gate passe
+ ## Anti-patterns
+ 
+ - ❌ Merge right after `gh pr checks` pass without `pr-merge-ready.sh`
++- ❌ Прямой `gh pr merge` — заблокирован хуками (guard-shell / PreToolUse), мержить через `ops/pr-merge.sh`
+ - ❌ Resolve only the first batch of threads; ignore post-push AI review
+ - ❌ `sleep 120 && gh pr checks` — use `Orakul/ops/ci-watch.sh`
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 212cac51..214d0fcb 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -126,6 +126,12 @@ jobs:
+       - name: Test fail-fast script (bash)
+         run: bash ops/ci-fail-fast.test.sh
+ 
++      # Merge-гейт: врапер + Claude-хук + правило guard-shell (аудит #504 P0-C).
++      - name: Test merge gate (wrapper + hooks)
++        run: |
++          bash ops/pr-merge.test.sh
++          python3 .cursor/hooks/_selftest_guard.py
++
+       # Юнит-тесты движка авто-ревью (чистые функции: парсинг диффа, JSON-repair, чанкинг,
+       # фильтр ложных находок, консенсус; DI-тесты pipeline/engine/ollama без сети) и
+       # graphify work-memory guard. Без npm-зависимостей — на встроенном node:test.
+diff --git a/docs/08-technical/37-ai-review-backlog.md b/docs/08-technical/37-ai-review-backlog.md
+index a73f13c3..e2bfe4f8 100644
+--- a/docs/08-technical/37-ai-review-backlog.md
++++ b/docs/08-technical/37-ai-review-backlog.md
+@@ -26,7 +26,12 @@ A/B-эксперименты и диагностика FP из локальны
+ | 2 | **Fingerprint-инвалидация prior findings** (canvas P0) | Prior findings подмешиваются в промпт без проверки актуальности: переносятся устаревшие находки, исторически рост кластеров 1→3→4 между прогонами (PR #348: 27 priors) | Fingerprint `file+hunk+normalized title+SHA`; до LLM выбрасывать carry-over при изменённом hunk/исчезнувшем fingerprint; changed-files list в каждом чанке | После фикса находки число blocker clusters не растёт в трёх повторных runs одного PR |
+ | 3 | **Real model eval (gold set)** (canvas P0) | Eval-фикстуры проверяют post-processing, а не качество LLM: модели и промпты не вызываются, findings/verdicts поданы готовыми | 20–30 frozen PR-диффов с разметкой TP/FP/FN (реальные дефекты, исторические FP, clean controls); nightly full-pipeline shadow run; протокол уже есть — [36 §6](36-ai-review-model-tuning.md) | Blocker precision ≥90%, critical/major recall ≥80% на gold set; drift виден до смены моделей |
+ 
++<<<<<<< HEAD
++**Статус (2026-08-01, жёсткий pre-merge):** правило «не мержить без `pr-merge-ready.sh`» было записано в скиллах и не исполнялось (аудит #504 §6.3: 4 merged PR с unresolved blocking). Теперь merge идёт через `ops/pr-merge.sh` — гейт внутри, красный ⇒ exit 1 и merge не вызывается; прямой `gh pr merge` у агентов блокируется `guard-shell.py` (Cursor) и PreToolUse-хуком `ops/hooks/deny-raw-pr-merge.sh` (Claude Code). Тесты — `ops/pr-merge.test.sh` (со стабом `gh`, настоящий гейт внутри) и `_selftest_guard.py`, оба в CI.
++||||||| 2d8e01fd
++=======
+ **Статус P0 (2026-08-01, #1):** `gh` → node+REST починил только вызовы. Петля стояла ещё по двум причинам, обе закрыты: (а) `migrate-feedback --write` переупаковывает JSON, поэтому байтовый `git diff` показывал изменение при **нуле** новых записей — ветка и PR создавались каждый день впустую (лог в `main` нормализован, решение теперь по множеству записей, а не по байтам); (б) `POST /pulls → 403 «Actions is not permitted to create or approve pull requests»` — добавлен обход через секрет `FEEDBACK_PR_TOKEN` и точная инструкция в job summary. Имя bot-ветки зафиксировано (`bot/ai-review-feedback`) — 14 висячих веток от суффикса `${GITHUB_RUN_ID}` больше не копятся.
++>>>>>>> origin/main
+ 
+ **Статус (2026-08-01, мёртвые блокеры):** на влитом PR незакрытые треды больше не считаются merge-гейтом — `ai-review-status` отдаёт `stale` (`ref.state=merged`) и exit 0 вместо `blocking`/exit 1, чтобы агентские циклы не вставали на #490/#496. Разбор пачкой — `ops/pr-review.stale-threads.mjs` (dry-run по умолчанию, `--write` отвечает «superseded by merge» и резолвит; трогает только треды Orakul). На 2026-08-01 в последних 25 влитых PR — 11 мёртвых блокеров на #487/#490/#496.
+ 
+diff --git a/docs/dev/reference/cli-and-quality-gates.md b/docs/dev/reference/cli-and-quality-gates.md
+index 2609b95d..5e00789e 100644
+--- a/docs/dev/reference/cli-and-quality-gates.md
++++ b/docs/dev/reference/cli-and-quality-gates.md
+@@ -1,7 +1,7 @@
+ ---
+ Документ: CLI и quality gates
+-Версия: 1.9
+-Дата: 2026-08-08
++Версия: 1.10
++Дата: 2026-08-09
+ Статус: Активен
+ Владелец: Tech Lead
+ diataxis: reference
+@@ -85,12 +85,16 @@ audience: developer
+ ```bash
+ ./ops/ci-watch.sh          # ждёт CI (event-driven)
+ ./ops/pr-merge-ready.sh    # merge gate: CI + 0 unresolved threads
++./ops/pr-merge.sh [PR]     # merge: гоняет гейт и мержит только на зелёном
+ ```
+ 
+ Мёртвые блокеры на **уже влитых** PR (тред остался незакрытым после merge) — не гейт:
+ `ai-review-status` отдаёт по ним `stale`, а разобрать пачкой можно
+ `node ops/pr-review.stale-threads.mjs` (dry-run; `--write` отвечает «superseded by merge»
+ и резолвит — только свои треды, чужие не трогает).
++Прямой `gh pr merge` у агентов **заблокирован** (`.cursor/hooks/guard-shell.py` и
++PreToolUse-хук `ops/hooks/deny-raw-pr-merge.sh` из `.claude/settings.json`): правило
++«не мержить без `pr-merge-ready`» перестало быть только текстом в скилле.
+ 
+ Подробный сценарий — [run-dev-loop-before-pr](../how-to/run-dev-loop-before-pr.md).
+ 
+@@ -114,6 +118,7 @@ Pre-commit сам делает write+stage при изменении `app/server
+ 
+ | Версия | Дата | Изменение |
+ |--------|------|-----------|
++| 1.10 | 2026-08-09 | `ops/pr-merge.sh` — merge только через гейт; прямой `gh pr merge` блокируется хуками |
+ | 1.9 | 2026-08-08 | `stale`-статус на влитых PR + `pr-review.stale-threads.mjs` для разбора мёртвых блокеров |
+ | 1.8 | 2026-08-05 | CI babysit: `ops/ci-fail-fast.sh` — красный CI гасит AI review этого коммита |
+ | 1.7 | 2026-07-20 | pre-commit: regen API endpoints index при staged server routes |
+diff --git a/ops/hooks/deny-raw-pr-merge.sh b/ops/hooks/deny-raw-pr-merge.sh
+new file mode 100755
+index 00000000..568fe92d
+--- /dev/null
++++ b/ops/hooks/deny-raw-pr-merge.sh
+@@ -0,0 +1,29 @@
++#!/usr/bin/env bash
++# Claude Code PreToolUse(Bash): сырой `gh pr merge` запрещён — только ops/pr-merge.sh,
++# внутри которого исполняется ops/pr-merge-ready.sh (аудит #504 §6.3, урок PR #326).
++#
++# Контракт хука: JSON на stdin, exit 2 = заблокировать вызов и отдать stderr модели.
++# Всё остальное (нет jq, чужой инструмент, кривой JSON) — тихо пропускаем: хук не должен
++# ломать сессию, он закрывает ровно одну дыру.
++set -uo pipefail
++
++command -v jq >/dev/null 2>&1 || exit 0
++INPUT="$(cat 2>/dev/null || true)"
++[ -n "$INPUT" ] || exit 0
++
++CMD="$(printf '%s' "$INPUT" | jq -r 'if (.tool_name // "") == "Bash" then (.tool_input.command // "") else "" end' 2>/dev/null || true)"
++[ -n "$CMD" ] || exit 0
++
++# Наш врапper сам вызывает gh pr merge — его пропускаем (перехватываем строку агента, не подпроцесс).
++printf '%s' "$CMD" | grep -qE '(^|[;&|[:space:]])gh[[:space:]]+pr[[:space:]]+merge([[:space:]]|$)' || exit 0
++
++cat >&2 <<'MSG'
++Прямой `gh pr merge` заблокирован: merge разрешён только через гейт.
++
++    ./ops/pr-merge.sh <PR> [--squash|--merge|--rebase] [--delete-branch]
++
++Внутри выполняется ./ops/pr-merge-ready.sh: CI зелёный + ноль unresolved blocking
++threads + mergeable. Если гейт красный — разбирай находки (./ops/ai-review-status.sh <PR>)
++и чини CI (./ops/ci-watch.sh <PR>), а не обходи проверку.
++MSG
++exit 2
+diff --git a/ops/pr-merge.sh b/ops/pr-merge.sh
+new file mode 100755
+index 00000000..4f9a7397
+--- /dev/null
++++ b/ops/pr-merge.sh
+@@ -0,0 +1,57 @@
++#!/usr/bin/env bash
++# Единственный санкционированный путь merge для агентов: гейт → merge.
++#
++# Аудит #504 §6.3: «процессный gate слабее CI check» — правило «не мержить без
++# pr-merge-ready.sh» было записано в скиллах, но ничем не исполнялось, и PR уезжали
++# в main с незакрытыми blocking-тредами (#475/#487/#490/#496). Здесь оно исполняется:
++# без зелёного ops/pr-merge-ready.sh merge не произойдёт — скрипт выйдет ≠0.
++#
++#   ./ops/pr-merge.sh                 # PR текущей ветки, merge-commit
++#   ./ops/pr-merge.sh 519             # конкретный PR
++#   ./ops/pr-merge.sh 519 --squash --delete-branch
++#
++# Обхода нет: если находки уже разобраны, но тред висит — закрой тред, а не гейт.
++set -euo pipefail
++
++ROOT="$(cd "$(dirname "$0")/.." && pwd)"
++
++if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
++  echo "Usage: $0 [pr-number] [gh pr merge flags…]"
++  exit 0
++fi
++
++command -v gh >/dev/null 2>&1 || { echo "pr-merge: нужен gh CLI" >&2; exit 127; }
++
++PR=""
++if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
++  PR="$1"; shift
++else
++  PR="$(gh pr view --json number -q .number 2>/dev/null || true)"
++fi
++if [ -z "$PR" ]; then
++  echo "pr-merge: не понял, какой PR мержить (передай номер)" >&2
++  exit 2
++fi
++
++echo "pr-merge: гейт merge-ready для PR #${PR}…"
++if ! "$ROOT/ops/pr-merge-ready.sh" "$PR"; then
++  echo "" >&2
++  echo "pr-merge: MERGE НЕ ВЫПОЛНЕН — гейт красный (см. причины выше)." >&2
++  echo "  · красный CI → ./ops/ci-watch.sh $PR, чинить и пушить" >&2
++  echo "  · unresolved blocking threads → ./ops/ai-review-status.sh $PR, разобрать и закрыть" >&2
++  exit 1
++fi
++
++# Метод merge по умолчанию — merge-commit (так выглядит история main).
++METHOD_GIVEN=0
++for arg in "$@"; do
++  case "$arg" in
++    --squash|--rebase|--merge) METHOD_GIVEN=1 ;;
++  esac
++done
++if [ "$METHOD_GIVEN" -eq 0 ]; then
++  set -- "$@" --merge
++fi
++
++echo "pr-merge: гейт зелёный → gh pr merge $PR $*"
++gh pr merge "$PR" "$@"
+diff --git a/ops/pr-merge.test.sh b/ops/pr-merge.test.sh
+new file mode 100755
+index 00000000..beb00072
+--- /dev/null
++++ b/ops/pr-merge.test.sh
+@@ -0,0 +1,105 @@
++#!/usr/bin/env bash
++# Тест ops/pr-merge.sh без сети: `gh` подменён стабом в PATH. Внутри работает НАСТОЯЩИЙ
++# ops/pr-merge-ready.sh — проверяем сцепку «гейт → merge», а не мок гейта.
++#
++#   ./ops/pr-merge.test.sh
++set -uo pipefail
++
++ROOT="$(cd "$(dirname "$0")/.." && pwd)"
++SCRIPT="$ROOT/ops/pr-merge.sh"
++TMP="$(mktemp -d)"
++trap 'rm -rf "$TMP"' EXIT
++
++bash -n "$SCRIPT" || { echo "pr-merge.test: синтаксис $SCRIPT"; exit 1; }
++
++FAKE_BIN="$TMP/bin"; mkdir -p "$FAKE_BIN"
++MERGE_LOG="$TMP/merge.log"
++
++# Стаб gh: сценарий задаётся через FAKE_CHECKS / FAKE_MERGEABLE / FAKE_THREADS.
++cat > "$FAKE_BIN/gh" <<'STUB'
++#!/usr/bin/env bash
++ARGS="$*"
++case "$ARGS" in
++  "repo view "*) echo '{"nameWithOwner":"o/r"}'; [[ "$ARGS" == *"-q"* ]] && echo "o/r"; exit 0 ;;
++esac
++if [[ "$ARGS" == "pr view --json number"* ]]; then echo "519"; exit 0; fi
++if [[ "$ARGS" == *"--json mergeable,mergeStateStatus"* ]]; then
++  echo "${FAKE_MERGEABLE:-MERGEABLE CLEAN}"; exit 0
++fi
++if [[ "$ARGS" == *"--json reviewDecision"* ]]; then echo "${FAKE_DECISION:-APPROVED}"; exit 0; fi
++if [[ "$ARGS" == "pr checks"* ]]; then
++  if [ "${FAKE_CHECKS:-pass}" = "pass" ]; then echo "Tests + build	pass	1m"; exit 0; fi
++  echo "Tests + build	fail	1m"; exit 1
++fi
++if [[ "$ARGS" == "api graphql"* ]]; then
++  if [ "${FAKE_THREADS:-none}" = "blocking" ]; then
++    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"body":"<!-- orakul-ai-review-inline -->\n**major**: RBAC"}]}}]}}}}}'
++  else
++    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
++  fi
++  exit 0
++fi
++if [[ "$ARGS" == "pr merge"* ]]; then echo "$ARGS" >> "$MERGE_LOG"; echo "merged"; exit 0; fi
++exit 0
++STUB
++chmod +x "$FAKE_BIN/gh"
++export MERGE_LOG
++
++PASS=0; FAIL=0
++run() { # run <описание> [VAR=val …] -- [аргументы pr-merge.sh]
++  CASE="$1"; shift
++  : > "$MERGE_LOG"
++  local envs=(); while [ "${1:-}" != "--" ] && [ $# -gt 0 ]; do envs+=("$1"); shift; done; shift || true
++  OUT="$(env PATH="$FAKE_BIN:$PATH" MERGE_LOG="$MERGE_LOG" ${envs[@]+"${envs[@]}"} bash "$SCRIPT" "$@" 2>&1)"
++  RC=$?
++}
++check() {
++  if [ "$2" = "$3" ]; then PASS=$((PASS+1)); printf '  ✓ %s: %s\n' "$CASE" "$1";
++  else FAIL=$((FAIL+1)); printf '  ✗ %s: %s\n    ожидали: %s\n    получили: %s\n--- вывод ---\n%s\n' "$CASE" "$1" "$2" "$3" "$OUT"; fi
++}
++merged() { tr -d '\n' < "$MERGE_LOG"; }
++
++echo "pr-merge: тесты"
++
++run 'гейт зелёный' -- 519
++check 'rc' 0 "$RC"
++check 'смержили merge-коммитом' 'pr merge 519 --merge' "$(merged)"
++
++run 'явный метод не перетирается' -- 519 --squash --delete-branch
++check 'rc' 0 "$RC"
++check 'флаги пользователя' 'pr merge 519 --squash --delete-branch' "$(merged)"
++
++run 'красный CI' FAKE_CHECKS=fail -- 519
++check 'rc' 1 "$RC"
++check 'merge не вызывался' '' "$(merged)"
++
++run 'висит blocking-тред' FAKE_THREADS=blocking -- 519
++check 'rc' 1 "$RC"
++check 'merge не вызывался' '' "$(merged)"
++
++run 'конфликт в PR' FAKE_MERGEABLE='CONFLICTING DIRTY' -- 519
++check 'rc' 1 "$RC"
++check 'merge не вызывался' '' "$(merged)"
++
++run 'человек запросил изменения' FAKE_DECISION=CHANGES_REQUESTED -- 519
++check 'rc' 1 "$RC"
++check 'merge не вызывался' '' "$(merged)"
++
++# --- хук Claude Code: сырой gh pr merge должен блокироваться (exit 2) ---
++HOOK="$ROOT/ops/hooks/deny-raw-pr-merge.sh"
++bash -n "$HOOK" || { echo "pr-merge.test: синтаксис $HOOK"; exit 1; }
++hook() { # hook <описание> <json> <ожидаемый rc>
++  CASE="$1"
++  OUT="$(printf '%s' "$2" | bash "$HOOK" 2>&1)"; RC=$?
++  check 'rc хука' "$3" "$RC"
++}
++hook 'хук: сырой merge'      '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 519 --squash"}}' 2
++hook 'хук: merge в цепочке'  '{"tool_name":"Bash","tool_input":{"command":"cd Orakul && gh pr merge 519"}}' 2
++hook 'хук: врапер разрешён'  '{"tool_name":"Bash","tool_input":{"command":"./ops/pr-merge.sh 519 --merge"}}' 0
++hook 'хук: чтение разрешено' '{"tool_name":"Bash","tool_input":{"command":"gh pr view 519"}}' 0
++hook 'хук: другой инструмент' '{"tool_name":"Read","tool_input":{"file_path":"gh pr merge"}}' 0
++hook 'хук: мусор на входе'   'not json' 0
++
++echo
++echo "pr-merge: $PASS ok, $FAIL fail"
++[ "$FAIL" -eq 0 ] || exit 1

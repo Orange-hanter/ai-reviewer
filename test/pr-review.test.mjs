@@ -12,7 +12,7 @@ import { writeFile, rm, readFile } from 'node:fs/promises';
 import { MARKERS, extractStickyFooterRaw } from '../lib/constants.mjs';
 
 const {
-  parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks,
+  parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks,
   extractJsonObject, filterFalsePositiveFindings, clusterFindings,
   hasMarker, publicErrorLabel, loadReviewConfig, readChangedFiles, normalizeConfidence,
   extractFileDiffSections, selectVerifierCandidates, applyVerifierVerdicts,
@@ -57,6 +57,33 @@ export const x = 1;`;   // arrow — да; голый const без () — нет
   assert.ok(!syms.includes('x'), 'короткие (<3) не берём');
 });
 
+test('extractChangedSymbols: export { a, b as c }', () => {
+  const syms = extractChangedSymbols('export { makeDataStore, helper as aliasHelper };');
+  assert.ok(syms.includes('makeDataStore'));
+  assert.ok(syms.includes('helper'));
+  assert.ok(!syms.includes('aliasHelper'), 'as-alias не подставляем — в графе обычно исходное имя');
+});
+
+test('extractChangedSymbols: одиночный export-clause без пробелов вокруг имени', () => {
+  for (const src of ['export { fooBar };', "export { fooBar } from './other.js';", 'export {\n  fooBar,\n};']) {
+    const syms = extractChangedSymbols(src);
+    assert.ok(syms.includes('fooBar'), `имя без пробелов для: ${JSON.stringify(src)}`);
+    assert.ok(
+      !syms.some((s) => s !== s.trim()),
+      `ни одного имени с пробелами для: ${JSON.stringify(src)} → ${JSON.stringify(syms)}`,
+    );
+  }
+});
+
+test('collectBlastSymbols: добор экспортов из полного файла, если hunk без export-строки', () => {
+  const changed = '+  return store.get(id);\n';
+  const contentMap = new Map([
+    ['app/server/store.ts', 'export function makeDataStore() { return {}; }\nexport const unused = 1;\n'],
+  ]);
+  const syms = collectBlastSymbols(changed, contentMap, 25);
+  assert.ok(syms.includes('makeDataStore'), 'export из файла попадает в blast даже без export в hunk');
+});
+
 test('Graphify: пустой blast-radius различает stale graph, неразрешимый символ и реальные зависимости', async () => {
   const calls = [];
   const cfg = {
@@ -73,6 +100,7 @@ test('Graphify: пустой blast-radius различает stale graph, нер
   const client = createGraphifyClient(cfg, {
     execFileP,
     readFile: async () => '# Graph Report\n- Built from commit: `12345678`\n',
+    access: async () => {},
   });
 
   const { blocks, metrics } = await client.buildBlastRadius(['unresolved', 'noDeps', 'usedElsewhere']);
@@ -86,6 +114,39 @@ test('Graphify: пустой blast-radius различает stale graph, нер
   assert.equal(metrics.skip_reasons.graph_stale, 1);
   assert.equal(metrics.skip_reason, 'mixed');
   assert.ok(calls.some(([bin]) => bin === 'git'), 'freshness сверяется с HEAD');
+});
+
+test('Graphify: отсутствует graph.json → graph_missing, без вызова affected', async () => {
+  const calls = [];
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'missing-graph.json', report: 'missing-report.md' },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const client = createGraphifyClient(cfg, {
+    execFileP: async (...args) => { calls.push(args); return { stdout: '' }; },
+    access: async () => { const err = new Error('ENOENT'); err.code = 'ENOENT'; throw err; },
+  });
+  const { blocks, metrics } = await client.buildBlastRadius(['makeDataStore']);
+  assert.equal(blocks.length, 0);
+  assert.equal(metrics.graph_status, 'missing');
+  assert.equal(metrics.skip_reasons.graph_missing, 1);
+  assert.equal(metrics.symbols_resolved, 0);
+  assert.equal(calls.length, 0, 'affected/git не вызываем без графа');
+});
+
+test('Graphify: нет символов в диффе → честный skip no_symbols_in_diff', async () => {
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md' },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const client = createGraphifyClient(cfg, {
+    execFileP: async () => ({ stdout: '' }),
+    readFile: async () => '# Graph Report\n- Built from commit: `abcdef12`\n',
+    access: async () => {},
+  });
+  const { metrics } = await client.buildBlastRadius([]);
+  assert.equal(metrics.skip_reasons.no_symbols_in_diff, 1);
+  assert.equal(metrics.symbols_total, 0);
 });
 
 test('extractJsonObject: чистый и в fence', () => {
@@ -582,10 +643,17 @@ test('buildSummary: Δ-блок показывает новые, закрыты�
   assert.match(md, /прошлый прогон `aaa1111`/);
   assert.match(md, /История прогонов/);
 
-  // Идентичность: отпечаток кода важнее координаты — находка, уехавшая на другую строку,
-  // не должна считаться «новой».
-  assert.equal(findingIdentity({ fp: 'abc', file: 'a.ts', line: 1 }), findingIdentity({ fp: 'abc', file: 'a.ts', line: 40 }));
-  const d = diffFindings([{ fp: 'x' }], [{ fp: 'x' }]);
+  // Идентичность: отпечаток + формулировка; координата вторична.
+  assert.equal(
+    findingIdentity({ fp: 'abc', title: 't', file: 'a.ts', line: 1 }),
+    findingIdentity({ fp: 'abc', title: 't', file: 'a.ts', line: 40 }),
+  );
+  assert.notEqual(
+    findingIdentity({ fp: 'abc', title: 'одна', file: 'a.ts', line: 1 }),
+    findingIdentity({ fp: 'abc', title: 'другая', file: 'a.ts', line: 1 }),
+    'одна строка, разные претензии — разные находки в Δ',
+  );
+  const d = diffFindings([{ fp: 'x', title: 't' }], [{ fp: 'x', title: 't' }]);
   assert.deepEqual([d.added.length, d.gone.length, d.kept.length], [0, 0, 1]);
 });
 
@@ -719,4 +787,165 @@ test('migrate-feedback: канонизированный лог — no-op (ин�
   assert.ok(Array.isArray(once.entries) && once.entries.length > 0, 'migrateFeedbackText должен возвращать разобранные записи — иначе canary ниже проверяет пустоту');
   for (const entry of once.entries) walk(entry, '');
   assert.deepEqual([...new Set(arrayPaths)], [], 'в схеме появились массивы — `jq -cS` их порядок не нормализует, канонизацию нужно доучить в migrate-feedback');
+});
+
+
+test('идентичность: две находки на одной строке — разные в списках Δ, одна точка в метрике', async () => {
+  const { diffFindings, findingIdentity, findingPointDelta, findingsStability } =
+    await import('../lib/report.mjs');
+  const { findingFingerprint } = await import('../lib/findings.mjs');
+  const { files } = parseDiff(SAMPLE_DIFF);
+  const fp = findingFingerprint(files.get('foo.ts'), 2);
+  const a = { file: 'foo.ts', line: 2, severity: 'major', title: 'SQL-инъекция в запросе', fp };
+  const b = { file: 'foo.ts', line: 2, severity: 'minor', title: 'нет обработки ошибки', fp };
+
+  assert.notEqual(findingIdentity(a), findingIdentity(b), 'одна строка, но претензии разные');
+
+  const d = diffFindings([a, b], [a]);
+  assert.deepEqual(
+    [d.added.length, d.kept.length, d.gone.length], [1, 1, 0],
+    'вторая находка на уже помеченной строке обязана попасть в «новые»',
+  );
+  assert.equal(d.added[0].title, b.title);
+
+  const points = findingPointDelta([a, b], [a]);
+  assert.deepEqual(points, { kept: 1, added: 0, gone: 0, current: 1, prior: 1 });
+  assert.equal(findingsStability([a, b], [a]), 1);
+});
+
+test('findingsStability: пересечение к объединению; без базы сравнения и на двух пустых наборах — null', async () => {
+  const { findingsStability } = await import('../lib/report.mjs');
+  const mk = (n, tag = 'f') => Array.from({ length: n }, (_, i) => ({ fp: `${tag}${i}` }));
+  const common = mk(5, 'c');
+  assert.equal(findingsStability(mk(14), mk(14)), 1);
+  assert.equal(
+    findingsStability([...common, ...mk(9, 'a')], [...common, ...mk(9, 'b')]), 0.22,
+  );
+  assert.equal(findingsStability(mk(4, 'a'), mk(5, 'b')), 0);
+  assert.equal(findingsStability([...mk(1, 'c'), ...mk(2, 'a')], mk(1, 'c')), 0.33);
+  assert.equal(findingsStability(mk(3), [], { priorKnown: false }), null);
+  assert.equal(findingsStability([], []), null);
+  assert.equal(findingsStability([], mk(4)), 0);
+  assert.equal(findingsStability([{ fp: 'a' }, { fp: 'b' }], [{ fp: 'a' }, { fp: 'c' }]), 0.33);
+});
+
+test('findingsStability: потеряли почти всё → стабильность низкая, а не идеальная', async () => {
+  const { findingsStability } = await import('../lib/report.mjs');
+  const mk = (n, tag = 'f') => Array.from({ length: n }, (_, i) => ({ fp: `${tag}${i}` }));
+  const survivor = mk(1, 'c');
+  const value = findingsStability(survivor, [...survivor, ...mk(13, 'g')]);
+  assert.equal(value, 0.07);
+  assert.ok(value < 0.5);
+});
+
+test('buildSummary: стабильность в Δ-блоке, в футере прогона и колонкой в истории', async () => {
+  const { findingFingerprint } = await import('../lib/findings.mjs');
+  const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
+  const { files } = parseDiff(SAMPLE_DIFF);
+  const stay = { file: 'foo.ts', line: 1, severity: 'major', title: 'осталась', body: '', model: 'm1' };
+  const fresh = { file: 'foo.ts', line: 2, severity: 'minor', title: 'новая', body: '', model: 'm1' };
+  const priorFindings = [
+    { file: 'foo.ts', line: 1, severity: 'major', title: 'осталась', fp: findingFingerprint(files.get('foo.ts'), 1) },
+    { file: 'foo.ts', line: 9, severity: 'minor', title: 'ушедшая', fp: 'gone12345678' },
+  ];
+  const { md, delta } = buildSummary(cfg, {
+    reviews: [], ok: [], allFindings: [stay, fresh], outside: [stay, fresh], blastBlocks: [], files,
+    pr: { number: 1, title: 't' }, headSha: 'bbb2222', note: '', blockerClusters: [],
+    priorFindings, priorSha: 'aaa1111',
+    priorRuns: [{ sha: 'aaa1111', counts: { critical: 0, major: 1, minor: 1, nit: 0 }, added: 2, gone: 0 }],
+  });
+
+  assert.equal(delta.stability, 0.33);
+  assert.equal(delta.kept, 1);
+  assert.match(md, /1 без изменений, стабильность 33%/);
+
+  const data = JSON.parse(extractStickyFooterRaw(md).trim());
+  assert.equal(data.runs.at(-1).stability, 0.33);
+
+  const history = md.split('📈 История прогонов')[1];
+  assert.ok(history.includes('| Δ | стаб. |'));
+  assert.match(history, /\| `aaa1111` \|.*\| \+2 \/ −0 \| — \|/);
+});
+
+test('агрегат вердикта: не-булево значение blocked не считается блокировкой', () => {
+  const rows = [
+    { type: 'verdict', sha: 'aaa1111', blocked: true },
+    { type: 'verdict', sha: 'aaa1111', blocked: 'false' },
+    { type: 'verdict', sha: 'aaa1111', blocked: 1 },
+  ];
+  const agg = aggregateMetrics(rows);
+  assert.equal(agg.verdict.blocked, 1);
+  assert.equal(agg.verdict.events, 3);
+});
+
+test('экспорт несёт агрегат воспроизводимости, а не только вердикт прогона', async () => {
+  const { buildReviewJson } = await import('../lib/export.mjs');
+  const json = buildReviewJson({
+    pr: { number: 7, title: 't' }, headSha: 'bbb2222', reviewMode: 'moa',
+    wouldBlock: true, verdict: { sha: 'bbb2222', blocked: true, reproducibility: { total: 4, blocked: 2, flaky: true } },
+    counts: {}, total: 0, findings: [], blockers: [], reviews: [],
+  });
+  assert.equal(json.verdict.reproducibility.flaky, true);
+  assert.equal(json.verdict.reproducibility.blocked, 2);
+  const without = buildReviewJson({
+    pr: { number: 7, title: 't' }, headSha: 'bbb2222', reviewMode: 'moa',
+    wouldBlock: false, counts: {}, total: 0, findings: [], blockers: [], reviews: [],
+  });
+  assert.equal(without.verdict, undefined);
+});
+
+test('buildSummary: факт блокировки — в записи прогона и колонкой «гейт» в истории', () => {
+  const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
+  const blocker = { file: 'x.ts', line: 1, severity: 'critical', title: 'блокер', body: '', model: 'm1' };
+  const priorRuns = [
+    { sha: 'aaa1111', counts: {}, added: 0, gone: 0, blocked: true },
+    { sha: 'aaa1111', counts: {}, added: 0, gone: 0, blocked: false },
+    { sha: 'aaa1111', counts: {}, added: 0, gone: 0 },
+  ];
+  const { md, verdict } = buildSummary(cfg, {
+    reviews: [], ok: [], allFindings: [blocker], outside: [blocker], blastBlocks: [], files: new Map(),
+    pr: { number: 1, title: 't' }, headSha: 'bbb2222', note: '', blockerClusters: [[blocker]], priorRuns,
+  });
+
+  assert.deepEqual(verdict, { sha: 'bbb2222', blocked: true, reproducibility: null });
+  const data = JSON.parse(extractStickyFooterRaw(md).trim());
+  assert.equal(data.runs.at(-1).blocked, true);
+
+  const history = md.split('📈 История прогонов')[1];
+  assert.ok(history.includes('| sha | гейт |'));
+  assert.match(history, /\| `aaa1111` \| ⛔ \|/);
+  assert.match(history, /\| `aaa1111` \| ✅ \|/);
+  assert.match(history, /\| `aaa1111` \| — \|/);
+
+  const { md: clean } = buildSummary(cfg, {
+    reviews: [], ok: [], allFindings: [], outside: [], blastBlocks: [], files: new Map(),
+    pr: { number: 1, title: 't' }, headSha: 'ccc3333', note: '', blockerClusters: [],
+  });
+  assert.equal(JSON.parse(extractStickyFooterRaw(clean).trim()).runs.at(-1).blocked, false);
+});
+
+test('buildSummary: воспроизводимость вердикта считается по одному sha вместе с текущим прогоном', () => {
+  const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
+  const priorRuns = [
+    { sha: 'bbb2222', counts: {}, added: 0, gone: 0, blocked: true },
+    { sha: 'bbb2222', counts: {}, added: 0, gone: 0, blocked: false },
+    { sha: 'bbb2222', counts: {}, added: 0, gone: 0, blocked: true },
+    { sha: 'aaa1111', counts: {}, added: 0, gone: 0, blocked: false },
+  ];
+  const { md } = buildSummary(cfg, {
+    reviews: [], ok: [], allFindings: [], outside: [], blastBlocks: [], files: new Map(),
+    pr: { number: 1, title: 't' }, headSha: 'bbb2222', note: '', blockerClusters: [], priorRuns,
+  });
+  assert.ok(
+    md.includes('⛔ **Вердикт на `bbb2222` невоспроизводим: 2 из 4 прогонов на этом коммите блокировали merge.**'),
+    md,
+  );
+  assert.ok(md.includes('📈 История прогонов · ⛔ вердикт нестабилен (2 из 4 на этом коммите)'));
+
+  const { md: stable } = buildSummary(cfg, {
+    reviews: [], ok: [], allFindings: [], outside: [], blastBlocks: [], files: new Map(),
+    pr: { number: 1, title: 't' }, headSha: 'ddd4444', note: '', blockerClusters: [],
+    priorRuns: [{ sha: 'ddd4444', counts: {}, added: 0, gone: 0, blocked: false }],
+  });
+  assert.ok(stable.includes('✅ Вердикт на `ddd4444` воспроизводим: ни один из 2 прогонов на этом коммите.'), stable);
 });

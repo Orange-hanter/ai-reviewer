@@ -1,6 +1,24 @@
 # Changelog
 
+## 0.2.1 — blast-radius sync + portable gold
+
+Синхронизация с живым движком Orakul (коммиты после выноса v0.2.0) и расширение gold-набора.
+
+### Добавлено
+
+- `collectBlastSymbols` — добор экспортов из полного текста файла, если hunk без `export`
+- Graphify: `graph_missing` / `no_symbols_in_diff` без ложных вызовов `affected`
+- Стабильность находок (Jaccard по точкам кода) и воспроизводимость вердикта в sticky / JSONL
+- Portable gold: clean-controls, absence-claim FP, router-light, regen FP (8 кейсов)
+- [docs/backlog.md](docs/backlog.md) — рыночный бэклог как канон приоритетов
+
+### Изменено
+
+- Промпт aggregator/verifier: обязаны опираться на blast-radius callers, не выдумывать зависимости
+- Pipeline: сначала `readChangedFiles`, затем blast; события `stability` / `verdict` в observability
+
 ## 0.2.0 — вынос движка в самостоятельное решение
+
 
 Первый релиз, в котором пакет не привязан к конкретному репозиторию. Движок синхронизирован
 с рабочей версией потребителя (август 2026) и расцеплен с ней через профиль проекта.

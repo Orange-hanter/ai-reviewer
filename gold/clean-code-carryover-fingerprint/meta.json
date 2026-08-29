@@ -1,0 +1,18 @@
+{
+  "id": "clean-code-carryover-fingerprint",
+  "type": "clean",
+  "description": "PR #531 (carry-over по отпечатку строки кода вместо позиции ±3) — clean control: смерженный код-дифф на 11 файлов, в футере sticky 0 critical/major",
+  "source": {
+    "pr": 531,
+    "diff": "gh pr diff 531",
+    "evidence": [
+      "sticky PR #531: 6 находок (5 minor, 1 nit), 0 critical/major — блокеров не было",
+      "в комментариях PR — ручной разбор каждого прогона: «Прогон на b1ccdc87 (🟡4 🔵3, approve, блокеров нет) — исправлено в 34e7479e»",
+      "PR смержен 2026-08-10, то есть уже после жёсткого гейта #522: merge физически идёт только через ops/pr-merge.sh, который выходит ≠0 на красном ops/pr-merge-ready.sh"
+    ]
+  },
+  "expect": {
+    "wouldBlock": false,
+    "note": "Clean control меряет precision: любой блокер здесь — ложный по построению разметки. Это НЕ «дифф без замечаний»: minor/nit ожидаемы и разметкой не запрещены."
+  }
+}

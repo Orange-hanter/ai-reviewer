@@ -1,0 +1,320 @@
+diff --git a/ops/ai-review-status.test.mjs b/ops/ai-review-status.test.mjs
+index 6689cc24..5438bbcd 100644
+--- a/ops/ai-review-status.test.mjs
++++ b/ops/ai-review-status.test.mjs
+@@ -135,6 +135,22 @@ test('detectAiTool: цитата маркера в человеческом ко
+   );
+ });
+ 
++// Живой случай PR #531: ревью процитировало ПРИМЕР маркера прямо в тексте находки
++// (`<!-- orakul-ai-review-data:{"findings":[]} -->`), разбор «до первого вхождения» брал этот
++// пример, успешно парсил пустой объект — и отчёт показывал clean при шести живых находках.
++test('parseOrakulStickyData: пример маркера в тексте находки не подменяет футер', () => {
++  const findings = [{ file: 'a.ts', line: 1, severity: 'major', title: 'настоящая находка' }];
++  const body = [
++    'x',
++    'В находке процитирован пример: `<!-- orakul-ai-review-data:{"findings":[]} -->` — это текст, не футер.',
++    `<!-- orakul-ai-review-data:${JSON.stringify({ sha: 'deadbee', findings })} -->`,
++  ].join('\n');
++  const data = parseOrakulStickyData(body);
++  assert.equal(data.findings.length, 1, 'прочитан последний блок — настоящий футер');
++  assert.equal(data.sha, 'deadbee');
++  assert.equal(data.findings[0].title, 'настоящая находка');
++});
++
+ test('toolFromComment: blocking major', () => {
+   const findings = [
+     { file: 'a.ts', line: 2, severity: 'major', title: 'leak' },
+diff --git a/ops/ai-review-status/lib/markers.mjs b/ops/ai-review-status/lib/markers.mjs
+index 97e7bfde..4e9f850f 100644
+--- a/ops/ai-review-status/lib/markers.mjs
++++ b/ops/ai-review-status/lib/markers.mjs
+@@ -4,12 +4,46 @@ export const ORAKUL = {
+   review: '<!-- orakul-ai-review -->',
+   inline: '<!-- orakul-ai-review-inline -->',
+   dataRe: /<!--\s*orakul-ai-review-data:([\s\S]*?)-->/,
+-  // Тот же маркер, но до ПОСЛЕДНЕГО `-->` В КОНЦЕ ТЕЛА: запасной разбор, когда находка
+-  // процитировала закрывающую последовательность и оборвала ленивый вариант. Якорь на конец
+-  // не даёт захватить чужой HTML-комментарий, оказавшийся после футера.
+-  dataReGreedy: /<!--\s*orakul-ai-review-data:([\s\S]*)-->\s*$/,
+ };
+ 
++/** Ключ машинного блока — одно место на модуль; из него строятся все регексы. */
++const DATA_KEY = 'orakul-ai-review-data:';
++
++/**
++ * Тело машинного футера sticky (сырой JSON-текст) или null.
++ *
++ * Берём ПОСЛЕДНЕЕ вхождение маркера, а не первое: находка может процитировать пример
++ * маркера в своём тексте — так и случилось на PR #531, где ревью привело в теле замечания
++ * `<!-- orakul-ai-review-data:{"findings":[]} -->`. Разбор «до первого» хватал этот пример,
++ * успешно парсил пустой объект, и отчёт выглядел чистым при шести живых находках.
++ *
++ * Закрытие ищем в порядке убывания надёжности: `-->` в самом конце тела (наш футер пишется
++ * последним блоком) → последний `-->`, после которого хвост парсится как JSON → просто
++ * последний. Последний вариант оставляет разбор ремонту JSON у вызывающего.
++ */
++export function extractStickyFooterRaw(body) {
++  const text = typeof body === 'string' ? body : '';
++  const open = new RegExp(`<!--\\s*${DATA_KEY}`, 'g');
++  let start = -1;
++  for (let m = open.exec(text); m; m = open.exec(text)) start = m.index + m[0].length;
++  if (start < 0) return null;
++  const rest = text.slice(start);
++  const anchored = /-->\s*$/.exec(rest);
++  if (anchored) return rest.slice(0, anchored.index);
++  // После футера что-то дописали (ручная правка комментария): перебираем закрытия с конца и
++  // берём первое, дающее валидный JSON, — иначе обрезали бы наш блок на чужой стрелке.
++  const positions = [];
++  for (let i = rest.indexOf('-->'); i >= 0; i = rest.indexOf('-->', i + 1)) positions.push(i);
++  for (const i of positions.reverse()) {
++    const candidate = rest.slice(0, i);
++    try {
++      JSON.parse(candidate.trim());
++      return candidate;
++    } catch { /* пробуем более раннее закрытие */ }
++  }
++  return positions.length ? rest.slice(0, Math.max(...positions)) : rest;
++}
++
+ // A severity belongs to an inline-review heading, not arbitrary prose in the body.
+ export const SEV_RE = /(?:^|\n)\s*(?:[^\w\n]*\s+)?\*\*(critical|major|minor|nit)\b/i;
+ export const SEV_FINDING_RE = /\*\*(critical|major|minor|nit)(?:\s*\((.+)\))?:\s*([^*]+)\*\*/g;
+diff --git a/ops/ai-review-status/lib/parse.mjs b/ops/ai-review-status/lib/parse.mjs
+index 72b4cd36..b50f5eb1 100644
+--- a/ops/ai-review-status/lib/parse.mjs
++++ b/ops/ai-review-status/lib/parse.mjs
+@@ -1,6 +1,6 @@
+ /** Parse sticky footers, findings, and severity from review comment bodies. */
+ 
+-import { ORAKUL, SEV_RE, SEV_FINDING_RE, detectAiTool, isOrakulInline } from './markers.mjs';
++import { ORAKUL, extractStickyFooterRaw, SEV_RE, SEV_FINDING_RE, detectAiTool, isOrakulInline } from './markers.mjs';
+ 
+ const EMPTY_COUNTS = () => ({ critical: 0, major: 0, minor: 0, nit: 0, total: 0 });
+ const SEVERITY_RANK = { critical: 4, major: 3, minor: 2, nit: 1 };
+@@ -17,21 +17,10 @@ export function countBySeverity(findings) {
+ 
+ /** Extract machine footer from Orakul sticky; returns { sha, findings, reasoning } or null. */
+ export function parseOrakulStickyData(body) {
+-  if (!body) return null;
+-  const m = ORAKUL.dataRe.exec(body);
+-  if (!m) return null;
++  const raw = extractStickyFooterRaw(body);
++  if (raw === null) return null;
+   try {
+-    // Жадный разбор до ПОСЛЕДНЕГО `-->`, если ленивый оборвался на `-->` внутри строки
+-    // находки (она могла процитировать маркер футера): футер — последний блок тела.
+-    // Паттерн берём из markers.mjs — маркер описан там один раз.
+-    let data;
+-    try {
+-      data = JSON.parse(m[1].trim());
+-    } catch (lazyErr) {
+-      const greedy = ORAKUL.dataReGreedy.exec(body);
+-      if (!greedy) throw lazyErr;
+-      data = JSON.parse(greedy[1].trim());
+-    }
++    const data = JSON.parse(raw.trim());
+     return {
+       sha: data.sha || '',
+       findings: Array.isArray(data.findings) ? data.findings : [],
+@@ -40,7 +29,6 @@ export function parseOrakulStickyData(body) {
+   } catch {
+     // Truncated footer — best-effort salvage of findings array.
+     try {
+-      const raw = m[1];
+       const findingsMatch = /"findings"\s*:\s*(\[[\s\S]*)/.exec(raw);
+       if (!findingsMatch) return { sha: '', findings: [], reasoning: [], truncated: true };
+       let arr = findingsMatch[1];
+@@ -48,23 +36,21 @@ export function parseOrakulStickyData(body) {
+       let depth = 0;
+       let quoted = false;
+       let escaped = false;
+-      let close = -1;
+-      for (let i = 0; i < arr.length; i += 1) {
+-        const char = arr[i];
+-        if (quoted) {
+-          if (escaped) escaped = false;
+-          else if (char === '\\') escaped = true;
+-          else if (char === '"') quoted = false;
+-          continue;
+-        }
+-        if (char === '"') quoted = true;
+-        else if (char === '[') depth += 1;
+-        else if (char === ']' && --depth === 0) { close = i; break; }
++      let cut = -1;
++      for (let i = 0; i < arr.length; i++) {
++        const ch = arr[i];
++        if (escaped) { escaped = false; continue; }
++        if (ch === '\\') { escaped = true; continue; }
++        if (ch === '"') { quoted = !quoted; continue; }
++        if (quoted) continue;
++        if (ch === '[') depth++;
++        else if (ch === ']') { depth--; if (depth === 0) { cut = i; break; } }
+       }
+-      if (close >= 0) arr = arr.slice(0, close + 1);
++      if (cut > 0) arr = arr.slice(0, cut + 1);
+       const findings = JSON.parse(arr);
++      const shaMatch = /"sha"\s*:\s*"([^"]*)"/.exec(raw);
+       return {
+-        sha: /"sha"\s*:\s*"([^"]+)"/.exec(raw)?.[1] || '',
++        sha: shaMatch ? shaMatch[1] : '',
+         findings: Array.isArray(findings) ? findings : [],
+         reasoning: [],
+         truncated: true,
+diff --git a/ops/pr-review.test.mjs b/ops/pr-review.test.mjs
+index aa171e4a..9446e289 100644
+--- a/ops/pr-review.test.mjs
++++ b/ops/pr-review.test.mjs
+@@ -8,7 +8,7 @@ process.env.OLLAMA_MODELS = 'm1,m2';
+ import { test } from 'node:test';
+ import assert from 'node:assert/strict';
+ import { writeFile, rm, readFile } from 'node:fs/promises';
+-import { MARKERS } from './pr-review/lib/constants.mjs';
++import { MARKERS, extractStickyFooterRaw } from './pr-review/lib/constants.mjs';
+ 
+ const {
+   parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks,
+@@ -486,11 +486,11 @@ test('carry-over: починенная находка снимается, нет
+     reviews: [], ok: [], allFindings: findings, outside: findings, blastBlocks: [], files: runOne.files,
+     pr: { number: 1, title: 't' }, headSha: 'abcdef1', note: '', blockerClusters: [],
+   });
+-  // Тот же паттерн, что в движке (без дубля литерала): ленивый вариант обрывается на `-->`
+-  // внутри текста находки — ровно тот баг, что чинился в этом PR.
+-  const footerMatch = MARKERS.dataReGreedy.exec(md);
+-  assert.ok(footerMatch, 'в sticky есть скрытый блок orakul-ai-review-data — без него carry-over нечем питать');
+-  const priors = JSON.parse(footerMatch[1].trim()).findings;
++  // Тот же экстрактор, что в движке (без дубля литерала): он берёт ПОСЛЕДНИЙ блок, а не
++  // первый — находка могла процитировать пример маркера в своём тексте.
++  const footerRaw = extractStickyFooterRaw(md);
++  assert.ok(footerRaw, 'в sticky есть скрытый блок orakul-ai-review-data — без него carry-off нечем питать');
++  const priors = JSON.parse(footerRaw.trim()).findings;
+   assert.ok(priors.every((f) => f.fp), 'в футере у каждой находки есть отпечаток кода');
+ 
+   // Прогон 2: строку 2 починили (parseInt получил основание), строка 3 не тронута,
+@@ -536,6 +536,26 @@ test('sticky footer: `-->` внутри находки не рвёт машин
+   assert.equal(data.findings[0].title, 'regex /data:([\\s\\S]*?) -->/ хрупок', 'текст восстановлен без потерь');
+ });
+ 
++test('extractStickyFooterRaw: берётся последний блок, а не процитированный пример', async () => {
++  const { extractStickyFooterRaw } = await import('./pr-review/lib/constants.mjs');
++  const real = '{"sha":"abc1234","findings":[{"file":"a.ts"}]}';
++  const body = [
++    'пример в тексте находки: <!-- orakul-ai-review-data:{"findings":[]} -->',
++    `<!-- orakul-ai-review-data:${real} -->`,
++  ].join('\n');
++  assert.equal(JSON.parse(extractStickyFooterRaw(body).trim()).sha, 'abc1234');
++  assert.equal(extractStickyFooterRaw('без маркера'), null);
++
++  // После футера дописали текст со стрелкой (ручная правка комментария): блок всё равно
++  // извлекается целиком, а не режется по чужой `-->`.
++  const withTail = `${body}\n\nдописано вручную: смотри стрелку --> сюда`;
++  assert.equal(JSON.parse(extractStickyFooterRaw(withTail).trim()).sha, 'abc1234');
++
++  // Обрезанный футер (лимит GitHub): закрытия нет — отдаём хвост, ремонт JSON у вызывающего.
++  const cut = '<!-- orakul-ai-review-data:{"sha":"abc1234","findings":[{"file":"a.';
++  assert.match(extractStickyFooterRaw(cut), /^\{"sha":"abc1234"/);
++});
++
+ test('missing confidence → 0.5: блок без явной уверенности невозможен (canvas P1)', () => {
+   assert.equal(normalizeConfidence(undefined), 0.5);
+   assert.equal(normalizeConfidence(null), 0.5);
+diff --git a/ops/pr-review/lib/constants.mjs b/ops/pr-review/lib/constants.mjs
+index b0e05476..78994e14 100644
+--- a/ops/pr-review/lib/constants.mjs
++++ b/ops/pr-review/lib/constants.mjs
+@@ -38,13 +38,46 @@ export const MARKERS = {
+   review: '<!-- orakul-ai-review -->',
+   inline: '<!-- orakul-ai-review-inline -->',
+   dataRe: /<!--\s*orakul-ai-review-data:([\s\S]*?)-->/,
+-  // До ПОСЛЕДНЕГО `-->` В КОНЦЕ ТЕЛА: запасной разбор для sticky, написанных до экранирования
+-  // маркеров, где находка процитировала закрывающую последовательность и оборвала ленивый
+-  // вариант. Якорь на конец обязателен: без него жадный захват проглотил бы чужой
+-  // HTML-комментарий, если он окажется после футера.
+-  dataReGreedy: /<!--\s*orakul-ai-review-data:([\s\S]*)-->\s*$/,
+ };
+ 
++/** Ключ машинного блока — одно место на модуль; из него строятся все регексы. */
++const DATA_KEY = 'orakul-ai-review-data:';
++
++/**
++ * Тело машинного футера sticky (сырой JSON-текст) или null.
++ *
++ * Берём ПОСЛЕДНЕЕ вхождение маркера, а не первое: находка может процитировать пример
++ * маркера в своём тексте — так и случилось на PR #531, где ревью привело в теле замечания
++ * `<!-- orakul-ai-review-data:{"findings":[]} -->`. Разбор «до первого» хватал этот пример,
++ * успешно парсил пустой объект, и отчёт выглядел чистым при шести живых находках.
++ *
++ * Закрытие ищем в порядке убывания надёжности: `-->` в самом конце тела (наш футер пишется
++ * последним блоком) → последний `-->`, после которого хвост парсится как JSON → просто
++ * последний. Последний вариант оставляет разбор ремонту JSON у вызывающего.
++ */
++export function extractStickyFooterRaw(body) {
++  const text = typeof body === 'string' ? body : '';
++  const open = new RegExp(`<!--\\s*${DATA_KEY}`, 'g');
++  let start = -1;
++  for (let m = open.exec(text); m; m = open.exec(text)) start = m.index + m[0].length;
++  if (start < 0) return null;
++  const rest = text.slice(start);
++  const anchored = /-->\s*$/.exec(rest);
++  if (anchored) return rest.slice(0, anchored.index);
++  // После футера что-то дописали (ручная правка комментария): перебираем закрытия с конца и
++  // берём первое, дающее валидный JSON, — иначе обрезали бы наш блок на чужой стрелке.
++  const positions = [];
++  for (let i = rest.indexOf('-->'); i >= 0; i = rest.indexOf('-->', i + 1)) positions.push(i);
++  for (const i of positions.reverse()) {
++    const candidate = rest.slice(0, i);
++    try {
++      JSON.parse(candidate.trim());
++      return candidate;
++    } catch { /* пробуем более раннее закрытие */ }
++  }
++  return positions.length ? rest.slice(0, Math.max(...positions)) : rest;
++}
++
+ /**
+  * Наш комментарий — маркер в НАЧАЛЕ body (все наши посты начинаются с маркера).
+  * includes() нельзя: процитированный маркер в чужом комментарии сделал бы его «нашим»
+diff --git a/ops/pr-review/lib/github.mjs b/ops/pr-review/lib/github.mjs
+index 843b543a..6c3ca654 100644
+--- a/ops/pr-review/lib/github.mjs
++++ b/ops/pr-review/lib/github.mjs
+@@ -1,5 +1,5 @@
+ import { sleep, isTransient, backoffMs } from './util.mjs';
+-import { MARKERS, hasMarker } from './constants.mjs';
++import { MARKERS, hasMarker, extractStickyFooterRaw } from './constants.mjs';
+ import { extractJsonObject } from './json.mjs';
+ 
+ export function createGithubClient(cfg, log) {
+@@ -80,23 +80,18 @@ export function createGithubClient(cfg, log) {
+     try {
+       const comments = await ghList(`/repos/${repo}/issues/${prNumber}/comments?per_page=100`);
+       const mine = [...comments].reverse().find((c) => hasMarker(c.body, MARKERS.review));
+-      const m = mine && MARKERS.dataRe.exec(mine.body);
+-      if (!m) return [];
+-      // Старые sticky (до экранирования маркеров) могли содержать `-->` внутри строки
+-      // находки — ленивый dataRe обрезал футер на ней. Жадный вариант берёт блок целиком,
+-      // и в ремонт JSON тоже уходит он: чинить обрезанный кусок бессмысленно.
+-      const raw = MARKERS.dataReGreedy.exec(mine.body)?.[1] ?? m[1];
++      // Берём ПОСЛЕДНЕЕ вхождение маркера: находка могла процитировать его пример в своём
++      // тексте, и разбор «до первого» вернул бы чужой JSON (случай PR #531 — отчёт выглядел
++      // пустым при шести находках).
++      const raw = mine && extractStickyFooterRaw(mine.body);
++      if (raw == null) return [];
+       let data;
+       try {
+-        data = JSON.parse(m[1].trim());
++        data = JSON.parse(raw.trim());
+       } catch {
+-        try {
+-          data = JSON.parse(raw.trim());
+-        } catch {
+-          // Footer мог быть обрезан под лимит GitHub — пробуем ремонт JSON (P2-12),
+-          // иначе prior findings молча теряются.
+-          data = extractJsonObject(raw, { onRepaired: () => {} });
+-        }
++        // Footer мог быть обрезан под лимит GitHub — пробуем ремонт JSON (P2-12),
++        // иначе prior findings молча теряются.
++        data = extractJsonObject(raw, { onRepaired: () => {} });
+       }
+       return Array.isArray(data.findings) ? data.findings.slice(0, 40) : [];
+     } catch { return []; }

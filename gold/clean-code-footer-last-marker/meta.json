@@ -1,0 +1,17 @@
+{
+  "id": "clean-code-footer-last-marker",
+  "type": "clean",
+  "description": "PR #532 (машинный футер разбирается по последнему блоку, маркер экранируется при записи) — clean control: смерженный код-дифф на 6 файлов, в футере sticky 0 critical/major",
+  "source": {
+    "pr": 532,
+    "diff": "gh pr diff 532",
+    "evidence": [
+      "sticky PR #532: 9 находок (5 minor, 4 nit), 0 critical/major — блокеров не было",
+      "PR смержен 2026-08-08 в цепочке починки движка; выводы разобраны в docs/08-technical/42-ai-review-agents-system-audit-2026-07.md §0.1 (строка «Хрупкое чтение машинного футера … #531, #532»)"
+    ]
+  },
+  "expect": {
+    "wouldBlock": false,
+    "note": "Второй clean control. Отдельно интересен тем, что sticky этого PR содержит 10 вхождений маркера orakul-ai-review-data (находки цитируют маркер в тексте) — если раннер когда-нибудь начнёт читать футер наивно, кейс это покажет."
+  }
+}

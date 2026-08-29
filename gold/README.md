@@ -26,26 +26,27 @@ npx pr-review-gold --case <id>     # один кейс
 Env пайплайна переопределяется как обычно (`MOA_AGGREGATOR`, `REVIEW_VERIFIER_MODEL`, …) —
 это же протокол A/B моделей (см. [docs/model-tuning.md](../docs/model-tuning.md)).
 
-## Текущие seed-кейсы (2026-07-18)
+## Переносимые кейсы (v0.2.1)
 
-| id | Что проверяет | Разметка |
-|----|---------------|----------|
-| `tp-real-bugs-unescape` | recall: реальные major (unescape C-quoting) среди FP-шума → блок | wouldBlock=true, title ~«escape» |
-| `fp-noise-no-real-blockers` | precision: все major — подтверждённые вручную FP → без блока | wouldBlock=false |
+| id | Тип | Что проверяет |
+|----|-----|---------------|
+| `tp-real-bugs-unescape` | tp | recall: реальные major (unescape) среди FP-шума → блок |
+| `fp-noise-no-real-blockers` | fp | precision: все major — подтверждённые FP → без блока |
+| `clean-code-carryover-fingerprint` | clean | precision: смерженный PR без critical/major |
+| `clean-code-footer-last-marker` | clean | футер по последнему маркеру; цитаты маркера в тексте |
+| `fp-absence-consumer-out-of-chunk` | fp | absence-claim при consumer в другом чанке |
+| `fp-absence-doc-claims-not-in-diff` | fp | «фиксов нет в diff», когда они в workflow-чанке |
+| `fp-regen-double-changelog-bump` | fp | ложный major про «двойной бамп changelog» |
+| `router-light-conflict-markers-escape` | router | light-маршрут на docs с conflict-markers |
+
+Доменные кейсы Orakul (supplier e2e, rbac gate, IDOR push, …) живут у потребителя —
+в пакет не входят.
 
 ## Как добавить кейс
 
-1. Взять PR, где вердикт известен вручную (после разбора TP/FP): `gh pr diff <N> > diff.patch`
-   или `git diff base..head > diff.patch`.
+1. Взять PR, где вердикт известен вручную: `gh pr diff <N> > diff.patch`.
 2. `meta.json` с ожиданием и ссылкой на ручной разбор (note).
-3. Прогнать раннер — расхождение = либо регресс пайплайна, либо неверная разметка (обсудить).
+3. Прогнать раннер — расхождение = регресс или неверная разметка.
 
-Кейс, падающий на текущем конфиге — НЕ удалять: это сигнал, а не мусор (фиксируем в
-журнал FP репозитория-потребителя).
-
-## Roadmap
-
-- Nightly/weekly workflow с отдельным бюджетом (gold не должен гейтить PR).
-- Расширение до 20–30 кейсов: исторические FP из `ai-review-false-positives.md`,
-  clean controls (PR без проблем → 0 находок).
-- Целевые SLO: blocker precision ≥90%, critical/major recall ≥80% (бэклог #3).
+Кейс, падающий на текущем конфиге — НЕ удалять: это сигнал (фиксируем в журнал FP
+репозитория-потребителя).

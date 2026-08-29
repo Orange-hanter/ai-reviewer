@@ -1,0 +1,481 @@
+diff --git a/docs/08-technical/25-ai-code-review-pipeline-spec.md b/docs/08-technical/25-ai-code-review-pipeline-spec.md
+index 53c21b0c..e995df18 100644
+--- a/docs/08-technical/25-ai-code-review-pipeline-spec.md
++++ b/docs/08-technical/25-ai-code-review-pipeline-spec.md
+@@ -135,7 +135,7 @@ flowchart TB
+ 4. **Чанки** — жадная упаковка ~`REVIEW_CHUNK_BYTES` (recall > большой контекст). Каждый чанк знает свой состав (`paths`, `partialPaths`) и получает **карту PR**: полный список changed files с пометками `[THIS PART]` / `[THIS PART, SOME HUNKS ONLY]` / `[ANOTHER PART]` и запретом absence-claim. Карта лежит в user-контенте, поэтому доезжает и до specialists/advisors, которые заменяют system целиком. Prior findings скоупятся по файлам чанка; находка про файл вне чанка понижается до `nit` с меткой `outOfChunk` — слепой блокер merge невозможен. Скоуп — по файлу, а не по видимым хункам: чанку с частично видимым файлом prior finding придёт, даже если её строка в другом куске, поэтому пометка `[THIS PART, SOME HUNKS ONLY]` обязательна — она объясняет модели, почему строку может быть не видно. Понижение и промпт-правило — независимые слои: промпт снижает вероятность absence-claim, понижение гарантирует, что такой claim не заблокирует merge.
+ 5. **LLM** — см. §4.
+ 6. **Пост-обработка** — дедуп повторов внутри модели (`dedupeSameModelFindings`, ключ `model|file|line|severity|title` с нормализацией заголовка по регистру, разметке и хвостовой пунктуации: одна тема, увиденная из нескольких чанков, — дубль, а не подтверждение; между моделями не дедупим — там совпадение и есть консенсус) → детерминированный FP-filter → кластеры ±3 строки → гейт → inline (cap `REVIEW_MAX_INLINE`) + sticky.
+-7. **Сходимость** — скрытый блок `<!-- orakul-ai-review-data:… -->` в sticky; следующий прогон подмешивает prior findings в промпт после **fingerprint-инвалидации** (`filterStalePriorFindings`: файл в диффе + строка в пределах ±3 от текущих hunks, иначе carry-over отбрасывается до LLM).
++7. **Сходимость** — скрытый блок `<!-- orakul-ai-review-data:… -->` в sticky; у каждой находки там лежит `fp` — отпечаток (sha256/12) нормализованной по пробелам строки, на которую она показывает. Следующий прогон подмешивает prior findings в промпт после **инвалидации по содержимому** (`filterStalePriorFindings`): отпечаток найден в файле — находка жива, её номер строки обновляется на фактический (код мог уехать); не найден — код в этом месте изменён, находка снимается до LLM; файл вышел из диффа — снимается. Находки из старого sticky без `fp` проходят прежнее правило ±3 строки, чтобы первый прогон после выката не потерял carry-over. Отпечаток берётся по одной строке, без окрестности (пробовали окно ±2 — починка одной строки стирала отпечатки соседних находок и снимала живые вместе с исправленной). Нормализация перед хешированием: `trim` + схлопывание любых пробельных последовательностей в один пробел, пустая строка отпечатка не даёт (`fp` в футер не пишется). Коллизии типовых строк (`}`, `});`) разрешаются выбором ближайшего совпадения к прежнему номеру строки; при равном расстоянии в обе стороны берётся меньший номер. Порога на величину смещения нет намеренно: совпал сам код, а находку всё равно перепроверяет модель.
+ 8. **Inline lifecycle** — post-then-delete: сначала новый review, потом удаление старых инлайнов (кроме запощенных и тредов с ответами — их резолвит auto-triage); «свой» комментарий определяется маркером в начале body (цитата маркера ≠ наш).
+ 
+ ---
+diff --git a/docs/08-technical/37-ai-review-backlog.md b/docs/08-technical/37-ai-review-backlog.md
+index d9fc194e..662bdeda 100644
+--- a/docs/08-technical/37-ai-review-backlog.md
++++ b/docs/08-technical/37-ai-review-backlog.md
+@@ -38,10 +38,20 @@ A/B-эксперименты и диагностика FP из локальны
+ его в PR нет; (б) дедупа повторов между чанками не было вовсе — одна тема из N чанков давала N строк в
+ sticky. Закрыто в `fix/ai-review-chunk-context`: карта PR с пометками частей в каждый чанк (в
+ user-контенте — чтобы доезжала до specialists/advisors), скоуп priors по составу чанка, понижение
+-находок про файлы вне чанка до `nit`, дедуп внутри модели. Осталось от #2: заменить позиционную
+-эвристику ±3 строки на fingerprint по содержимому hunk — точная починка помеченной строки сейчас
+-гарантирует, что находка переживёт фильтр как «актуальная». Требует поля в футере sticky
+-(`orakul-ai-review-data`) и обратной совместимости со старым форматом — отдельным PR.
++находок про файлы вне чанка до `nit`, дедуп внутри модели.
++
++**#2 закрыт полностью (2026-08-07):** хвост — замена позиционной эвристики — сделан в
++`fix/ai-review-prior-fingerprint`. В футер sticky пишется `fp` (sha256/12 нормализованной строки,
++на которую показывает находка), и carry-over решается по коду: отпечаток найден → находка жива,
++номер строки обновляется на фактический; не найден → код изменён, находка снимается до LLM.
++Старые sticky без `fp` идут по прежнему правилу ±3 (обратная совместимость на один прогон).
++Отпечаток берётся по собственной строке, без окрестности: с окном ±2 починка одной строки
++стирала отпечатки соседних находок и снимала живые вместе с исправленной.
++
++Измерение эффекта чанк-фикса (три прогона на одном sha PR #524, до fingerprint-правки):
++набор 14 → 14 → 13 находок, absence-claim нет ни одного, блокер-кластеры 0 → 1 → 1. Набор больше
++не растёт, но во всех трёх прогонах совпали только 5 находок из ~14 — оставшийся источник шума
++это дисперсия MoA (P1 #8), а не чанкинг.
+ 
+ ### P1
+ 
+diff --git a/ops/ai-review-status.test.mjs b/ops/ai-review-status.test.mjs
+index 5ba3cc80..6689cc24 100644
+--- a/ops/ai-review-status.test.mjs
++++ b/ops/ai-review-status.test.mjs
+@@ -102,6 +102,39 @@ test('parseOrakulStickyData', () => {
+   assert.equal(data.findings[0].title, 'bug');
+ });
+ 
++// Живой случай на PR #531: находка процитировала regex разбора футера, её текст содержал
++// `-->`, ленивый маркерный regex обрывал JSON — инструмент отдавал 0 находок при 5 реальных
++// и PR выглядел «clean». Старые sticky (до экранирования на стороне движка) читаем жадно.
++test('parseOrakulStickyData: `-->` внутри находки не превращает отчёт в пустой', () => {
++  const findings = [
++    { file: 'a.ts', line: 1, severity: 'minor', title: 'regex ([\\s\\S]*?) --> обрывает футер' },
++    { file: 'b.ts', line: 2, severity: 'nit', title: 'вторая находка' },
++  ];
++  const body = `x\n<!-- orakul-ai-review-data:${JSON.stringify({ sha: 'deadbee', findings })} -->`;
++  const data = parseOrakulStickyData(body);
++  assert.equal(data.findings.length, 2, 'обе находки прочитаны, а не обрезаны на первом `-->`');
++  assert.equal(data.sha, 'deadbee');
++});
++
++// Живой случай на #531: человек ответил на находку, процитировав маркер `orakul-ai-review`,
++// и его комментарий стал «последним sticky» для провайдера — отчёт показал 0 находок и
++// `verdict: unknown` при шести реальных. Для блокеров это выглядело бы как «clean».
++test('detectAiTool: цитата маркера в человеческом комментарии не подменяет sticky', async () => {
++  const { detectAiTool } = await import('./ai-review-status/lib/markers.mjs');
++  const quoted = 'Разбор находки: маркер `orakul-ai-review` цитируется в тексте ответа.';
++  assert.equal(detectAiTool({ author: 'Orange-hanter', body: quoted }), null, 'человек — не инструмент');
++  assert.equal(
++    detectAiTool({ author: 'github-actions[bot]', body: quoted })?.id,
++    'orakul',
++    'тот же текст от автора инструмента по-прежнему распознаётся',
++  );
++  assert.equal(
++    detectAiTool({ author: 'Orange-hanter', body: `${ORAKUL.review}\n## отчёт` })?.id,
++    'orakul',
++    'маркер в НАЧАЛЕ тела — прежнее поведение (ручной прогон движка от имени человека)',
++  );
++});
++
+ test('toolFromComment: blocking major', () => {
+   const findings = [
+     { file: 'a.ts', line: 2, severity: 'major', title: 'leak' },
+diff --git a/ops/ai-review-status/lib/markers.mjs b/ops/ai-review-status/lib/markers.mjs
+index 222b30dd..97e7bfde 100644
+--- a/ops/ai-review-status/lib/markers.mjs
++++ b/ops/ai-review-status/lib/markers.mjs
+@@ -4,6 +4,10 @@ export const ORAKUL = {
+   review: '<!-- orakul-ai-review -->',
+   inline: '<!-- orakul-ai-review-inline -->',
+   dataRe: /<!--\s*orakul-ai-review-data:([\s\S]*?)-->/,
++  // Тот же маркер, но до ПОСЛЕДНЕГО `-->` В КОНЦЕ ТЕЛА: запасной разбор, когда находка
++  // процитировала закрывающую последовательность и оборвала ленивый вариант. Якорь на конец
++  // не даёт захватить чужой HTML-комментарий, оказавшийся после футера.
++  dataReGreedy: /<!--\s*orakul-ai-review-data:([\s\S]*)-->\s*$/,
+ };
+ 
+ // A severity belongs to an inline-review heading, not arbitrary prose in the body.
+@@ -70,6 +74,11 @@ export function detectAiTool({ author, body } = {}) {
+     if (tool.bodyStartsWith && hasMarkerStart(text, tool.bodyStartsWith)) return tool;
+   }
+   for (const tool of AI_TOOLS) {
++    // Маркер ГДЕ-ТО в теле — слабое свидетельство: человек, процитировавший маркер в ответе
++    // на находку, иначе подменяет собой sticky (провайдер берёт последний коммент на
++    // инструмент), и отчёт становится пустым — «clean» при живых блокерах.
++    // Поэтому по вхождению признаём только комментарии от известных авторов инструмента.
++    if (tool.authors?.length && !tool.authors.some((a) => normalizeLogin(a) === login)) continue;
+     if (tool.bodyIncludes?.some((s) => text.includes(s))) return tool;
+   }
+   // Bot identity alone is not evidence of a review: CI notifications often use
+diff --git a/ops/ai-review-status/lib/parse.mjs b/ops/ai-review-status/lib/parse.mjs
+index 1653dd93..72b4cd36 100644
+--- a/ops/ai-review-status/lib/parse.mjs
++++ b/ops/ai-review-status/lib/parse.mjs
+@@ -21,7 +21,17 @@ export function parseOrakulStickyData(body) {
+   const m = ORAKUL.dataRe.exec(body);
+   if (!m) return null;
+   try {
+-    const data = JSON.parse(m[1].trim());
++    // Жадный разбор до ПОСЛЕДНЕГО `-->`, если ленивый оборвался на `-->` внутри строки
++    // находки (она могла процитировать маркер футера): футер — последний блок тела.
++    // Паттерн берём из markers.mjs — маркер описан там один раз.
++    let data;
++    try {
++      data = JSON.parse(m[1].trim());
++    } catch (lazyErr) {
++      const greedy = ORAKUL.dataReGreedy.exec(body);
++      if (!greedy) throw lazyErr;
++      data = JSON.parse(greedy[1].trim());
++    }
+     return {
+       sha: data.sha || '',
+       findings: Array.isArray(data.findings) ? data.findings : [],
+diff --git a/ops/pr-review.test.mjs b/ops/pr-review.test.mjs
+index c96127fd..aa171e4a 100644
+--- a/ops/pr-review.test.mjs
++++ b/ops/pr-review.test.mjs
+@@ -8,6 +8,7 @@ process.env.OLLAMA_MODELS = 'm1,m2';
+ import { test } from 'node:test';
+ import assert from 'node:assert/strict';
+ import { writeFile, rm, readFile } from 'node:fs/promises';
++import { MARKERS } from './pr-review/lib/constants.mjs';
+ 
+ const {
+   parseDiff, extractChangedSymbols, splitSegmentByHunks, buildChunks,
+@@ -461,6 +462,80 @@ test('filterStalePriorFindings: fingerprint-инвалидация carry-over',
+   assert.deepEqual(titles, ['рядом с текущим hunk', 'в пределах ±3 от строки 3']);
+ });
+ 
++// Регрессия PR #520: находка возвращалась прогон за прогоном ИМЕННО потому, что её чинили.
++// Старое правило («файл в диффе И рядом ±3 есть изменённая строка») точную починку помеченной
++// строки считало доказательством актуальности. Проверяем сквозной путь: sticky-футер прогона 1
++// → фильтр carry-over прогона 2.
++test('carry-over: починенная находка снимается, нетронутая переносится, уехавшая — с новой строкой', () => {
++  const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
++  const diffV1 = `diff --git a/a.ts b/a.ts
++--- a/a.ts
+++++ b/a.ts
++@@ -1,4 +1,4 @@
++ const head = 0;
+++const bug = parseInt(raw);
+++const stable = compute(head);
++ const tail = 1;
++`;
++  const runOne = parseDiff(diffV1);
++  const findings = [
++    { file: 'a.ts', line: 2, severity: 'major', title: 'parseInt без основания', body: '', model: 'm1' },
++    { file: 'a.ts', line: 3, severity: 'minor', title: 'compute без проверки', body: '', model: 'm1' },
++  ];
++  const { md } = buildSummary(cfg, {
++    reviews: [], ok: [], allFindings: findings, outside: findings, blastBlocks: [], files: runOne.files,
++    pr: { number: 1, title: 't' }, headSha: 'abcdef1', note: '', blockerClusters: [],
++  });
++  // Тот же паттерн, что в движке (без дубля литерала): ленивый вариант обрывается на `-->`
++  // внутри текста находки — ровно тот баг, что чинился в этом PR.
++  const footerMatch = MARKERS.dataReGreedy.exec(md);
++  assert.ok(footerMatch, 'в sticky есть скрытый блок orakul-ai-review-data — без него carry-over нечем питать');
++  const priors = JSON.parse(footerMatch[1].trim()).findings;
++  assert.ok(priors.every((f) => f.fp), 'в футере у каждой находки есть отпечаток кода');
++
++  // Прогон 2: строку 2 починили (parseInt получил основание), строка 3 не тронута,
++  // но уехала вниз из-за вставки выше.
++  const diffV2 = `diff --git a/a.ts b/a.ts
++--- a/a.ts
+++++ b/a.ts
++@@ -1,5 +1,6 @@
++ const head = 0;
+++const extra = 0;
+++const bug = parseInt(raw, 10);
+++const stable = compute(head);
++ const tail = 1;
++`;
++  const runTwo = parseDiff(diffV2);
++  const kept = filterStalePriorFindings(priors, runTwo.files, () => {});
++  assert.deepEqual(kept.map((f) => f.title), ['compute без проверки'], 'починенная не переносится');
++  assert.equal(kept[0].line, 4, 'нетронутая находка переехала вместе с кодом');
++
++  // Старый sticky без fp: работает прежнее правило ±3, carry-over не теряется целиком.
++  const legacy = priors.map(({ fp, ...rest }) => rest);
++  assert.equal(filterStalePriorFindings(legacy, runTwo.files, () => {}).length, 2);
++});
++
++// Поймано на живом прогоне #531: находка процитировала regex разбора футера, и её текст
++// содержал `-->`. Ленивый dataRe обрезал футер на этой последовательности → JSON не парсился
++// → carry-over и ai-review-status видели пустоту (5 находок превратились в 0).
++test('sticky footer: `-->` внутри находки не рвёт машинный блок', () => {
++  const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
++  const findings = [
++    { file: 'a.ts', line: 1, severity: 'minor', title: 'regex /data:([\\s\\S]*?) -->/ хрупок', body: '', model: 'm1' },
++    { file: 'b.ts', line: 2, severity: 'nit', title: 'вторая находка должна дожить до футера', body: '', model: 'm1' },
++  ];
++  const { md } = buildSummary(cfg, {
++    reviews: [], ok: [], allFindings: findings, outside: findings, blastBlocks: [], files: new Map(),
++    pr: { number: 1, title: 't' }, headSha: 'abc', note: '', blockerClusters: [],
++  });
++  const footerStart = md.lastIndexOf('orakul-ai-review-data:');
++  const footerBody = md.slice(footerStart, md.lastIndexOf('-->'));
++  assert.ok(!footerBody.includes('-->'), 'в теле футера нет сырого `-->` — только закрывающий маркер');
++  const data = JSON.parse(md.match(/<!--\s*orakul-ai-review-data:([\s\S]*?)-->/)[1].trim());
++  assert.equal(data.findings.length, 2, 'обе находки дожили до машинного блока');
++  assert.equal(data.findings[0].title, 'regex /data:([\\s\\S]*?) -->/ хрупок', 'текст восстановлен без потерь');
++});
++
+ test('missing confidence → 0.5: блок без явной уверенности невозможен (canvas P1)', () => {
+   assert.equal(normalizeConfidence(undefined), 0.5);
+   assert.equal(normalizeConfidence(null), 0.5);
+diff --git a/ops/pr-review/lib/constants.mjs b/ops/pr-review/lib/constants.mjs
+index 036a5a86..b0e05476 100644
+--- a/ops/pr-review/lib/constants.mjs
++++ b/ops/pr-review/lib/constants.mjs
+@@ -38,6 +38,11 @@ export const MARKERS = {
+   review: '<!-- orakul-ai-review -->',
+   inline: '<!-- orakul-ai-review-inline -->',
+   dataRe: /<!--\s*orakul-ai-review-data:([\s\S]*?)-->/,
++  // До ПОСЛЕДНЕГО `-->` В КОНЦЕ ТЕЛА: запасной разбор для sticky, написанных до экранирования
++  // маркеров, где находка процитировала закрывающую последовательность и оборвала ленивый
++  // вариант. Якорь на конец обязателен: без него жадный захват проглотил бы чужой
++  // HTML-комментарий, если он окажется после футера.
++  dataReGreedy: /<!--\s*orakul-ai-review-data:([\s\S]*)-->\s*$/,
+ };
+ 
+ /**
+diff --git a/ops/pr-review/lib/diff.mjs b/ops/pr-review/lib/diff.mjs
+index fcf23cc1..9c4657e5 100644
+--- a/ops/pr-review/lib/diff.mjs
++++ b/ops/pr-review/lib/diff.mjs
+@@ -37,6 +37,16 @@ export const parseDiffGitPath = (line) => {
+   return l.match(/ b\/(.+)$/)?.[1] ?? null;
+ };
+ 
++/**
++ * @typedef {Object} DiffFileRecord — запись файла из parseDiff (`files.get(path)`).
++ * @property {Set<number>} validLines номера строк RIGHT-стороны, на которые можно вешать inline
++ * @property {string[]} changed тексты изменённых строк (`+`/`-`) для blast-radius и prescan
++ * @property {Map<number,string>} text номер строки RIGHT-стороны → её текст; читают
++ *   `findingFingerprint` и `filterStalePriorFindings` (lib/findings.mjs) — по нему решается,
++ *   жива ли находка прошлого прогона. Формат менять только вместе с ними.
++ */
++
++/** @returns {{files: Map<string, DiffFileRecord>, annotated: string, changedText: string}} */
+ export function parseDiff(diff) {
+   const files = new Map();
+   const annotatedParts = [];
+@@ -48,7 +58,10 @@ export function parseDiff(diff) {
+     if (raw.startsWith('diff --git')) { curPath = null; annotatedParts.push(raw); continue; }
+     if (raw.startsWith('+++ ')) {
+       curPath = parseDiffNewPath(raw);
+-      if (curPath && !files.has(curPath)) files.set(curPath, { validLines: new Set(), changed: [] });
++      // text: номер строки RIGHT-стороны → её содержимое. Потребитель — findingFingerprint
++      // и filterStalePriorFindings (lib/findings.mjs): «жива» ли находка прошлого прогона,
++      // решается по коду строки, а не по её номеру. Поле обязано пережить рефакторинг парсера.
++      if (curPath && !files.has(curPath)) files.set(curPath, { validLines: new Set(), changed: [], text: new Map() });
+       annotatedParts.push(raw);
+       continue;
+     }
+@@ -61,6 +74,7 @@ export function parseDiff(diff) {
+     if (raw.startsWith('+') && !raw.startsWith('+++')) {
+       rec.validLines.add(newLine);
+       rec.changed.push(raw.slice(1));
++      rec.text.set(newLine, raw.slice(1));
+       changedLines.push(raw.slice(1));
+       annotatedParts.push(`${String(newLine).padStart(5)}: ${raw}`);
+       newLine++;
+@@ -70,6 +84,7 @@ export function parseDiff(diff) {
+       annotatedParts.push(`     : ${raw}`);
+     } else {
+       rec.validLines.add(newLine);
++      rec.text.set(newLine, raw.startsWith(' ') ? raw.slice(1) : raw);
+       annotatedParts.push(`${String(newLine).padStart(5)}: ${raw}`);
+       newLine++;
+     }
+diff --git a/ops/pr-review/lib/findings.mjs b/ops/pr-review/lib/findings.mjs
+index 1ca2233d..36a024b5 100644
+--- a/ops/pr-review/lib/findings.mjs
++++ b/ops/pr-review/lib/findings.mjs
+@@ -1,3 +1,4 @@
++import { createHash } from 'node:crypto';
+ import { SEV, MARKERS } from './constants.mjs';
+ import { DEFAULT_FP_PATTERNS_PATH, getFpPatterns, matchFpPatterns } from './fp-patterns.mjs';
+ import { normalizeAdvisorClaims } from './specialists.mjs';
+@@ -145,27 +146,99 @@ export function clusterFindings(allFindings, gate) {
+ }
+ 
+ /**
+- * Fingerprint-инвалидация prior findings (carry-over): находка прошлого прогона
+- * остаётся, только если её файл всё ещё в диффе И рядом (±3 строки) есть строки
+- * текущего diff — иначе hunk изменился (фикс внесён) или файл вышел из PR, и
+- * переутверждать находку нельзя. Детерминированно, ДО LLM (canvas P0).
++ * Отпечаток строки, на которую показывает находка: код, а не координата.
++ * Пробелы схлопнуты — переформатирование отступов не должно выглядеть как починка.
++ *
++ * Берём ТОЛЬКО собственную строку, без окрестности: с окном соседей починка одной строки
++ * стирала отпечатки соседних находок, и они снимались вместе с исправленной, хотя живы.
++ * Плата за узкое окно — коллизии на типовых строках (`}`), они разрешаются выбором
++ * ближайшего совпадения к прежнему номеру строки.
++ *
++ * Возвращает '' если строки нет (файл вне диффа, строка вне hunks) или она пустая.
++ */
++export function findingFingerprint(rec, line) {
++  const n = Number(line) || 0;
++  const raw = n > 0 ? rec?.text?.get(n) : undefined;
++  const body = String(raw ?? '').trim().replace(/\s+/g, ' ');
++  if (!body) return '';
++  return createHash('sha256').update(body).digest('hex').slice(0, 12);
++}
++
++/** Все отпечатки файла: fp → номера строк (их может быть несколько — типовые строки). */
++function fileFingerprints(rec) {
++  const map = new Map();
++  if (!rec?.text) return map;
++  for (const line of rec.text.keys()) {
++    const fp = findingFingerprint(rec, line);
++    if (!fp) continue;
++    if (map.has(fp)) map.get(fp).push(line);
++    else map.set(fp, [line]);
++  }
++  return map;
++}
++
++/**
++ * Из совпавших строк берём ближайшую к прежней позиции находки; при равном расстоянии —
++ * меньший номер. Пустой список возвращает 0: `reduce` без начального значения бросил бы
++ * TypeError, а вызывающий может измениться и перестать проверять длину заранее.
++ */
++const nearestLine = (lines, line) => (lines?.length
++  ? lines.reduce((best, cur) => (Math.abs(cur - line) < Math.abs(best - line) ? cur : best))
++  : 0);
++
++/**
++ * Инвалидация prior findings (carry-over) по СОДЕРЖИМОМУ, а не по позиции.
++ *
++ * Раньше находка считалась живой, если её файл в диффе и рядом (±3 строки) есть изменённая
++ * строка. Правило инвертировало смысл: чем точнее чинили помеченную строку, тем надёжнее
++ * находка проходила фильтр как «актуальная» и возвращалась прогон за прогоном (PR #520).
++ *
++ * Теперь в футере sticky у находки лежит `fp` — отпечаток кода, на который она показывала.
++ * На следующем прогоне:
++ *   - отпечаток нашёлся в файле (пусть на другой строке) → код не тронут, находку несём
++ *     дальше, обновив номер строки;
++ *   - не нашёлся → код в этом месте изменён (или файл вышел из PR) → находка снимается;
++ *   - у находки нет `fp` (старый футер) → работает прежнее правило ±3, чтобы первый прогон
++ *     после выката не потерял carry-over целиком.
+  */
+ export function filterStalePriorFindings(priors, files, log = () => {}) {
+   const kept = [];
+-  let dropped = 0;
++  const fpCache = new Map();
++  // Причины снятия считаем раздельно: «файл вышел из PR» и «код в этом месте изменён» —
++  // разные истории, и по одному общему счётчику не понять, работает ли инвалидация.
++  const outOfDiff = [];
++  const codeChanged = [];
++  const staleLegacy = [];
++  let legacy = 0;
+   for (const f of priors || []) {
+     const rec = f.file ? files.get(f.file) : null;
+     const line = Number(f.line) || 0;
++    if (!rec) { outOfDiff.push(f); continue; }
++    if (f.fp) {
++      if (!fpCache.has(f.file)) fpCache.set(f.file, fileFingerprints(rec));
++      const hits = fpCache.get(f.file).get(f.fp);
++      if (!hits?.length) { codeChanged.push(f); continue; }
++      const at = nearestLine(hits, line);
++      kept.push(at === line ? f : { ...f, line: at });
++      continue;
++    }
++    legacy++;
+     let fresh = false;
+-    if (rec && line > 0) {
++    if (line > 0) {
+       for (const vl of rec.validLines) {
+         if (Math.abs(vl - line) <= 3) { fresh = true; break; }
+       }
+     }
+     if (fresh) kept.push(f);
+-    else dropped++;
++    else staleLegacy.push(f);
+   }
+-  if (dropped) log(`prior findings: отброшено устаревших ${dropped} (hunk изменён / файл вне диффа / без строки)`);
++  const reasons = [
++    codeChanged.length && `код изменён: ${codeChanged.length}`,
++    outOfDiff.length && `файл вне диффа: ${outOfDiff.length}`,
++    staleLegacy.length && `правило ±3 (без fingerprint): ${staleLegacy.length}`,
++  ].filter(Boolean);
++  if (reasons.length) log(`prior findings: снято ${reasons.join(', ')}`);
++  if (legacy) log(`prior findings: ${legacy} из старого sticky без fingerprint — сравнение по ±3 строки`);
+   return kept;
+ }
+ 
+diff --git a/ops/pr-review/lib/github.mjs b/ops/pr-review/lib/github.mjs
+index 63e2dcf6..843b543a 100644
+--- a/ops/pr-review/lib/github.mjs
++++ b/ops/pr-review/lib/github.mjs
+@@ -82,13 +82,21 @@ export function createGithubClient(cfg, log) {
+       const mine = [...comments].reverse().find((c) => hasMarker(c.body, MARKERS.review));
+       const m = mine && MARKERS.dataRe.exec(mine.body);
+       if (!m) return [];
++      // Старые sticky (до экранирования маркеров) могли содержать `-->` внутри строки
++      // находки — ленивый dataRe обрезал футер на ней. Жадный вариант берёт блок целиком,
++      // и в ремонт JSON тоже уходит он: чинить обрезанный кусок бессмысленно.
++      const raw = MARKERS.dataReGreedy.exec(mine.body)?.[1] ?? m[1];
+       let data;
+       try {
+         data = JSON.parse(m[1].trim());
+       } catch {
+-        // Footer мог быть обрезан под лимит GitHub — пробуем ремонт JSON (P2-12),
+-        // иначе prior findings молча теряются.
+-        data = extractJsonObject(m[1], { onRepaired: () => {} });
++        try {
++          data = JSON.parse(raw.trim());
++        } catch {
++          // Footer мог быть обрезан под лимит GitHub — пробуем ремонт JSON (P2-12),
++          // иначе prior findings молча теряются.
++          data = extractJsonObject(raw, { onRepaired: () => {} });
++        }
+       }
+       return Array.isArray(data.findings) ? data.findings.slice(0, 40) : [];
+     } catch { return []; }
+diff --git a/ops/pr-review/lib/report.mjs b/ops/pr-review/lib/report.mjs
+index 5e2d302b..3fe08082 100644
+--- a/ops/pr-review/lib/report.mjs
++++ b/ops/pr-review/lib/report.mjs
+@@ -1,6 +1,7 @@
+ import { SEV, MARKERS } from './constants.mjs';
+ import { extractReasoningEntries } from './export.mjs';
+ import { publicErrorLabel } from './util.mjs';
++import { findingFingerprint } from './findings.mjs';
+ 
+ const REASONING_ADVISOR_MAX = 1800;
+ const REASONING_SECTION_MAX = 10_000;
+@@ -255,14 +256,26 @@ export function buildSummary(cfg, input) {
+     : `Модели: ${models.list.join(', ')}`;
+   md += `\n<sub>¹ ${modelFoot} · commit ${String(headSha).slice(0, 7) || '—'} · ${gateNote}; инфра-сбои merge не блокируют.</sub>`;
+ 
+-  const slim = allFindings.map((f) => ({ file: f.file, line: f.line, severity: f.severity, title: f.title, model: f.model }));
++  // fp — отпечаток кода, на который показывает находка. По нему следующий прогон решает,
++  // жива ли она: код на месте → несём дальше, изменился → снимаем. Без него carry-over
++  // держался на «рядом есть изменённая строка», то есть точная починка находку сохраняла.
++  const slim = allFindings.map((f) => {
++    const fp = findingFingerprint(files.get(f.file), f.line);
++    return { file: f.file, line: f.line, severity: f.severity, title: f.title, model: f.model, ...(fp ? { fp } : {}) };
++  });
+   const reasoning = reasoningEnabled ? buildStickyReasoningFooter(reviews, reviewMode) : [];
+   const footerData = {
+     sha: String(headSha).slice(0, 7),
+     findings: slim,
+     ...(reasoning.length ? { reasoning } : {}),
+   };
+-  const footer = `\n<!-- orakul-ai-review-data:${JSON.stringify(footerData)} -->`;
++  // Внутри JSON может оказаться `-->` или `<!--` — например, находка процитировала regex
++  // разбора этого самого футера. Тогда читатель (ленивый `dataRe`) обрежет футер на чужой
++  // последовательности, JSON не распарсится, и carry-over со статус-инструментом увидят
++  // пустоту. `>`/`<` — валидные JSON-escape: после parse строка та же, но в сыром
++  // тексте последовательностей-маркеров больше нет.
++  const footerJson = JSON.stringify(footerData).replace(/-->/g, '--\\u003e').replace(/<!--/g, '\\u003c!--');
++  const footer = `\n<!-- orakul-ai-review-data:${footerJson} -->`;
+   const LIMIT = 65_000;
+   if (md.length + footer.length > LIMIT) {
+     md = md.slice(0, Math.max(0, LIMIT - footer.length - 120)) + '\n\n> …(отчёт обрезан под лимит GitHub)\n';
