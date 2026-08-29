@@ -205,3 +205,42 @@ test('явно назначенный профиль не перетираетс
   assert.equal(other.name, 'orakul');
   resetProfile();
 });
+
+test('без repoRulesFile подхватывается AGENTS.md рядом с профилем', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ai-review-agents-'));
+  try {
+    await writeFile(join(dir, 'AGENTS.md'), '# Agent rules\nPrefer shared/round.ts\n', 'utf8');
+    await writeFile(join(dir, 'profile.json'), JSON.stringify({ name: 'with-agents', markerNamespace: 't' }), 'utf8');
+    const profile = loadProfileFile(join(dir, 'profile.json'));
+    assert.match(profile.repoRules, /Prefer shared\/round\.ts/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('prompts.* дописываются в системные промпты', () => {
+  setProfile(normalizeProfile({
+    name: 'p',
+    prompts: {
+      aggregatorExtra: 'CUSTOM_AGG_MARKER',
+      verifierExtra: 'CUSTOM_VER_MARKER',
+      advisorExtra: 'CUSTOM_ADV_MARKER',
+    },
+  }));
+  const prompt = createPromptBuilder();
+  const [system] = prompt.buildMessages({
+    annotated: '+ const a = 1;', blastBlocks: [], pr: { number: 1, title: 't' },
+    fileContents: '', priorFindings: [], changedPaths: ['src/a.ts'],
+  });
+  assert.match(system.content, /CUSTOM_AGG_MARKER/);
+  const [vSystem] = prompt.buildVerifierMessages({
+    candidates: [{ severity: 'major', file: 'a.ts', line: 1, title: 't', body: '' }],
+    annotated: '', fileContents: '', blastBlocks: [], pr: { number: 1, title: 't' },
+  });
+  assert.match(vSystem.content, /CUSTOM_VER_MARKER/);
+  const [refSystem] = prompt.buildReferenceMessages([
+    { role: 'user', content: 'diff' },
+  ]);
+  assert.match(refSystem.content, /CUSTOM_ADV_MARKER/);
+  resetProfile();
+});

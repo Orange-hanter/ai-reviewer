@@ -41,7 +41,7 @@ export {
   extractReasoningEntries, sarifArtifactUri, sarifAutomationGuid,
   EXPORT_VERSION, SARIF_SCHEMA, SARIF_GUID_RE, TOOL_VERSION, toolName,
 } from './lib/export.mjs';
-export { buildSummary, buildRouterSummary, buildLlmUnavailableSummary, buildReasoningSection, buildStickyReasoningFooter, diffFindings, findingIdentity, findingPointDelta, findingsStability, verdictReproducibility } from './lib/report.mjs';
+export { buildSummary, buildRouterSummary, buildLlmUnavailableSummary, buildReasoningSection, buildStickyReasoningFooter, buildWalkthroughSection, diffFindings, findingIdentity, findingPointDelta, findingsStability, verdictReproducibility } from './lib/report.mjs';
 export { MARKERS, hasMarker, extractStickyFooterRaw, repoRules, SEV } from './lib/constants.mjs';
 export {
   DEFAULT_PROFILE, PROFILE_FILENAMES, createMarkers, normalizeProfile, loadProfileFile,

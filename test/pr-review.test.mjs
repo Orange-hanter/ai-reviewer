@@ -727,6 +727,29 @@ test('missing confidence → 0.5: блок без явной увереннос�
   assert.equal(findings[0].consensusBlock, false, 'critical без confidence — не блок');
 });
 
+
+test('buildSummary: Walkthrough из summary агрегатора сразу после вердикта', () => {
+  const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
+  const reviews = [
+    { model: 'moa', summary: 'PR чинит утечку в clientIp и обновляет тесты.', findings: [] },
+    { model: 'broken', error: 'timeout', findings: [] },
+  ];
+  const { md } = buildSummary(cfg, {
+    reviews, ok: reviews, allFindings: [], outside: [], blastBlocks: [], files: new Map(),
+    pr: { number: 1, title: 't' }, headSha: 'abc', note: '', blockerClusters: [],
+  });
+  const walkIdx = md.indexOf('### Walkthrough');
+  const modelsIdx = md.indexOf('### Оценки моделей');
+  assert.ok(walkIdx > 0 && modelsIdx > walkIdx, 'Walkthrough раньше оценок моделей');
+  assert.match(md, /PR чинит утечку в clientIp/);
+  const empty = buildSummary(cfg, {
+    reviews: [{ model: 'm', error: 'fail', findings: [] }], ok: [], allFindings: [], outside: [],
+    blastBlocks: [], files: new Map(), pr: { number: 1, title: 't' }, headSha: 'abc', note: '',
+    blockerClusters: [],
+  });
+  assert.doesNotMatch(empty.md, /### Walkthrough/);
+});
+
 test('buildSummary: advisory — top-10 по severity, хвост свёрнут, но в отчёте', () => {
   const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
   const mk = (i, sev) => ({ file: 'x.ts', line: i, severity: sev, title: `f${i}-${sev}`, body: '', model: 'm1' });

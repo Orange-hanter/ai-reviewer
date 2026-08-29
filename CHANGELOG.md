@@ -1,11 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 — поверхность: AGENTS.md, Walkthrough, prompts
+
+### Добавлено
+
+- **AGENTS.md** как дефолтный источник `repoRules`, если профиль не задал `repoRules`/`repoRulesFile`
+- **Walkthrough** в начало sticky из summary агрегатора (без отдельного LLM-вызова)
+- **`prompts.*` в профиле**: `advisorExtra` / `specialistExtra` / `aggregatorExtra` / `verifierExtra`
 
 ### Изменено
 
 - CI / шаблоны потребителя: `graphifyy` **0.9.31 → 0.9.52**; GitHub Actions —
   `checkout`/`setup-node`/`setup-python` **v6 → v7**, `cache` **v5 → v6**
+
 
 ## 0.2.2 — LLM abstraction, cost, benchmark, verdict quality
 

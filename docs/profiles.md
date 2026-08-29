@@ -29,7 +29,12 @@ TS/JS в корне репозитория, блок правил проекта
   "toolName": "acme-ai-review",            // SARIF tool.name, имена файлов экспорта, User-Agent
   "sarifRulePrefix": "acme",               // ruleId в SARIF: acme/critical…
   "repositoryUri": "https://github.com/acme/widgets",
-  "repoRulesFile": "acme-repo-rules.md",   // или "repoRules": "…текст…"
+  "repoRulesFile": "acme-repo-rules.md",   // или "repoRules": "…текст…"; иначе AGENTS.md
+
+  "prompts": {                             // опционально: вставки в системные промпты
+    "aggregatorExtra": "Prefer findings about money rounding.",
+    "verifierExtra": "Treat blast-radius callers as strong evidence."
+  },
 
   "layout": {
     "appDir": "app",                       // каталог приложения ('' = корень репозитория)
@@ -68,7 +73,8 @@ TS/JS в корне репозитория, блок правил проекта
 | `toolName` | Имя в SARIF, имена файлов экспорта (`<toolName>.json`, `<toolName>.sarif.json`), User-Agent к GitHub API | = `markerNamespace` |
 | `sarifRulePrefix` | `ruleId` в SARIF — по нему Code Scanning группирует алерты | = `toolName` |
 | `repositoryUri` | `tool.driver.informationUri` в SARIF | из `GITHUB_REPOSITORY` |
-| `repoRules` / `repoRulesFile` | Блок «правила проекта» в системном промпте: слои, канонические примитивы, чем проверяется поведение. Самое сильное средство против FP-лекций «у вас неправильная архитектура» | пусто |
+| `repoRules` / `repoRulesFile` | Блок «правила проекта» в системном промпте: слои, канонические примитивы, чем проверяется поведение. Самое сильное средство против FP-лекций «у вас неправильная архитектура» | пусто; иначе **`AGENTS.md`** в корне (или рядом с профилем), если файл есть |
+| `prompts.advisorExtra` / `specialistExtra` / `aggregatorExtra` / `verifierExtra` | Свободный текст, дописывается в соответствующий системный промпт (кастомизация без форка движка) | пусто |
 | `layout.appDir` | Каталог, из которого запускается eslint/ast-grep (там `node_modules`) | корень |
 | `layout.layerDirs` | Каталоги, которым можно вернуть префикс `appDir`, если путь из diff пришёл без него | — |
 | `layout.lintable` | Какие файлы вообще отдаются в prescan | любой TS/JS |
