@@ -40,12 +40,12 @@ jobs:
       (github.event.action == 'labeled' && github.event.label.name == 'ai-review-fp')
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
 
@@ -59,7 +59,7 @@ jobs:
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
       - name: Checkout pinned AI review engine
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: Orange-hanter/ai-reviewer
           ref: ${{ steps.pin.outputs.ref }}

@@ -41,17 +41,17 @@ jobs:
       (github.event.pull_request.draft == false && github.event.pull_request.user.type != 'Bot')
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # полный граф; теги не нужны, но дешевле не урезать
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'
           cache-dependency-path: app/package-lock.json
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
@@ -61,16 +61,16 @@ jobs:
       # v2: инвалидирует venv с битым shebang после restore (self-hosted path drift).
       - name: Cache graphify venv
         id: gfcache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .graphify/venv
-          key: gf-venv-${{ runner.os }}-py311-graphifyy-0.9.31-v3
+          key: gf-venv-${{ runner.os }}-py311-graphifyy-0.9.52-v1
 
       - name: Install graphify (pinned, from PyPI)
         run: |
           install_graphify() {
             python -m venv .graphify/venv
-            .graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.31
+            .graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.52
           }
           if [ -x .graphify/venv/bin/graphify ] && .graphify/venv/bin/graphify --version >/dev/null 2>&1; then
             echo "graphify venv OK: $(.graphify/venv/bin/graphify --version 2>&1 | head -1)"
@@ -126,7 +126,7 @@ jobs:
 
       - name: Checkout pinned AI review engine
         if: steps.pin.outputs.ref != ''
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: Orange-hanter/ai-reviewer
           ref: ${{ steps.pin.outputs.ref }}

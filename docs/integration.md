@@ -44,7 +44,7 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
       - name: Checkout pinned AI review engine
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: Orange-hanter/ai-reviewer
           ref: ${{ steps.pin.outputs.ref }}

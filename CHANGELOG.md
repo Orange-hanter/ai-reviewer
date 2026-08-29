@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Изменено
+
+- CI / шаблоны потребителя: `graphifyy` **0.9.31 → 0.9.52**; GitHub Actions —
+  `checkout`/`setup-node`/`setup-python` **v6 → v7**, `cache` **v5 → v6**
+
 ## 0.2.2 — LLM abstraction, cost, benchmark, verdict quality
 
 ### Добавлено
