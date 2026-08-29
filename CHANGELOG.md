@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.2 — LLM abstraction, cost, benchmark, verdict quality
+
+### Добавлено
+
+- **`lib/llm.mjs`** — канонический OpenAI-compatible клиент (`createLlmClient`); `lib/ollama.mjs` — thin re-export
+- Env-приоритет: `LLM_API_KEY` / `LLM_BASE_URL` с fallback на `OLLAMA_*`; fail-closed без silent provider fallback
+- **Cost tracking**: usage из SSE, `createCostTracker`, `REVIEW_PRICE_JSON`, sticky `💰 ~$0.12 · 45k tokens`
+- **`lib/benchmark.mjs`** + `pr-review-benchmark` CLI + [docs/benchmark.md](docs/benchmark.md)
+- **Blast-radius findings** (`lib/blast-findings.mjs`): cross-layer callers вне диффа → deterministic major
+- **`REVIEW_STRICT=1`** / `profile.strict`: блок только prescan или verifier-verified; advisory не inline
+- **Grounding quotes**: поле `quote` в schema; `REVIEW_REQUIRE_QUOTE=1` / strict — drop critical/major без quote
+- `filterFindingsFixedInDiff` — adjacent-commit carry-over через fingerprint-инвалидацию
+- Actionability signal `blastCaller` (weight 2)
+
+### Изменено
+
+- User-facing ошибки LLM говорят «LLM», не только «Ollama»
+- `lib/metrics.mjs`: агрегация prompt/completion/total tokens из `llm_call` events
+- `pr-review-gold` использует `scoreGoldCase` из benchmark
+
 ## 0.2.1 — blast-radius sync + portable gold
 
 Синхронизация с живым движком Orakul (коммиты после выноса v0.2.0) и расширение gold-набора.

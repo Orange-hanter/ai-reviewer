@@ -18,7 +18,9 @@ const {
   extractFileDiffSections, selectVerifierCandidates, applyVerifierVerdicts,
   parseJsonl, aggregateMetrics, formatMetricsReport,
   parseDiffNewPath, parseDiffGitPath, unescapeGitPath, buildSummary, filterStalePriorFindings,
-  createGraphifyClient, buildChangedFilesSection, dedupeSameModelFindings,
+  filterFindingsFixedInDiff, findingFingerprint, createGraphifyClient, buildChangedFilesSection,
+  dedupeSameModelFindings, createCostTracker, formatCostStickyLine, scoreGoldCase, aggregateBenchmark,
+  emitBlastRadiusFindings, resolveBlockers, normalizeFinding, setProfile, resetProfile,
 } = await import('../index.mjs');
 
 const SAMPLE_DIFF = `diff --git a/foo.ts b/foo.ts
@@ -948,4 +950,130 @@ test('buildSummary: воспроизводимость вердикта счит
     priorRuns: [{ sha: 'ddd4444', counts: {}, added: 0, gone: 0, blocked: false }],
   });
   assert.ok(stable.includes('✅ Вердикт на `ddd4444` воспроизводим: ни один из 2 прогонов на этом коммите.'), stable);
+});
+
+// --- Phase 2+3: LLM config, cost, benchmark, blast, strict, quote ---
+
+test('loadReviewConfig: LLM env priority over OLLAMA_*', () => {
+  const cfg = loadReviewConfig({
+    LLM_API_KEY: 'llm-key',
+    OLLAMA_API_KEY: 'old-key',
+    LLM_BASE_URL: 'https://api.example/v1',
+    OLLAMA_BASE_URL: 'https://ollama.com/v1',
+  });
+  assert.equal(cfg.llm.key, 'llm-key');
+  assert.equal(cfg.ollama.key, 'llm-key');
+  assert.equal(cfg.llm.base, 'https://api.example/v1');
+  assert.equal(cfg.ollama.base, 'https://api.example/v1');
+});
+
+test('loadReviewConfig: empty key when neither LLM nor OLLAMA key set', () => {
+  const cfg = loadReviewConfig({});
+  assert.equal(cfg.llm.key, '');
+  assert.equal(cfg.ollama.key, '');
+});
+
+test('createCostTracker: aggregates tokens and cost from REVIEW_PRICE_JSON', () => {
+  const priceMap = { 'm1': { in: 1, out: 2 } };
+  const tracker = createCostTracker(priceMap);
+  tracker.record({ prompt_tokens: 1_000_000, completion_tokens: 500_000, total_tokens: 1_500_000 }, 'm1', 'review_json');
+  const snap = tracker.snapshot();
+  assert.equal(snap.prompt_tokens, 1_000_000);
+  assert.equal(snap.total_tokens, 1_500_000);
+  assert.ok(snap.cost_known);
+  assert.ok(Math.abs(snap.cost_usd - 2) < 0.001);
+  assert.ok(formatCostStickyLine(snap).includes('💰'));
+});
+
+test('aggregateMetrics: sums llm_call token fields', () => {
+  const agg = aggregateMetrics([
+    { type: 'llm_call', ok: true, callType: 'review_json', model: 'm1', prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+    { type: 'llm_call', ok: true, callType: 'advisor', model: 'm2', prompt_tokens: 200, completion_tokens: 0, total_tokens: 200 },
+  ]);
+  assert.equal(agg.llm.total_tokens, 350);
+  assert.equal(agg.llm.prompt_tokens, 300);
+});
+
+test('scoreGoldCase + aggregateBenchmark: title recall and wouldBlock', () => {
+  const meta = { id: 'x', type: 'tp', expect: { wouldBlock: true, mustFindTitles: ['escape'], mustNotFindTitles: ['noise'] } };
+  const good = scoreGoldCase(meta, { wouldBlock: true, findings: [{ title: 'Git escape bug' }] });
+  assert.equal(good.ok, true);
+  const bad = scoreGoldCase(meta, { wouldBlock: false, findings: [{ title: 'noise here' }] });
+  assert.equal(bad.ok, false);
+  const agg = aggregateBenchmark([
+    { id: 'x', type: 'tp', expect: meta.expect, score: good, wouldBlock: true },
+    { id: 'y', type: 'fp', expect: meta.expect, score: bad, wouldBlock: false },
+  ]);
+  assert.equal(agg.total, 2);
+  assert.equal(agg.passed, 1);
+  assert.equal(agg.recall.hits, 1);
+});
+
+test('emitBlastRadiusFindings: cross-layer caller outside diff', () => {
+  setProfile({
+    layout: { layerDirs: ['apps', 'packages'] },
+  });
+  const blocks = ['- `exportFn` → 2 зависимостей вне диффа: apps/web/api.ts:10 [calls], packages/core/x.ts:3 [calls]'];
+  const findings = emitBlastRadiusFindings(blocks, ['packages/core/changed.ts'], { symbols: ['exportFn'] });
+  assert.ok(findings.some((f) => f.file === 'apps/web/api.ts'), findings);
+  assert.equal(findings[0].source, 'blast-radius');
+  assert.equal(findings[0].severity, 'major');
+  resetProfile();
+});
+
+test('strict mode: LLM major without verifier does not block', () => {
+  const gate = { blockOn: ['critical', 'major'], blockSingle: ['critical'], consensusMin: 1, confidenceMin: 0.8, strict: true };
+  const findings = [{ file: 'a.ts', line: 1, severity: 'major', confidence: 0.95, title: 'bug', model: 'm1' }];
+  const { blockers, wouldBlock } = resolveBlockers(findings, ['a.ts'], gate, () => {}, { skipFpFilter: true });
+  assert.equal(wouldBlock, false);
+  assert.equal(blockers.length, 0);
+});
+
+test('strict mode: prescan still blocks', () => {
+  const gate = { blockOn: ['critical', 'major'], blockSingle: ['critical'], consensusMin: 1, confidenceMin: 0.8, strict: true };
+  const findings = [{ file: 'a.ts', line: 1, severity: 'critical', confidence: 1, title: 'eslint', model: 'prescan', prescan: true, prescanBlock: true }];
+  const { wouldBlock } = resolveBlockers(findings, ['a.ts'], gate, () => {}, { skipFpFilter: true, prescan: { enabled: true, blockEnabled: true, blockRules: ['x'] } });
+  assert.equal(wouldBlock, true);
+});
+
+test('normalizeFinding: requireQuote drops critical/major without quote', () => {
+  assert.equal(normalizeFinding({ severity: 'major', title: 'x' }, 'm', { requireQuote: true }), null);
+  assert.ok(normalizeFinding({ severity: 'major', title: 'x', quote: 'const x = 1;' }, 'm', { requireQuote: true }));
+  assert.ok(normalizeFinding({ severity: 'minor', title: 'x' }, 'm', { requireQuote: true }));
+});
+
+test('filterFindingsFixedInDiff: adjacent commit drops fixed finding', () => {
+  const diffV0 = `diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -1,2 +1,2 @@
+-const old = 0;
++const bug = parseInt(raw);
+ const ok = 1;
+`;
+  const diffV1 = `diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -1,2 +1,2 @@
+-const bug = parseInt(raw);
++const bug = parseInt(raw, 10);
+ const ok = 1;
+`;
+  const { files: filesV0 } = parseDiff(diffV0);
+  const fp = findingFingerprint(filesV0.get('a.ts'), 1);
+  assert.ok(fp, 'fingerprint на buggy строке');
+  const priors = [{ file: 'a.ts', line: 1, severity: 'major', title: 'parseInt', fp }];
+  const { files: filesV1 } = parseDiff(diffV1);
+  const kept = filterFindingsFixedInDiff(priors, filesV1, () => {});
+  assert.equal(kept.length, 0, 'fixed between adjacent commits → dropped');
+});
+
+test('buildSummary: cost sticky line when snapshot provided', () => {
+  const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
+  const { md } = buildSummary(cfg, {
+    reviews: [], ok: [], allFindings: [], outside: [], blastBlocks: [], files: new Map(),
+    pr: { number: 1, title: 't' }, headSha: 'abc', note: '', blockerClusters: [],
+    costSnapshot: { total_tokens: 45_000, cost_known: true, cost_usd: 0.12 },
+  });
+  assert.ok(md.includes('💰 ~$0.12 · 45k tokens'));
 });

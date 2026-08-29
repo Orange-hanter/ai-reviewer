@@ -2,7 +2,7 @@
 
 export { parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, parseDiffNewPath, parseDiffGitPath, unescapeGitPath } from './lib/diff.mjs';
 export { extractJsonObject } from './lib/json.mjs';
-export { filterFalsePositiveFindings, matchesKnownFalsePositive, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers, applyPrescanBlockPolicy, filterStalePriorFindings, dedupeSameModelFindings } from './lib/findings.mjs';
+export { filterFalsePositiveFindings, matchesKnownFalsePositive, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers, applyPrescanBlockPolicy, filterStalePriorFindings, filterFindingsFixedInDiff, dedupeSameModelFindings, findingFingerprint } from './lib/findings.mjs';
 export { selectVerifierCandidates, applyVerifierVerdicts, createVerifierRunner } from './lib/verifier.mjs';
 export {
   parseSpecialistAssignments, applyRefutation, decideRefutation, normalizeAdvisorClaims,
@@ -31,7 +31,11 @@ export {
 export { buildMoAReferenceSection, buildChangedFilesSection, createPromptBuilder } from './lib/prompt.mjs';
 export { loadReviewConfig, parseCli } from './lib/config.mjs';
 export { createReviewEngine } from './lib/engine.mjs';
+export { createLlmClient } from './lib/llm.mjs';
 export { createOllamaClient } from './lib/ollama.mjs';
+export { createCostTracker, estimateCost, formatCostStickyLine, loadPriceMap } from './lib/cost.mjs';
+export { scoreGoldCase, aggregateBenchmark, scoreFromRecord } from './lib/benchmark.mjs';
+export { emitBlastRadiusFindings, parseBlastDependentPaths } from './lib/blast-findings.mjs';
 export {
   buildReviewJson, buildSarif, writeReviewExports, selectSarifFindings,
   extractReasoningEntries, sarifArtifactUri, sarifAutomationGuid,

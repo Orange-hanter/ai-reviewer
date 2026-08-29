@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { loadReviewConfig } from '../lib/config.mjs';
 import { createReviewPipeline } from '../pipeline.mjs';
 import { MARKERS } from '../lib/constants.mjs';
+import { scoreGoldCase } from '../lib/benchmark.mjs';
 
 const GOLD_DIR = process.env.REVIEW_GOLD_DIR
   ? resolve(process.cwd(), process.env.REVIEW_GOLD_DIR)
@@ -49,24 +50,8 @@ async function runCase(id) {
   return { meta, code, findings: footerFindings(captured.join('\n')), wallMs: Date.now() - t0 };
 }
 
-function assess(meta, code, findings) {
-  const errors = [];
-  const wouldBlock = code === 1;
-  if (meta.expect.wouldBlock !== undefined && wouldBlock !== meta.expect.wouldBlock) {
-    errors.push(`wouldBlock: ожидали ${meta.expect.wouldBlock}, получили ${wouldBlock}`);
-  }
-  const titles = findings.map((f) => String(f.title || '').toLowerCase());
-  for (const t of meta.expect.mustFindTitles || []) {
-    if (!titles.some((x) => x.includes(t.toLowerCase()))) errors.push(`нет находки с «${t}» в title`);
-  }
-  for (const t of meta.expect.mustNotFindTitles || []) {
-    if (titles.some((x) => x.includes(t.toLowerCase()))) errors.push(`неожиданная находка с «${t}» в title`);
-  }
-  return errors;
-}
-
-if (!process.env.OLLAMA_API_KEY) {
-  console.error('[gold] нет OLLAMA_API_KEY');
+if (!process.env.LLM_API_KEY && !process.env.OLLAMA_API_KEY) {
+  console.error('[gold] нет LLM_API_KEY / OLLAMA_API_KEY');
   process.exit(1);
 }
 
@@ -85,7 +70,9 @@ for (const id of ids) {
   process.stdout.write(`[gold] ${id} … `);
   try {
     const { meta, code, findings, wallMs } = await runCase(id);
-    const errors = assess(meta, code, findings);
+    const wouldBlock = code === 1;
+    const score = scoreGoldCase(meta, { wouldBlock, findings });
+    const errors = score.precisionHints;
     const stat = errors.length ? '❌' : '✅';
     console.log(`${stat} wouldBlock=${code === 1} findings=${findings.length} wall=${(wallMs / 1000).toFixed(0)}с`);
     for (const e of errors) {

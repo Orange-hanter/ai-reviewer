@@ -2,7 +2,9 @@ import { readFile } from 'node:fs/promises';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
 import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks } from './lib/diff.mjs';
-import { createOllamaClient } from './lib/ollama.mjs';
+import { createLlmClient } from './lib/llm.mjs';
+import { createCostTracker } from './lib/cost.mjs';
+import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
 import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs';
 import { createGraphifyClient } from './lib/graphify.mjs';
 import { createGithubClient } from './lib/github.mjs';
@@ -97,6 +99,7 @@ async function runVerifierStage(allFindings, {
       inlineOn: gate.blockOn,
       threshold: actionability.threshold,
       maxAdvisoryInline: actionability.verifyAdvisory,
+      strict: gate.strict,
       ctx: actionabilityCtx || {},
     }).filter((s) => s.promoted).map((s) => s.finding)
     : [];
@@ -223,7 +226,8 @@ export function createReviewPipeline(cfg, deps = {}) {
   const log = deps.log ?? createLogger();
   const die = deps.die ?? ((msg) => { log('SOFT-FAIL:', msg); process.exit(0); });
 
-  const ollama = deps.ollama ?? createOllamaClient(cfg, log);
+  const costTracker = deps.costTracker ?? createCostTracker(cfg.cost?.priceMap);
+  const ollama = deps.ollama ?? createLlmClient(cfg, log, { costTracker });
   const prompt = deps.prompt ?? createPromptBuilder();
   const graphify = deps.graphify ?? createGraphifyClient(cfg);
   const github = deps.github ?? createGithubClient(cfg, log);
@@ -242,7 +246,7 @@ export function createReviewPipeline(cfg, deps = {}) {
     const { dryRun, diffFile } = cli;
     const postCreds = cfg.github.repo && cfg.github.prNumber && cfg.github.token;
 
-    if (!oCfg.key) die('нет OLLAMA_API_KEY');
+    if (!oCfg.key) die('нет LLM API key (задайте LLM_API_KEY или OLLAMA_API_KEY)');
     if (reviewMode === 'moa' && !moa.references.length) die('MOA_REFERENCE_MODELS пуст — задай хотя бы один advisor');
     if (!diffFile && !postCreds) die('нет REPO/PR_NUMBER/GITHUB_TOKEN для загрузки диффа');
     if (!dryRun && !postCreds) die('постинг требует REPO/PR_NUMBER/GITHUB_TOKEN — для локального прогона добавь --dry-run');
@@ -251,7 +255,7 @@ export function createReviewPipeline(cfg, deps = {}) {
     let finalObs = { exitCode: 0 };
 
     try {
-      const engine = deps.engine ?? createReviewEngine(cfg, { ollama, prompt, log, observability: obs });
+      const engine = deps.engine ?? createReviewEngine(cfg, { ollama, prompt, log, observability: obs, costTracker });
 
       let pr = { number: cfg.github.prNumber, title: '(local diff)', html_url: '' };
       let headSha = '';
@@ -361,6 +365,8 @@ export function createReviewPipeline(cfg, deps = {}) {
       // процесс завершается штатно (sticky/export/observability) до убийства job раннером.
       const deadline = limits.timeBudgetMs > 0 ? Date.now() + limits.timeBudgetMs : 0;
       log(`blast-radius блоков: ${blastBlocks.length} · symbols ${blastMetrics.symbols_resolved ?? '—'}/${blastMetrics.symbols_total} · affected ${blastMetrics.affected_nonempty} · graph ${blastMetrics.graph_status} · файлов с контекстом: ${contentMap.size} · чанков: ${chunks.length}`);
+      const blastFindings = emitBlastRadiusFindings(blastBlocks, changedPaths, { symbols, model: 'blast-radius' });
+      if (blastFindings.length) log(`blast-radius: +${blastFindings.length} детерминированных cross-layer caller(s)`);
       obs.logEvent('plan', {
         chunks: chunks.length,
         symbols: symbols.length,
@@ -409,6 +415,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       const llmFindings = ok.flatMap((r) => r.findings);
       let allFindings = [
         ...prescanResult.findings,
+        ...blastFindings,
         ...dedupeAgainstPrescan(llmFindings, prescanResult.findings),
       ];
       logFindingsStage(obs, 'after_llm_merge', allFindings);
@@ -567,6 +574,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         // Δ считаем против ПОЛНОГО набора прошлого прогона, а не против отфильтрованного
         // carry-over: «закрыто» — это то, что ушло из отчёта, включая снятое инвалидацией.
         priorFindings: priorSticky.findings, priorRuns: priorSticky.runs, priorSha: priorSticky.sha,
+        costSnapshot: costTracker.snapshot(),
       });
       // Дисперсия набора находок — измеримая величина, а не впечатление от чтения sticky:
       // в JSONL уходит Jaccard по точкам кода и его слагаемые, по ним недельный отчёт строит

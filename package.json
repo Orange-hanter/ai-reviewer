@@ -1,6 +1,6 @@
 {
   "name": "ai-reviewer",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "AI code review engine: MoA/consensus LLM pipeline, deterministic prescan, blast-radius, eval fixtures, GitHub feedback loop",
   "type": "module",
   "license": "UNLICENSED",
@@ -15,7 +15,8 @@
     "pr-review-metrics": "./bin/pr-review-metrics.mjs",
     "pr-review-probe-models": "./bin/pr-review-probe-models.mjs",
     "pr-review-feedback": "./bin/pr-review-feedback.mjs",
-    "pr-review-feedback-batch": "./bin/pr-review-feedback-batch.mjs"
+    "pr-review-feedback-batch": "./bin/pr-review-feedback-batch.mjs",
+    "pr-review-benchmark": "./bin/pr-review-benchmark.mjs"
   },
   "exports": {
     ".": "./index.mjs",

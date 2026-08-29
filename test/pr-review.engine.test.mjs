@@ -196,7 +196,7 @@ test('ollama: не-transient ошибка (400) — без ретраев', asyn
   let calls = 0;
   const client = createOllamaClient(OLLAMA_CFG, () => {});
   await withFetch(async () => { calls++; return new Response('bad', { status: 400 }); }, async () => {
-    await assert.rejects(() => client.chatText([], 'm1'), /Ollama 400/);
+    await assert.rejects(() => client.chatText([], 'm1'), /LLM 400/);
     assert.equal(calls, 1);
   });
 });
@@ -211,7 +211,7 @@ test('ollama: retry-бюджет — при исчерпанном таймау�
     await new Promise((r) => setTimeout(r, 5));
     return new Response('err', { status: 500 });
   }, async () => {
-    await assert.rejects(() => client.chatText([], 'm1'), /Ollama 500/);
+    await assert.rejects(() => client.chatText([], 'm1'), /LLM 500/);
     assert.equal(calls, 1, 'ретрай подавлен бюджетом таймаута');
   });
 });
