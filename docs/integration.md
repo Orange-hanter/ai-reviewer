@@ -100,7 +100,17 @@ OLLAMA_API_KEY=… REVIEW_PROFILE=ops/ai-review/profile.json \
 
 В монорепо удобно держать клон движка рядом и запускать `node ../ai-reviewer/bin/pr-review.mjs`.
 
-## 7. Обновление версии
+## 7. Swarm / оркестратор (E22–E23)
+
+При `REVIEW_EXPORT=1` в каталоге экспорта появляются:
+
+- `<tool>.json` — полный payload, включая поле `swarm`;
+- `<tool>-swarm.json` — только контракт внешнего вердикта.
+
+Описание полей и правила `strong` — [swarm.md](swarm.md). Готовый kit для Orakul:
+[`examples/consumers/orakul/`](../examples/consumers/orakul/).
+
+## 8. Обновление версии
 
 1. В движке: зелёные `npm test` и `npm run eval`, тег `vX.Y.Z`.
 2. У потребителя: правка `ops/ai-reviewer-ref` → PR → ревью нового движка идёт **старым**

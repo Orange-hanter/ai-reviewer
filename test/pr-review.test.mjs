@@ -1060,11 +1060,55 @@ test('экспорт несёт агрегат воспроизводимост�
   });
   assert.equal(json.verdict.reproducibility.flaky, true);
   assert.equal(json.verdict.reproducibility.blocked, 2);
+  assert.equal(json.swarm.version, 1);
+  assert.equal(json.swarm.role, 'external-verdict');
+  assert.equal(json.swarm.wouldBlock, true);
   const without = buildReviewJson({
     pr: { number: 7, title: 't' }, headSha: 'bbb2222', reviewMode: 'moa',
     wouldBlock: false, counts: {}, total: 0, findings: [], blockers: [], reviews: [],
   });
   assert.equal(without.verdict, undefined);
+  assert.equal(without.swarm.strong, false);
+});
+
+test('buildSwarmVerdict E22: strong только при независимо подтверждённых блокерах', async () => {
+  const { buildSwarmVerdict, isStrongBlocker, suggestedScopeFiles } = await import('../lib/swarm.mjs');
+  assert.equal(isStrongBlocker({ prescan: { tool: 'eslint' } }), true);
+  assert.equal(isStrongBlocker({ verifierStatus: 'verified' }), true);
+  assert.equal(isStrongBlocker({ severity: 'critical' }), false);
+
+  const soft = buildSwarmVerdict({
+    wouldBlock: true,
+    blockers: [{ file: 'a.ts', line: 1, severity: 'critical', title: 'LLM only' }],
+    headSha: 'abc',
+  });
+  assert.equal(soft.strong, false);
+  assert.match(soft.notes[0], /advisory/);
+
+  const strong = buildSwarmVerdict({
+    wouldBlock: true,
+    blockers: [
+      { file: 'a.ts', line: 1, severity: 'major', title: 'lint', prescan: { tool: 'eslint' } },
+      { file: 'b.ts', line: 2, severity: 'critical', title: 'ver', verifierStatus: 'verified' },
+    ],
+    blastMetrics: {
+      affected_files: ['a.ts', 'apps/web/caller.ts', 'packages/core/x.ts'],
+      symbols_total: 2,
+      symbols_resolved: 2,
+      affected_nonempty: 2,
+      graph_status: 'ok',
+    },
+    changedPaths: ['a.ts'],
+    headSha: 'deadbeef',
+    pr: { number: 9, title: 'scope', html_url: 'https://example/pr/9' },
+  });
+  assert.equal(strong.strong, true);
+  assert.equal(strong.strongBlockers, 2);
+  assert.deepEqual(strong.suggestedScopeFiles, ['apps/web/caller.ts', 'packages/core/x.ts']);
+  assert.deepEqual(
+    suggestedScopeFiles(['a.ts', 'out.ts'], ['a.ts']),
+    ['out.ts'],
+  );
 });
 
 test('buildSummary: факт блокировки — в записи прогона и колонкой «гейт» в истории', () => {

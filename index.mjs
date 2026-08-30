@@ -41,6 +41,9 @@ export {
   extractReasoningEntries, sarifArtifactUri, sarifAutomationGuid,
   EXPORT_VERSION, SARIF_SCHEMA, SARIF_GUID_RE, TOOL_VERSION, toolName,
 } from './lib/export.mjs';
+export {
+  buildSwarmVerdict, isStrongBlocker, suggestedScopeFiles, SWARM_CONTRACT_VERSION,
+} from './lib/swarm.mjs';
 export { buildSummary, buildRouterSummary, buildLlmUnavailableSummary, buildReasoningSection, buildStickyReasoningFooter, buildWalkthroughSection, diffFindings, findingIdentity, findingPointDelta, findingsStability, verdictReproducibility } from './lib/report.mjs';
 export { MARKERS, hasMarker, extractStickyFooterRaw, repoRules, SEV, BLAST_FINDING_SOURCE } from './lib/constants.mjs';
 export {

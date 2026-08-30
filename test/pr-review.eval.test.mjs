@@ -1082,6 +1082,10 @@ test('writeReviewExports R9: JSON + SARIF files', async () => {
   assert.ok(out.written.length >= 2);
   const json = JSON.parse(await readFile(join(dir, 'orakul-ai-review.json'), 'utf8'));
   assert.equal(json.pr.number, 42);
+  assert.ok(json.swarm);
+  const swarm = JSON.parse(await readFile(join(dir, 'orakul-ai-review-swarm.json'), 'utf8'));
+  assert.equal(swarm.role, 'external-verdict');
+  assert.equal(swarm.wouldBlock, false);
 });
 
 test('buildReasoningSection R9: empty without refs/claims/summaries', () => {
