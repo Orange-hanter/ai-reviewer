@@ -74,7 +74,10 @@ function mkDeps({ reviews, graphify = { buildBlastRadius: async () => [] }, veri
   return { deps, calls };
 }
 
-async function runPipeline({ diff, reviews, graphify, observabilityDir = '', env = {}, verifyFindings, prescanFindings, notifyTelegram }) {
+async function runPipeline({
+  diff, reviews, graphify, observabilityDir = '', env = {}, verifyFindings, prescanFindings, notifyTelegram,
+  mutateDeps,
+}) {
   const tmp = join(tmpdir(), `pr-review-pipe-${process.pid}-${Math.random().toString(36).slice(2)}.patch`);
   await writeFile(tmp, diff);
   try {
@@ -84,6 +87,7 @@ async function runPipeline({ diff, reviews, graphify, observabilityDir = '', env
       ...env,
     }, { dryRun: false, diffFile: tmp, repo: 'o/r', prNumber: 1 });
     const { deps, calls } = mkDeps({ reviews, graphify, verifyFindings, prescanFindings, notifyTelegram });
+    mutateDeps?.(deps, calls);
     const code = await createReviewPipeline(cfg, deps).run();
     return { code, calls };
   } finally {
@@ -322,4 +326,25 @@ test('pipeline: verifier strict — находки сверх капа (13-я) �
   const md = calls.upsertSticky[0];
   assert.ok(md.includes('🔴12'), '12 critical после verifier');
   assert.ok(md.includes('🟡1'), '13-я находка (overflow капа) → minor');
+});
+
+test('pipeline: sticky throw после postReview — ошибка не молчит (inline уже ушёл)', async () => {
+  let calls;
+  await assert.rejects(
+    () => runPipeline({
+      diff: CODE_DIFF,
+      reviews: [criticalReview],
+      mutateDeps: (deps, c) => {
+        calls = c;
+        deps.github.upsertSticky = async (body) => {
+          c.order.push('sticky');
+          c.upsertSticky.push(body);
+          throw new Error('GitHub 502: sticky upsert failed');
+        };
+      },
+    }),
+    /sticky upsert failed/,
+  );
+  assert.deepEqual(calls.order.slice(0, 2), ['post', 'delete'], 'inline успел уйти до sticky');
+  assert.ok(calls.order.includes('sticky'), 'upsertSticky вызывался и упал');
 });

@@ -129,7 +129,7 @@ export async function promoteCandidateToFixture(candidate, {
     cfg.prescan,
   );
 
-  if (!result.ok) {
+  if (!result.pass) {
     return { ok: false, id, errors: result.errors, wouldBlock: result.wouldBlock };
   }
 

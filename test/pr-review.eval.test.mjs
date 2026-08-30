@@ -27,7 +27,7 @@ import {
 } from '../lib/triage.mjs';
 import { matchesKnownFalsePositive, filterFalsePositiveFindings } from '../lib/findings.mjs';
 import { parseFpPatternsText } from '../lib/fp-patterns.mjs';
-import { sanitizeFixtureId, resolveFixtureDir, matchPrFilePatch } from '../feedback/promote-candidate.mjs';
+import { sanitizeFixtureId, resolveFixtureDir, matchPrFilePatch, promoteCandidateToFixture } from '../feedback/promote-candidate.mjs';
 import { groupFpEntries, fpAggregateKey, inferPatternId } from '../feedback/promote-patterns.mjs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +50,7 @@ import { SEV, MARKERS } from '../lib/constants.mjs';
 import { createReviewPipeline } from '../pipeline.mjs';
 import { buildReviewJson, buildSarif, writeReviewExports, selectSarifFindings, sarifArtifactUri, sarifAutomationGuid, SARIF_GUID_RE } from '../lib/export.mjs';
 import { buildSummary, buildReasoningSection, buildStickyReasoningFooter } from '../lib/report.mjs';
-import { access, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
@@ -1275,6 +1275,58 @@ test('buildFixtureCandidate R8', () => {
   assert.match(c.suggestedId, /^fp-pr-7-/);
   assert.equal(c.meta.expected.shouldBlock, false);
   assert.equal(c.findings[0].file, 'server/x.ts');
+});
+
+test('promote → fixture → eval: file-absent FP round-trip в tmp fixturesDir', async () => {
+  const fixturesDir = await mkdtemp(join(tmpdir(), 'promote-eval-'));
+  const id = 'fp-promote-roundtrip';
+  const file = 'server/preps.ts';
+  const candidate = {
+    suggestedId: id,
+    meta: {
+      id,
+      description: 'promote round-trip: file-absent при файле в diff',
+      expected: { shouldBlock: false, blockerCount: 0, findingCount: 0 },
+    },
+    findings: [{
+      file,
+      line: 10,
+      // critical намеренно: FP должен снять даже block-tier, не только advisory
+      severity: 'critical',
+      confidence: 0.95,
+      title: 'preps.ts не в PR',
+      body: 'файл preps.ts отсутствует в диффе PR',
+      model: 'm1',
+    }],
+    fromFeedback: { pr: 42 },
+  };
+  const diff = `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1 +1,2 @@\n const a = 1;\n+export const preps = 1;\n`;
+  try {
+    // DI: fetchDiff перекрывает сеть; token не уходит в HTTP
+    const promoted = await promoteCandidateToFixture(candidate, {
+      fixturesDir,
+      repo: 'o/r',
+      fetchDiff: async () => diff,
+    });
+    assert.equal(
+      promoted.ok,
+      true,
+      promoted.errors?.join('; ') || promoted.error || JSON.stringify(promoted),
+    );
+    assert.equal(promoted.wouldBlock, false);
+
+    const meta = JSON.parse(await readFile(join(fixturesDir, id, 'meta.json'), 'utf8'));
+    assert.equal(meta.expected.findingCount, 0);
+    await access(join(fixturesDir, id, 'diff.patch'));
+    await access(join(fixturesDir, id, 'findings.json'));
+
+    const { ok, metrics, results } = await runEvalHarness({ fixturesDir });
+    assert.equal(metrics.total, 1);
+    assert.equal(ok, true, results[0]?.errors?.join('; '));
+    assert.equal(results[0].findingCount, 0);
+  } finally {
+    await rm(fixturesDir, { recursive: true, force: true });
+  }
 });
 
 test('appendFeedbackLog R8: JSONL round-trip', async () => {

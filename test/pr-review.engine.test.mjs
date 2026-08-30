@@ -296,3 +296,173 @@ test('ollama: 429 вызывает throttle и ретрай (retry-after чте�
     assert.ok(logs.some((l) => l.includes('снижение параллелизма')), 'throttle залогирован');
   });
 });
+
+// --- MoA specialists → aggregator → advisorClaims ---
+
+const MOA_CFG = {
+  reviewMode: 'moa',
+  models: { list: [], fallback: [] },
+  moa: {
+    aggregator: 'agg-model',
+    label: 'moa',
+    references: ['ref-a', 'ref-b'],
+    refMaxTokens: 100,
+    refTemp: 0.6,
+    aggTemp: 0.4,
+  },
+  limits: { concurrency: 4 },
+  specialists: {
+    enabled: true,
+    assignments: [
+      { role: 'security', model: 'sec-m' },
+      { role: 'correctness', model: 'corr-m' },
+      { role: 'architecture', model: 'arch-m' },
+    ],
+  },
+  ollama: { temperature: 0.4 },
+  gate: {},
+  verifier: { model: 'ver-m', temperature: 0.2 },
+};
+
+const MOA_PROMPT = {
+  buildMessages: () => [{ role: 'user', content: 'base' }],
+  buildSpecialistMessages: (role, base) => [...base, { role: 'system', content: `specialist:${role}` }],
+  buildSpecialistAggregatorMessages: (base, refs) => [
+    ...base,
+    { role: 'user', content: `jury refs=${refs.map((r) => r.role).join(',')}` },
+  ],
+  buildReferenceMessages: (base) => base,
+  buildAggregatorMessages: (base) => base,
+  buildVerifierMessages: ({ candidates }) => [
+    { role: 'user', content: `verify ${candidates.length}` },
+  ],
+};
+
+const MOA_CHUNK = [{ annotated: 'd1', fileContents: 'code', paths: ['a.ts'], partialPaths: [] }];
+
+test('engine MoA: specialists → aggregator; advisorClaims и model=moa label', async () => {
+  const textCalls = [];
+  const jsonCalls = [];
+  const ollama = {
+    chatText: async (msgs, model) => {
+      textCalls.push({ model, tip: msgs.at(-1)?.content });
+      return `prose from ${model}`;
+    },
+    chatJson: async (msgs, model) => {
+      jsonCalls.push({ model, tip: msgs.at(-1)?.content });
+      assert.equal(model, 'agg-model');
+      return {
+        summary: 'jury',
+        verdict: 'changes_requested',
+        findings: [{
+          file: 'a.ts',
+          line: 3,
+          severity: 'critical',
+          title: 'IDOR',
+          body: 'open',
+          confidence: 0.9,
+          advisorClaims: [
+            { role: 'security', status: 'verified', reason: 'real' },
+            { role: 'correctness', status: 'rejected', reason: 'n/a' },
+            { role: 'architecture', status: 'downgraded', severity: 'minor', reason: 'layer' },
+          ],
+        }],
+      };
+    },
+  };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+
+  assert.deepEqual(
+    textCalls.map((c) => c.model).sort(),
+    ['arch-m', 'corr-m', 'sec-m'],
+    'три specialist prose-вызова',
+  );
+  assert.equal(jsonCalls.length, 1, 'один aggregator JSON');
+  assert.equal(res.model, 'moa');
+  assert.equal(res.aggregator, 'agg-model');
+  assert.equal(res.findings.length, 1);
+  assert.equal(res.findings[0].model, 'moa', 'атрибуция — label MoA, не agg-model');
+  assert.equal(res.findings[0].advisorClaims.length, 3);
+  assert.equal(res.findings[0].advisorClaims[0].status, 'verified');
+  assert.ok(res.references?.length >= 3, 'specialist references смержены в результат');
+  assert.ok(res.references.every((r) => r.text?.includes('prose from')));
+});
+
+test('engine MoA: все specialists недоступны → error, aggregator не зовётся', async () => {
+  let jsonCalls = 0;
+  const ollama = {
+    chatText: async () => { throw new Error('down'); },
+    chatJson: async () => { jsonCalls++; return { findings: [] }; },
+  };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  assert.equal(jsonCalls, 0);
+  assert.ok(res.error, 'ошибка без успешного jury');
+  assert.match(res.error, /security\/sec-m/);
+});
+
+// --- verifier runner (createVerifierRunner через engine) ---
+
+test('engine verifier: chatJson verdicts — order/decision доезжают (happy path)', async () => {
+  const ollama = {
+    chatJson: async (_msgs, model) => {
+      assert.equal(model, 'ver-m');
+      return {
+        verdicts: [
+          { candidateIndex: 0, decision: 'rejected', reason: 'fp' },
+          { candidateIndex: 1, decision: 'verified', reason: 'ok' },
+        ],
+      };
+    },
+  };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const verdicts = await engine.verifyFindings(
+    [
+      { file: 'a.ts', line: 1, severity: 'critical', title: 'x' },
+      { file: 'b.ts', line: 2, severity: 'major', title: 'y' },
+    ],
+    { annotated: 'd', fileContents: '', pr: {} },
+  );
+  assert.equal(verdicts.length, 2);
+  assert.equal(verdicts[0].candidateIndex, 0);
+  assert.equal(verdicts[0].decision, 'rejected');
+  assert.equal(verdicts[1].candidateIndex, 1);
+  assert.equal(verdicts[1].decision, 'verified');
+});
+
+test('engine verifier: нет поля verdicts → пустой список (strict apply понизит снаружи)', async () => {
+  const ollama = {
+    chatJson: async () => ({ summary: 'oops no verdicts' }),
+  };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const verdicts = await engine.verifyFindings(
+    [{ file: 'a.ts', line: 1, severity: 'critical', title: 'x' }],
+    { annotated: '', fileContents: '', pr: {} },
+  );
+  assert.deepEqual(verdicts, []);
+});
+
+test('engine verifier: LLM throw пробрасывается (pipeline решает fail-closed)', async () => {
+  const ollama = {
+    chatJson: async () => { throw new Error('verifier timeout'); },
+  };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  await assert.rejects(
+    () => engine.verifyFindings(
+      [{ file: 'a.ts', line: 1, severity: 'critical', title: 'x' }],
+      { annotated: '', fileContents: '', pr: {} },
+    ),
+    /verifier timeout/,
+  );
+});

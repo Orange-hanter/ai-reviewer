@@ -3,6 +3,7 @@
   "description": "major одна модель + низкий confidence → не блок (ни tier, ни conf)",
   "expected": {
     "shouldBlock": false,
-    "blockerCount": 0
+    "blockerCount": 0,
+    "findingCount": 1
   }
 }

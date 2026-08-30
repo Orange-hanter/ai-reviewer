@@ -15,7 +15,19 @@ Golden PR-кейсы для регрессии post-processing + gate **без L
 | `findings[].advisorClaims` | опц. refutation R5 |
 | `findings[].prescan` | опц. eslint-prescan finding (R6) |
 
-**15 кейсов** на 2026-07-06 (gate, consensus, verifier, refutation, prescan eslint/ast-grep, fp-e2e-in-diff, fp-pr-254/257).
+Число seed-кейсов проверяет тест `eval harness: все fixtures green` (не дублируем счётчик здесь вручную).
+
+### `meta.json` → `expected`
+
+| Поле | Что сверяет |
+|------|-------------|
+| `shouldBlock` | `wouldBlock` гейта |
+| `blockerCount` | число blockers |
+| `findingCount` | число findings **после** FP/refutation/verifier |
+| `titles` | titles среди **blockers** (должны присутствовать) |
+| `noTitles` | titles среди **всех** оставшихся findings (не должны присутствовать) |
+
+`titles` ≠ `noTitles` по области намеренно: FP может понизить severity вместо удаления — проверка только blockers такое пропустит.
 
 ## Прогон
 

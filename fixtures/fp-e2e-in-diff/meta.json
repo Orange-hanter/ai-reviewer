@@ -4,6 +4,7 @@
   "expected": {
     "shouldBlock": false,
     "blockerCount": 0,
+    "findingCount": 0,
     "noTitles": ["нет e2e на удаление"]
   }
 }
