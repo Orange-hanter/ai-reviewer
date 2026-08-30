@@ -1222,18 +1222,21 @@ test('bareLabel: снимает все хвостовые ()', () => {
 
 test('emitBlastRadiusFindings: Orakul appDir strips before layer compare', () => {
   setProfile({
-    layout: { appDir: 'app', layerDirs: ['server', 'shared', 'client'] },
+    layout: { appDir: 'app/', layerDirs: ['server', 'shared', 'client'] },
   });
-  const blocks = [
-    '- `makeDataStore` → 2 зависимостей вне диффа: `render()` @ app/client/ui.ts:L42 [calls][EXTRACTED], app/server/other.ts:3 [calls]',
-  ];
-  const findings = emitBlastRadiusFindings(blocks, ['app/server/store.ts'], { symbols: ['makeDataStore'] });
-  assert.equal(findings.length, 1, findings);
-  assert.equal(findings[0].file, 'app/client/ui.ts');
-  assert.equal(findings[0].line, 42);
-  assert.ok(findings[0].body.includes('`makeDataStore`'));
-  assert.ok(findings[0].body.includes('`render()`'));
-  resetProfile();
+  try {
+    const blocks = [
+      '- `makeDataStore` → 2 зависимостей вне диффа: `render()` @ app/client/ui.ts:L42 [calls][EXTRACTED], app/server/other.ts:3 [calls]',
+    ];
+    const findings = emitBlastRadiusFindings(blocks, ['app/server/store.ts'], { symbols: ['makeDataStore'] });
+    assert.equal(findings.length, 1, findings);
+    assert.equal(findings[0].file, 'app/client/ui.ts');
+    assert.equal(findings[0].line, 42);
+    assert.ok(findings[0].body.includes('`makeDataStore`'));
+    assert.ok(findings[0].body.includes('`render()`'));
+  } finally {
+    resetProfile();
+  }
 });
 
 test('emitBlastRadiusFindings: cross-community без смены layerDirs', () => {
@@ -1302,18 +1305,29 @@ test('emitBlastRadiusFindings: AMBIGUOUS пропускается', () => {
 
 test('blast-radius major alone does not block without verifier', () => {
   const gate = { blockOn: ['critical', 'major'], blockSingle: ['critical'], consensusMin: 1, confidenceMin: 0.8 };
-  const findings = [{
+  const soft = resolveBlockers([{
     file: 'app/client/ui.ts', line: 42, severity: 'major', confidence: 0.85,
     title: 'blast', model: 'blast-radius', source: 'blast-radius', blastCaller: true,
-  }];
-  const soft = resolveBlockers(findings, ['app/server/x.ts'], gate, () => {}, { skipFpFilter: true });
+  }], ['app/server/x.ts'], gate, () => {}, { skipFpFilter: true });
   assert.equal(soft.wouldBlock, false);
   assert.equal(soft.blockers.length, 0);
 
-  findings[0].verifierStatus = 'verified';
-  const hard = resolveBlockers(findings, ['app/server/x.ts'], gate, () => {}, { skipFpFilter: true });
+  const hard = resolveBlockers([{
+    file: 'app/client/ui.ts', line: 42, severity: 'major', confidence: 0.85,
+    title: 'blast', model: 'blast-radius', source: 'blast-radius', blastCaller: true,
+    verifierStatus: 'verified',
+  }], ['app/server/x.ts'], gate, () => {}, { skipFpFilter: true });
   assert.equal(hard.wouldBlock, true);
   assert.equal(hard.blockers.length, 1);
+});
+
+test('blastCaller without source=blast-radius does not soft-gate', () => {
+  const gate = { blockOn: ['critical', 'major'], blockSingle: ['critical'], consensusMin: 1, confidenceMin: 0.8 };
+  const { wouldBlock } = resolveBlockers([{
+    file: 'a.ts', line: 1, severity: 'major', confidence: 0.9,
+    title: 'llm', model: 'm1', blastCaller: true,
+  }], ['a.ts'], gate, () => {}, { skipFpFilter: true });
+  assert.equal(wouldBlock, true, 'actionability blastCaller alone must not soften the gate');
 });
 
 test('strict mode: LLM major without verifier does not block', () => {
