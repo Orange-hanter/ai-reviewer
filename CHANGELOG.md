@@ -28,10 +28,11 @@
   escapeMdTicks(dep.file); metrics Set/Map → JSON-friendly; crossCommunity ≥0;
   `BLAST_CONF_*` / `BLAST_FINDINGS_MAX` в `constants.mjs`
 - **Blast layer detection**: учитывает `layout.appDir` (`app/server` ↔ `app/client`); парсит `:L42` и привязывает символ/строку к caller
-- **Blast majors soft**: без verifier не блокируют merge (в т.ч. при `consensusMin: 1`)
+- **Blast majors soft**: без verifier не блокируют merge; soft только по `source === BLAST_FINDING_SOURCE` (`blastCaller` — actionability)
 - **LLM `stream_options`**: fail-open — при 400 повтор без `include_usage`
-- **Cost**: убран двойной `recordUsage` (llm + engine); usage только из успешного SSE
-- **C12**: `filterFindingsFixedInDiff` в pipeline; CHANGELOG уточняет, что это алиас fingerprint-инвалидации
+- **Cost**: убран двойной `recordUsage` (llm + engine); `createReviewEngine({ costTracker })` — deprecated noop + warn (`console.warn` без log)
+- Pipeline: канон `filterStalePriorFindings`; `filterFindingsFixedInDiff` — deprecated-алиас
+- `stripAppDir` нормализует trailing slash у `appDir`; `softConsensusForBlastCluster` вынесен из тела `clusterFindings`
 
 ## 0.2.3 — поверхность: AGENTS.md, Walkthrough, prompts
 
