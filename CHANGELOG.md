@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+## 0.2.4 — swarm contract (E22/E23) + graphify enrichment
+
 ### Добавлено
 
+- **E22/E23 swarm contract** (`lib/swarm.mjs`): поле `swarm` в JSON-экспорте +
+  sidecar `*-swarm.json`; `strong` только при независимо подтверждённых блокерах;
+  `suggestedScopeFiles` из blast `affected_files` вне диффа PR ([docs/swarm.md](docs/swarm.md))
+- Consumer kit Orakul: пин `v0.2.4`
 - **Graphify enrichment**: из `graph.json` — имя caller, `[EXTRACTED|INFERRED]`,
   `cross-community`; god-nodes из `.graphify_analysis.json`; метрики
   `affected_files` / `confidence` / `cross_community`; омонимный seed не

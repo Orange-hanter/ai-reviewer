@@ -6,6 +6,8 @@
 | [profiles.md](profiles.md) | Профиль проекта — чем движок адаптируется к репозиторию |
 | [configuration.md](configuration.md) | CLI и все env-переменные с дефолтами |
 | [integration.md](integration.md) | Подключение к репозиторию-потребителю (пин + workflow) |
+| [swarm.md](swarm.md) | E22/E23: внешний verdict + blast scope для PR-swarm |
+| [benchmark.md](benchmark.md) | Precision/recall gold-бенчмарк |
 | [false-positives.md](false-positives.md) | Семейства ложных срабатываний, защиты, петля обучения |
 | [model-tuning.md](model-tuning.md) | Роли моделей, температуры, размер чанка, reasoning effort |
 

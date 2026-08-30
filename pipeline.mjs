@@ -299,6 +299,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           pr, headSha, reviewMode, route, wouldBlock: false,
           counts: { critical: 0, major: 0, minor: 0, nit: 0 },
           total: 0, findings: [], blockers: [], reviews: [],
+          changedPaths,
         }), log, obs);
         if (dryRun) {
           log(`=== DRY-RUN: router ${route.route} — LLM пропущен ===`);
@@ -464,6 +465,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           blockers: prescanBlockers, reviews: [],
           llmFailed: true,
           llmErrors: reviews.map((r) => ({ model: r.model, error: String(r.error || '').slice(0, 200) })),
+          blastMetrics, changedPaths,
         }), log, obs);
         if (dryRun) {
           finalObs = {
@@ -595,6 +597,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         pr, headSha, reviewMode, route, wouldBlock: blockers.length > 0, verdict,
         counts, total, findings: allFindings, blockers, reviews,
         verifierStats, refutationStats, prescanResult,
+        blastMetrics, changedPaths,
       }), log, obs);
 
       if (dryRun) {

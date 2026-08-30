@@ -63,7 +63,8 @@ flowchart TB
 | `lib/triage.mjs` | Авто-ответ и resolve на своих тредах с известным FP |
 | `lib/github.mjs` | GitHub API: sticky, inline-треды, реакции |
 | `lib/feedback.mjs`, `feedback/*` | Сбор 👍/👎 → JSONL → паттерны и fixtures |
-| `lib/export.mjs` | JSON + SARIF артефакт прогона |
+| `lib/export.mjs` | JSON + SARIF артефакт прогона (+ sidecar swarm) |
+| `lib/swarm.mjs` | E22/E23: `strong` verdict + `suggestedScopeFiles` для оркестратора |
 | `lib/observability.mjs`, `lib/metrics.mjs` | JSONL-лог прогонов и сводка по нему |
 | `lib/eval.mjs` | Golden fixtures без LLM |
 
