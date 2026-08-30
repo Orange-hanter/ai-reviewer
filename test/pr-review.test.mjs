@@ -21,7 +21,13 @@ const {
   filterFindingsFixedInDiff, findingFingerprint, createGraphifyClient, buildChangedFilesSection,
   dedupeSameModelFindings, createCostTracker, formatCostStickyLine, scoreGoldCase, aggregateBenchmark,
   emitBlastRadiusFindings, resolveBlockers, normalizeFinding, setProfile, resetProfile,
+  matchesKnownFalsePositive, redactSecretsForLog,
 } = await import('../index.mjs');
+const {
+  buildGraphIndex, resolveUniqueNode, enrichAffectedDep, bareLabel,
+} = await import('../lib/graphify.mjs');
+const { resetFpPatternsCache } = await import('../lib/fp-patterns.mjs');
+const { BLAST_CONF_AMBIGUOUS } = await import('../lib/constants.mjs');
 
 const SAMPLE_DIFF = `diff --git a/foo.ts b/foo.ts
 --- a/foo.ts
@@ -89,9 +95,19 @@ test('collectBlastSymbols: добор экспортов из полного ф�
 test('Graphify: пустой blast-radius различает stale graph, неразрешимый символ и реальные зависимости', async () => {
   const calls = [];
   const cfg = {
-    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md' },
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
     limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
   };
+  const graphJson = JSON.stringify({
+    nodes: [
+      { id: 'seed', label: 'usedElsewhere', source_file: 'lib/x.ts', community: 1, community_name: 'core' },
+      { id: 'caller', label: 'caller', source_file: 'app/server.ts', community: 2, community_name: 'app' },
+    ],
+    links: [{
+      source: 'caller', target: 'seed', relation: 'calls',
+      confidence: 'EXTRACTED', source_file: 'app/server.ts', source_location: 'L42',
+    }],
+  });
   const execFileP = async (bin, args) => {
     calls.push([bin, ...args]);
     if (bin === 'git') return { stdout: 'abcdef123456\n' };
@@ -101,27 +117,37 @@ test('Graphify: пустой blast-radius различает stale graph, нер
   };
   const client = createGraphifyClient(cfg, {
     execFileP,
-    readFile: async () => '# Graph Report\n- Built from commit: `12345678`\n',
+    readFile: async (path) => {
+      if (String(path).endsWith('graph.json')) return graphJson;
+      return '# Graph Report\n- Built from commit: `12345678`\n';
+    },
     access: async () => {},
   });
 
   const { blocks, metrics } = await client.buildBlastRadius(['unresolved', 'noDeps', 'usedElsewhere']);
   assert.equal(blocks.length, 1);
+  assert.ok(blocks[0].includes('`caller` @ app/server.ts:42'), blocks[0]);
+  assert.ok(blocks[0].includes('[EXTRACTED]'), blocks[0]);
+  assert.ok(blocks[0].includes('cross-community'), blocks[0]);
   assert.equal(metrics.symbols_total, 3);
   assert.equal(metrics.symbols_resolved, 2);
   assert.equal(metrics.affected_nonempty, 1);
   assert.equal(metrics.graph_fresh, false);
+  assert.equal(metrics.cross_community, 1);
+  assert.equal(metrics.confidence.EXTRACTED, 1);
+  assert.deepEqual(metrics.affected_files, ['app/server.ts']);
   assert.equal(metrics.skip_reasons.symbol_unresolved, 1);
   assert.equal(metrics.skip_reasons.no_dependents, 1);
   assert.equal(metrics.skip_reasons.graph_stale, 1);
   assert.equal(metrics.skip_reason, 'mixed');
-  assert.ok(calls.some(([bin]) => bin === 'git'), 'freshness сверяется с HEAD');
+  assert.ok(calls.some(([bin, ...args]) => bin === 'git' && args.includes('-C')), 'git -C для freshness');
+  assert.ok(calls.some(([bin, ...args]) => bin === 'gf' && args.includes('--depth') && args.includes('2')), 'передаём --depth');
 });
 
 test('Graphify: отсутствует graph.json → graph_missing, без вызова affected', async () => {
   const calls = [];
   const cfg = {
-    graphify: { bin: 'gf', graph: 'missing-graph.json', report: 'missing-report.md' },
+    graphify: { bin: 'gf', graph: 'missing-graph.json', report: 'missing-report.md', depth: 2, dropAmbiguous: true },
     limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
   };
   const client = createGraphifyClient(cfg, {
@@ -138,17 +164,139 @@ test('Graphify: отсутствует graph.json → graph_missing, без вы
 
 test('Graphify: нет символов в диффе → честный skip no_symbols_in_diff', async () => {
   const cfg = {
-    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md' },
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
     limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
   };
   const client = createGraphifyClient(cfg, {
     execFileP: async () => ({ stdout: '' }),
-    readFile: async () => '# Graph Report\n- Built from commit: `abcdef12`\n',
+    readFile: async (path) => {
+      if (String(path).endsWith('graph.json')) return '{"nodes":[],"links":[]}';
+      return '# Graph Report\n- Built from commit: `abcdef12`\n';
+    },
     access: async () => {},
   });
   const { metrics } = await client.buildBlastRadius([]);
   assert.equal(metrics.skip_reasons.no_symbols_in_diff, 1);
   assert.equal(metrics.symbols_total, 0);
+});
+
+test('Graphify: AMBIGUOUS drop + INFERRED без cross-community', async () => {
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const graphJson = JSON.stringify({
+    nodes: [
+      { id: 'seed', label: 'foo', source_file: 'a.ts', community: 1 },
+      { id: 'amb', label: 'amb()', source_file: 'b.ts', community: 1 },
+      { id: 'inf', label: 'inf()', source_file: 'c.ts', community: 1 },
+    ],
+    links: [
+      { source: 'amb', target: 'seed', relation: 'uses', confidence: 'AMBIGUOUS', source_file: 'b.ts' },
+      { source: 'inf', target: 'seed', relation: 'uses', confidence: 'INFERRED', source_file: 'c.ts' },
+    ],
+  });
+  const client = createGraphifyClient(cfg, {
+    execFileP: async (bin) => {
+      if (bin === 'git') return { stdout: 'abcdef12\n' };
+      return { stdout: '- amb() [uses] b.ts:L1\n- inf() [uses] c.ts:L2\n' };
+    },
+    readFile: async (path) => {
+      if (String(path).endsWith('graph.json')) return graphJson;
+      return '# Graph Report\n- Built from commit: `abcdef12`\n';
+    },
+    access: async () => {},
+  });
+  const { blocks, metrics } = await client.buildBlastRadius(['foo']);
+  assert.equal(blocks.length, 1);
+  assert.ok(!blocks[0].includes('b.ts'), blocks[0]);
+  assert.ok(blocks[0].includes('`inf()` @ c.ts:2'), blocks[0]);
+  assert.ok(blocks[0].includes('[INFERRED]'), blocks[0]);
+  assert.ok(!blocks[0].includes('cross-community'), blocks[0]);
+  assert.equal(metrics.confidence.INFERRED, 1);
+  assert.equal(metrics.cross_community, 0);
+});
+
+test('Graphify resolveUniqueNode: exact побеждает bare-омоним Foo vs Foo()', () => {
+  const index = buildGraphIndex({
+    nodes: [
+      { id: 'plain', label: 'Foo', source_file: 'a.ts', community: 1, community_name: 'A' },
+      { id: 'call', label: 'Foo()', source_file: 'b.ts', community: 2, community_name: 'B' },
+      { id: 'caller', label: 'use()', source_file: 'c.ts', community: 3 },
+    ],
+    links: [
+      { source: 'caller', target: 'plain', relation: 'calls', confidence: 'EXTRACTED', source_file: 'c.ts' },
+      { source: 'caller', target: 'call', relation: 'calls', confidence: 'INFERRED', source_file: 'c.ts' },
+    ],
+  });
+  assert.equal(resolveUniqueNode(index, 'Foo')?.id, 'plain');
+  assert.equal(resolveUniqueNode(index, 'Foo()')?.id, 'call');
+  // два одинаковых exact — не угадываем
+  const dup = buildGraphIndex({
+    nodes: [
+      { id: 'a', label: 'handler()', source_file: 'a.ts', community: 1 },
+      { id: 'b', label: 'handler()', source_file: 'b.ts', community: 2 },
+    ],
+    links: [],
+  });
+  assert.equal(resolveUniqueNode(dup, 'handler'), null);
+  assert.equal(resolveUniqueNode(dup, 'handler()'), null);
+});
+
+test('Graphify enrichAffectedDep: омонимный seed не подмешивает чужой confidence/community', () => {
+  const index = buildGraphIndex({
+    nodes: [
+      { id: 'wrong', label: 'create', source_file: 'wrong.ts', community: 99, community_name: 'wrong-comm' },
+      { id: 'right', label: 'create()', source_file: 'right.ts', community: 1, community_name: 'right-comm' },
+      { id: 'caller', label: 'ui()', source_file: 'ui.ts', community: 2, community_name: 'ui' },
+    ],
+    links: [
+      // входящие к wrong (первый в индексе) — EXTRACTED + cross-community
+      { source: 'caller', target: 'wrong', relation: 'calls', confidence: 'EXTRACTED', source_file: 'ui.ts' },
+      // к реальному create() — нет рёбер
+    ],
+  }, { gods: [{ label: 'create' }] });
+
+  // bare-омоним create + create() → query create() уникален exact
+  const ok = enrichAffectedDep(
+    { label: 'ui()', relation: 'calls', file: 'ui.ts', line: 1 },
+    'create()',
+    index,
+  );
+  assert.equal(ok.seedCommunity, 1);
+  assert.equal(ok.confidence, undefined, 'нет ребра к create() — не берём от wrong');
+  assert.equal(ok.crossCommunity, true, 'community seed≠caller — ок даже без ребра');
+  assert.equal(ok.seedIsGodNode, undefined, 'gods exact "create", seed label create()');
+
+  // first-wins регрессия: query create() не должен взять inbound от plain `create`
+  const asWrong = enrichAffectedDep(
+    { label: 'ui()', relation: 'calls', file: 'ui.ts', line: 1 },
+    'create',
+    index,
+  );
+  assert.equal(asWrong.seedCommunity, 99);
+  assert.equal(asWrong.confidence, 'EXTRACTED');
+
+  // Полная коллизия двух create():
+  const amb = buildGraphIndex({
+    nodes: [
+      { id: 'a', label: 'make()', source_file: 'a.ts', community: 1 },
+      { id: 'b', label: 'make()', source_file: 'b.ts', community: 2 },
+      { id: 'c', label: 'caller()', source_file: 'c.ts', community: 3 },
+    ],
+    links: [
+      { source: 'c', target: 'a', relation: 'calls', confidence: 'EXTRACTED', source_file: 'c.ts' },
+    ],
+  });
+  const skipped = enrichAffectedDep(
+    { label: 'caller()', relation: 'calls', file: 'c.ts', line: 3 },
+    'make',
+    amb,
+  );
+  assert.equal(skipped.confidence, undefined);
+  assert.equal(skipped.seedCommunity, undefined);
+  assert.equal(skipped.crossCommunity, undefined);
+  assert.equal(skipped.seedIsGodNode, undefined);
 });
 
 test('extractJsonObject: чистый и в fence', () => {
@@ -456,7 +604,7 @@ test('aggregateMetrics + formatMetricsReport: сводка по событиям
   assert.equal(agg.blastRadius.graphFresh.stale, 1);
   assert.equal(agg.blastRadius.skipReasons.symbol_unresolved, 2);
   assert.equal(agg.llm.total, 2);
-  assert.equal(agg.llm.byModel.get('specialist/m1').ok, 1);
+  assert.equal(agg.llm.byModel['specialist/m1'].ok, 1);
   assert.equal(agg.fpFilterRemoved, 3);
   assert.equal(agg.verifier.unverified, 1);
   assert.equal(agg.verifier.skipped, 1);
@@ -465,7 +613,7 @@ test('aggregateMetrics + formatMetricsReport: сводка по событиям
   assert.ok(report.includes('Прогоны: 2 · блоков 1'));
   assert.ok(report.includes('specialist/m1: 2 вызов(ов), ok 50%, avg 3.0с'));
   assert.ok(report.includes('чанков пропущено 5'));
-  assert.ok(report.includes('Graphify blast-radius: plans 1 · symbols resolved 2/4 · non-empty 1 · graph fresh 0/1'));
+  assert.ok(report.includes('Graphify blast-radius: plans 1 · symbols resolved 2/4 · non-empty 1 · cross-community-edges(sum) 0 · affected-files 0 · graph fresh 0/1'));
 });
 
 test('parseDiffNewPath/parseDiffGitPath: unescape git C-quoting (octal UTF-8, \\\\, \\")', () => {
@@ -1036,12 +1184,136 @@ test('emitBlastRadiusFindings: cross-layer caller outside diff', () => {
   setProfile({
     layout: { layerDirs: ['apps', 'packages'] },
   });
-  const blocks = ['- `exportFn` → 2 зависимостей вне диффа: apps/web/api.ts:10 [calls], packages/core/x.ts:3 [calls]'];
+  const blocks = ['- `exportFn` → 2 зависимостей вне диффа: `api()` @ apps/web/api.ts:10 [calls][EXTRACTED], packages/core/x.ts:3 [calls]'];
   const findings = emitBlastRadiusFindings(blocks, ['packages/core/changed.ts'], { symbols: ['exportFn'] });
-  assert.ok(findings.some((f) => f.file === 'apps/web/api.ts'), findings);
+  assert.equal(findings.length, 1, findings);
+  assert.equal(findings[0].file, 'apps/web/api.ts');
   assert.equal(findings[0].source, 'blast-radius');
   assert.equal(findings[0].severity, 'major');
+  assert.equal(findings[0].line, 10);
+  assert.ok(findings[0].body.includes('`api()`'));
+  assert.ok(!findings.some((f) => f.file === 'packages/core/x.ts'), 'same-layer excluded');
   resetProfile();
+});
+
+test('emitBlastRadiusFindings: DROP_AMBIGUOUS=0 оставляет AMBIGUOUS', () => {
+  setProfile({ layout: { layerDirs: ['apps', 'packages'] } });
+  const blocks = [
+    '- `exportFn` → 1 зависимостей вне диффа: `maybe()` @ apps/web/x.ts:1 [uses][AMBIGUOUS]',
+  ];
+  const kept = emitBlastRadiusFindings(blocks, ['packages/core/a.ts'], {
+    symbols: ['exportFn'], dropAmbiguous: false,
+  });
+  assert.equal(kept.length, 1, kept);
+  assert.equal(kept[0].blastEdgeConfidence, 'AMBIGUOUS');
+  assert.equal(kept[0].confidence, BLAST_CONF_AMBIGUOUS);
+  const dropped = emitBlastRadiusFindings(blocks, ['packages/core/a.ts'], {
+    symbols: ['exportFn'], dropAmbiguous: true,
+  });
+  assert.equal(dropped.length, 0);
+  resetProfile();
+});
+
+test('bareLabel: снимает все хвостовые ()', () => {
+  assert.equal(bareLabel('foo()()'), 'foo');
+  assert.equal(bareLabel('bar()'), 'bar');
+  assert.equal(bareLabel('baz'), 'baz');
+});
+
+test('emitBlastRadiusFindings: Orakul appDir strips before layer compare', () => {
+  setProfile({
+    layout: { appDir: 'app', layerDirs: ['server', 'shared', 'client'] },
+  });
+  const blocks = [
+    '- `makeDataStore` → 2 зависимостей вне диффа: `render()` @ app/client/ui.ts:L42 [calls][EXTRACTED], app/server/other.ts:3 [calls]',
+  ];
+  const findings = emitBlastRadiusFindings(blocks, ['app/server/store.ts'], { symbols: ['makeDataStore'] });
+  assert.equal(findings.length, 1, findings);
+  assert.equal(findings[0].file, 'app/client/ui.ts');
+  assert.equal(findings[0].line, 42);
+  assert.ok(findings[0].body.includes('`makeDataStore`'));
+  assert.ok(findings[0].body.includes('`render()`'));
+  resetProfile();
+});
+
+test('emitBlastRadiusFindings: cross-community без смены layerDirs', () => {
+  setProfile({ layout: { layerDirs: ['app'] } });
+  const blocks = [
+    '- `sharedFn` → 1 зависимостей вне диффа: `other()` @ app/other.ts:5 [calls][EXTRACTED] cross-community',
+  ];
+  const findings = emitBlastRadiusFindings(blocks, ['app/changed.ts'], { symbols: ['sharedFn'] });
+  assert.equal(findings.length, 1, findings);
+  assert.equal(findings[0].file, 'app/other.ts');
+  assert.equal(findings[0].blastCrossCommunity, true);
+  assert.equal(findings[0].confidence, 0.9);
+  assert.ok(findings[0].body.includes('community'));
+  resetProfile();
+});
+
+test('fp-patterns: softblast-typedef + graphify-path-norm speculation', async () => {
+  resetFpPatternsCache();
+  assert.equal(
+    matchesKnownFalsePositive(
+      'typedef Finding не описывает blast-radius маркеры, а softBlast дублирует проверку через два поля',
+      ['lib/findings.mjs'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'Дедуп по d.file без нормализации пути — разные представления путей от graphify',
+      ['lib/graphify.mjs'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'Потенциальная command-injection при передаче REVIEW_GRAPHIFY_DEPTH в graphify CLI',
+      ['docs/configuration.md'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'Удалён costTracker из deps createReviewEngine — требуется верификация',
+      ['pipeline.mjs'],
+    ),
+    true,
+  );
+  // без requiresPath-пути паттерн не срабатывает
+  assert.equal(
+    matchesKnownFalsePositive(
+      'typedef Finding не описывает blast-radius маркеры, а softBlast дублирует проверку через два поля',
+      ['app/server/x.ts'],
+    ),
+    false,
+  );
+});
+
+test('emitBlastRadiusFindings: AMBIGUOUS пропускается', () => {
+  setProfile({ layout: { layerDirs: ['apps', 'packages'] } });
+  const blocks = [
+    '- `exportFn` → 1 зависимостей вне диффа: `maybe()` @ apps/web/x.ts:1 [uses][AMBIGUOUS]',
+  ];
+  const findings = emitBlastRadiusFindings(blocks, ['packages/core/a.ts'], { symbols: ['exportFn'] });
+  assert.equal(findings.length, 0, findings);
+  resetProfile();
+});
+
+test('blast-radius major alone does not block without verifier', () => {
+  const gate = { blockOn: ['critical', 'major'], blockSingle: ['critical'], consensusMin: 1, confidenceMin: 0.8 };
+  const findings = [{
+    file: 'app/client/ui.ts', line: 42, severity: 'major', confidence: 0.85,
+    title: 'blast', model: 'blast-radius', source: 'blast-radius', blastCaller: true,
+  }];
+  const soft = resolveBlockers(findings, ['app/server/x.ts'], gate, () => {}, { skipFpFilter: true });
+  assert.equal(soft.wouldBlock, false);
+  assert.equal(soft.blockers.length, 0);
+
+  findings[0].verifierStatus = 'verified';
+  const hard = resolveBlockers(findings, ['app/server/x.ts'], gate, () => {}, { skipFpFilter: true });
+  assert.equal(hard.wouldBlock, true);
+  assert.equal(hard.blockers.length, 1);
 });
 
 test('strict mode: LLM major without verifier does not block', () => {
@@ -1099,4 +1371,141 @@ test('buildSummary: cost sticky line when snapshot provided', () => {
     costSnapshot: { total_tokens: 45_000, cost_known: true, cost_usd: 0.12 },
   });
   assert.ok(md.includes('💰 ~$0.12 · 45k tokens'));
+});
+
+test('redactSecretsForLog: quoted secret with spaces + known token forms', () => {
+  const q = redactSecretsForLog('password="a b c" and api_key=xyz rest');
+  assert.ok(q.includes('password=***'), q);
+  assert.ok(q.includes('api_key=***'), q);
+  assert.ok(!q.includes('a b c'), q);
+  assert.ok(!q.includes('xyz'), q);
+  const unquoted = redactSecretsForLog('password=hello world; next');
+  assert.ok(unquoted.includes('password=***'), unquoted);
+  assert.ok(!unquoted.includes('hello'), unquoted);
+  assert.ok(unquoted.includes('next'), unquoted);
+  const basic = redactSecretsForLog('Authorization: Basic YWRtaW46c2VjcmV0');
+  assert.ok(basic.includes('Basic ***'), basic);
+  assert.ok(!basic.includes('YWRtaW4'), basic);
+  const forms = redactSecretsForLog('xoxb-1234567890-token AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz012345 AKIAIOSFODNN7EXAMPLE');
+  assert.equal(forms.includes('xoxb-'), false, forms);
+  assert.equal(forms.includes('AIza'), false, forms);
+  assert.equal(forms.includes('AKIA'), false, forms);
+  // bare "key=" / "token=" больше не матчим (false positive)
+  const bare = redactSecretsForLog('map key=alpha token=beta');
+  assert.ok(bare.includes('key=alpha'), bare);
+  assert.ok(bare.includes('token=beta'), bare);
+  assert.equal(redactSecretsForLog(undefined), '');
+  const trunc = redactSecretsForLog('abcdefghij', 5);
+  assert.equal(trunc, 'abcd…');
+});
+
+test('loadReviewConfig: GRAPHIFY depth clamp + DROP_AMBIGUOUS false/no', () => {
+  const hi = loadReviewConfig({ REVIEW_GRAPHIFY_DEPTH: '99', OLLAMA_API_KEY: 'x' });
+  assert.equal(hi.graphify.depth, 5);
+  const lo = loadReviewConfig({ REVIEW_GRAPHIFY_DEPTH: '0', OLLAMA_API_KEY: 'x' });
+  assert.equal(lo.graphify.depth, 2, 'invalid → default via numEnv');
+  for (const off of ['0', 'false', 'no', 'off']) {
+    const cfg = loadReviewConfig({ REVIEW_GRAPHIFY_DROP_AMBIGUOUS: off, OLLAMA_API_KEY: 'x' });
+    assert.equal(cfg.graphify.dropAmbiguous, false, off);
+  }
+  assert.equal(loadReviewConfig({ OLLAMA_API_KEY: 'x' }).graphify.dropAmbiguous, true);
+});
+
+test('loadReviewConfig: envFlag unifies boolean off (false/no) for default-on flags', () => {
+  for (const off of ['0', 'false', 'no']) {
+    const cfg = loadReviewConfig({
+      REVIEW_VERIFIER: off, REVIEW_ROUTER: off, REVIEW_PRESCAN: off, OLLAMA_API_KEY: 'x',
+    });
+    assert.equal(cfg.verifier.enabled, false, off);
+    assert.equal(cfg.router.enabled, false, off);
+    assert.equal(cfg.prescan.enabled, false, off);
+  }
+});
+
+test('emitBlastRadiusFindings: sort by confidence then cap; symbol after preamble', () => {
+  setProfile({ layout: { layerDirs: ['apps', 'packages'] } });
+  const preamble = 'Note:\n\n- `exportFn` → 3 зависимостей вне диффа: '
+    + '`low()` @ apps/web/a.ts:1 [calls][INFERRED], '
+    + '`hi()` @ apps/web/b.ts:2 [calls][EXTRACTED], '
+    + '`mid()` @ apps/web/c.ts:3 [calls]';
+  const findings = emitBlastRadiusFindings([preamble], ['packages/core/x.ts'], { symbols: ['exportFn'] });
+  assert.equal(findings.length, 3);
+  assert.equal(findings[0].file, 'apps/web/b.ts');
+  assert.equal(findings[0].confidence, 0.9);
+  assert.equal(findings[1].file, 'apps/web/a.ts');
+  assert.equal(findings[1].confidence, 0.75);
+  assert.equal(findings[2].confidence, 0.7, 'unknown ≤ INFERRED');
+  assert.ok(findings.every((f) => f.body.includes('`exportFn`')), 'symbol from multiline header');
+  resetProfile();
+});
+
+test('fp-patterns: round3 dash-flag + softblast boundary + redact dup', async () => {
+  resetFpPatternsCache();
+  assert.equal(
+    matchesKnownFalsePositive(
+      'символ начинается с `-` и looks like a CLI flag для graphify affected',
+      ['lib/graphify.mjs'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'Нарушение границ модулей: hardcoded blast-radius soft-tier в findings',
+      ['lib/findings.mjs'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'дублирование redactSecretsForLog между util.mjs и observability',
+      ['lib/util.mjs'],
+    ),
+    true,
+  );
+});
+
+test('fp-patterns: round4 cross-chunk + findings cluster + test nits', async () => {
+  resetFpPatternsCache();
+  assert.equal(
+    matchesKnownFalsePositive(
+      'Три FP-паттерна подряд глушат архитектурные претензии к findings.mjs',
+      ['feedback/fp-patterns.jsonl'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'Зависимость: filterFindingsFixedInDiff должен экспортироваться с эквивалентной семантикой',
+      ['pipeline.mjs'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'Зависимость: emitBlastRadiusFindings должен поддерживать dropAmbiguous',
+      ['pipeline.mjs'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'Прямой импорт graphify-интернов в обход barrel index.mjs',
+      ['test/pr-review.test.mjs'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'escapeMdTicks безвозвратно удаляет backticks из caller/symbol/file',
+      ['lib/blast-findings.mjs'],
+    ),
+    true,
+  );
+  assert.equal(
+    matchesKnownFalsePositive(
+      'Смена контракта aggregateMetrics.byModel: Map → Object',
+      ['lib/metrics.mjs'],
+    ),
+    true,
+  );
 });

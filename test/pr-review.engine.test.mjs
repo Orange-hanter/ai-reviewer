@@ -192,12 +192,33 @@ test('ollama: SSE-стрим собирается в content', async () => {
   });
 });
 
-test('ollama: не-transient ошибка (400) — без ретраев', async () => {
+test('ollama: не-transient 400 без stream_options в теле — сразу стоп (без ложного retry)', async () => {
+  let calls = 0;
+  const bodies = [];
+  const client = createOllamaClient(OLLAMA_CFG, () => {});
+  await withFetch(async (_url, init) => {
+    calls++;
+    bodies.push(JSON.parse(init.body));
+    return new Response('bad request: max_tokens', { status: 400 });
+  }, async () => {
+    await assert.rejects(() => client.chatText([], 'm1'), /LLM 400/);
+    assert.equal(calls, 1, 'без stream_options/include_usage в теле — не ретраим');
+    assert.ok(bodies[0].stream_options?.include_usage);
+  });
+});
+
+test('ollama: 400 на stream_options → успех без include_usage', async () => {
   let calls = 0;
   const client = createOllamaClient(OLLAMA_CFG, () => {});
-  await withFetch(async () => { calls++; return new Response('bad', { status: 400 }); }, async () => {
-    await assert.rejects(() => client.chatText([], 'm1'), /LLM 400/);
-    assert.equal(calls, 1);
+  await withFetch(async (_url, init) => {
+    calls++;
+    const body = JSON.parse(init.body);
+    if (body.stream_options) return new Response('unknown field stream_options', { status: 400 });
+    return new Response(sse('ok'), { status: 200 });
+  }, async () => {
+    const text = await client.chatText([], 'm1');
+    assert.equal(text, 'ok');
+    assert.equal(calls, 2);
   });
 });
 

@@ -9,7 +9,7 @@ import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs'
 import { createGraphifyClient } from './lib/graphify.mjs';
 import { createGithubClient } from './lib/github.mjs';
 import { createReviewEngine } from './lib/engine.mjs';
-import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings } from './lib/findings.mjs';
+import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterFindingsFixedInDiff } from './lib/findings.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey } from './lib/actionability.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
@@ -255,7 +255,7 @@ export function createReviewPipeline(cfg, deps = {}) {
     let finalObs = { exitCode: 0 };
 
     try {
-      const engine = deps.engine ?? createReviewEngine(cfg, { ollama, prompt, log, observability: obs, costTracker });
+      const engine = deps.engine ?? createReviewEngine(cfg, { ollama, prompt, log, observability: obs });
 
       let pr = { number: cfg.github.prNumber, title: '(local diff)', html_url: '' };
       let headSha = '';
@@ -343,7 +343,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         runs: Array.isArray(rawPriorFindings?.runs) ? rawPriorFindings.runs : [],
         sha: typeof rawPriorFindings?.sha === 'string' ? rawPriorFindings.sha : '',
       };
-      const priorFindings = filterStalePriorFindings(priorSticky.findings, files, log);
+      const priorFindings = filterFindingsFixedInDiff(priorSticky.findings, files, log);
       if (priorFindings.length !== priorSticky.findings.length) {
         obs.logEvent('prior_findings', { loaded: priorSticky.findings.length, kept: priorFindings.length });
       }
@@ -365,8 +365,12 @@ export function createReviewPipeline(cfg, deps = {}) {
       // процесс завершается штатно (sticky/export/observability) до убийства job раннером.
       const deadline = limits.timeBudgetMs > 0 ? Date.now() + limits.timeBudgetMs : 0;
       log(`blast-radius блоков: ${blastBlocks.length} · symbols ${blastMetrics.symbols_resolved ?? '—'}/${blastMetrics.symbols_total} · affected ${blastMetrics.affected_nonempty} · graph ${blastMetrics.graph_status} · файлов с контекстом: ${contentMap.size} · чанков: ${chunks.length}`);
-      const blastFindings = emitBlastRadiusFindings(blastBlocks, changedPaths, { symbols, model: 'blast-radius' });
-      if (blastFindings.length) log(`blast-radius: +${blastFindings.length} детерминированных cross-layer caller(s)`);
+      const blastFindings = emitBlastRadiusFindings(blastBlocks, changedPaths, {
+        symbols,
+        model: 'blast-radius',
+        dropAmbiguous: cfg.graphify?.dropAmbiguous !== false,
+      });
+      if (blastFindings.length) log(`blast-radius: +${blastFindings.length} детерминированных cross-layer/community caller(s)`);
       obs.logEvent('plan', {
         chunks: chunks.length,
         symbols: symbols.length,

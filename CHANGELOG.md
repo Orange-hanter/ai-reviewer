@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+### Добавлено
+
+- **Graphify enrichment**: из `graph.json` — имя caller, `[EXTRACTED|INFERRED]`,
+  `cross-community`; god-nodes из `.graphify_analysis.json`; метрики
+  `affected_files` / `confidence` / `cross_community`; омонимный seed не
+  угадывается (как `resolve_seed`); `REVIEW_GRAPHIFY_DROP_AMBIGUOUS` читается и
+  в `emitBlastRadiusFindings`; `BLAST_PATH_EXTS` — единый список расширений
+- Env: `REVIEW_GRAPHIFY_DEPTH`, `REVIEW_GRAPHIFY_DROP_AMBIGUOUS`
+- FP-паттерны: `softblast-typedef-cosmetic`, `graphify-path-norm-speculation`
+  (+ requiresPath); также `graphify-depth-shell-injection`, `blast-source-literal-softblast`,
+  `parse-blast-dependents-export-exists`, `costtracker-engine-deps-intentional`;
+  round3/4: dash-flag, softblast-boundary, redact-dup, findings-cluster, cross-chunk
+  filter/dropAmbiguous, test white-box/fp-import/fixture-secrets, query-ampersand
+- Graphify/blast hygiene: `BLAST_PATH_EXTS` в constants; `opts.layout`; markdown-escape;
+  god-node только через opts; `git -C` через safe cwd; LLM stream_options-retry без слота
+  httpRetries; redact секретов в LLM/obs логах
+
+### Исправлено
+
+- **redactSecretsForLog**: quoted-значения с пробелами; slack/google/AWS token forms;
+  без голых `key`/`token` (FP); Basic/Digest Authorization; unquoted до `,;`/EOL;
+  truncation `…`; `envFlag` унифицирует boolean env (вкл. DROP_AMBIGUOUS / VERIFIER / …);
+  GRAPHIFY_DEPTH clamp 1…5; blast conf unknown 0.7; top-8 по confidence; symbol `/m`;
+  escapeMdTicks(dep.file); metrics Set/Map → JSON-friendly; crossCommunity ≥0;
+  `BLAST_CONF_*` / `BLAST_FINDINGS_MAX` в `constants.mjs`
+- **Blast layer detection**: учитывает `layout.appDir` (`app/server` ↔ `app/client`); парсит `:L42` и привязывает символ/строку к caller
+- **Blast majors soft**: без verifier не блокируют merge (в т.ч. при `consensusMin: 1`)
+- **LLM `stream_options`**: fail-open — при 400 повтор без `include_usage`
+- **Cost**: убран двойной `recordUsage` (llm + engine); usage только из успешного SSE
+- **C12**: `filterFindingsFixedInDiff` в pipeline; CHANGELOG уточняет, что это алиас fingerprint-инвалидации
+
 ## 0.2.3 — поверхность: AGENTS.md, Walkthrough, prompts
 
 ### Добавлено
@@ -22,10 +55,10 @@
 - Env-приоритет: `LLM_API_KEY` / `LLM_BASE_URL` с fallback на `OLLAMA_*`; fail-closed без silent provider fallback
 - **Cost tracking**: usage из SSE, `createCostTracker`, `REVIEW_PRICE_JSON`, sticky `💰 ~$0.12 · 45k tokens`
 - **`lib/benchmark.mjs`** + `pr-review-benchmark` CLI + [docs/benchmark.md](docs/benchmark.md)
-- **Blast-radius findings** (`lib/blast-findings.mjs`): cross-layer callers вне диффа → deterministic major
+- **Blast-radius findings** (`lib/blast-findings.mjs`): cross-layer callers вне диффа → deterministic major (soft: блок merge только после verifier)
 - **`REVIEW_STRICT=1`** / `profile.strict`: блок только prescan или verifier-verified; advisory не inline
 - **Grounding quotes**: поле `quote` в schema; `REVIEW_REQUIRE_QUOTE=1` / strict — drop critical/major без quote
-- `filterFindingsFixedInDiff` — adjacent-commit carry-over через fingerprint-инвалидацию
+- `filterFindingsFixedInDiff` — алиас `filterStalePriorFindings` (тот же fingerprint carry-over; имя для adjacent-commit семантики)
 - Actionability signal `blastCaller` (weight 2)
 
 ### Изменено

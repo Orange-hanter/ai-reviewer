@@ -50,6 +50,7 @@ flowchart TB
 | `lib/config.mjs` | `loadReviewConfig()` — профиль + env + CLI в один замороженный объект |
 | `lib/diff.mjs` | Парсинг diff, чанкинг, аннотация номеров строк |
 | `lib/graphify.mjs` | `graphify affected` → blast-radius изменённых символов |
+| `lib/blast-findings.mjs` | Детерминированные major по cross-layer/community callers (soft: блок merge только после verifier) |
 | `lib/prescan.mjs`, `lib/astgrep.mjs`, `lib/prescan-shared.mjs` | eslint + ast-grep по изменённым файлам |
 | `lib/engine.mjs` | MoA и consensus, fallback моделей, дедлайн прогона |
 | `lib/ollama.mjs` | SSE-чат, JSON-mode, ретраи, адаптивный семафор по 429 |
@@ -82,8 +83,9 @@ flowchart TB
 Символы для Graphify берутся не только из hunk-строк: если в диффе правят тело функции
 без строки `export`, [`collectBlastSymbols`](../lib/diff.mjs) добирает экспорты из полного
 текста затронутых файлов. Отсутствующий `graph.json` — мягкий skip (`graph_missing`), без
-вызова `affected`. LLM и verifier обязаны опираться на перечисленных callers и не выдумывать
-зависимости вне секции Blast-radius.
+вызова `affected`. После `affected` движок обогащает deps из того же `graph.json`: имя
+caller, confidence ребра, community (маркер `cross-community`). LLM и verifier обязаны
+опираться на перечисленных callers и не выдумывать зависимости вне секции Blast-radius.
 
 ### Сходимость между прогонами
 

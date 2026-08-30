@@ -74,8 +74,8 @@ FP-learning-loop» пуста — конкурентов в ней нет; ри�
     для дедупа/промоута по RFC 22.
 22. **ai-reviewer как внешний verdict для PR swarm'а**: тот же принцип «двух независимых
     судей», что и правило strong=verdict в ZAIrgRush.
-23. Blast-radius graphify → scope задач swarm'а (`graphify affected` отдаёт affected-файлы
-    оркестратору).
+23. Blast-radius graphify → scope задач swarm'а: метрика `blast_radius.affected_files`
+    уже экспортируется в observability; оркестратор ZAIrgRush ещё не читает.
 
 ## Отклонено сознательно
 

@@ -35,7 +35,7 @@ export { createLlmClient } from './lib/llm.mjs';
 export { createOllamaClient } from './lib/ollama.mjs';
 export { createCostTracker, estimateCost, formatCostStickyLine, loadPriceMap } from './lib/cost.mjs';
 export { scoreGoldCase, aggregateBenchmark, scoreFromRecord } from './lib/benchmark.mjs';
-export { emitBlastRadiusFindings, parseBlastDependentPaths } from './lib/blast-findings.mjs';
+export { emitBlastRadiusFindings, parseBlastDependentPaths, parseBlastDependents } from './lib/blast-findings.mjs';
 export {
   buildReviewJson, buildSarif, writeReviewExports, selectSarifFindings,
   extractReasoningEntries, sarifArtifactUri, sarifAutomationGuid,
@@ -47,7 +47,7 @@ export {
   DEFAULT_PROFILE, PROFILE_FILENAMES, createMarkers, normalizeProfile, loadProfileFile,
   getProfile, setProfile, resetProfile, resolveProfile,
 } from './lib/profile.mjs';
-export { publicErrorLabel, createAdaptiveSemaphore } from './lib/util.mjs';
+export { publicErrorLabel, createAdaptiveSemaphore, redactSecretsForLog } from './lib/util.mjs';
 export { parseJsonl, aggregateMetrics, formatMetricsReport } from './lib/metrics.mjs';
 export { createGraphifyClient } from './lib/graphify.mjs';
 export { decideAutoTriage, buildTriageContext, runAutoTriage, findingLocationKey as triageLocationKey } from './lib/triage.mjs';

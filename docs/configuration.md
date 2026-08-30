@@ -5,6 +5,9 @@
 артефактам самого пакета резолвятся от корня пакета ([`lib/package-root.mjs`](../lib/package-root.mjs)).
 Всё, что зависит от репозитория, лучше держать не в env, а в [профиле](profiles.md).
 
+Boolean env (через `envFlag`): default-on принимают `0`/`false`/`no`/`off` как выкл.;
+default-off — `1`/`true`/`yes`/`on` как вкл. Пустое/незадано → default флага.
+
 ## CLI
 
 ```bash
@@ -134,8 +137,14 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `GRAPHIFY_BIN` | `.graphify/gf` | Бинарь graphify |
 | `GRAPH` | `.graphify/graphify-out/graph.json` | Граф кода |
 | `GRAPHIFY_REPORT` | `.graphify/graphify-out/GRAPH_REPORT.md` | Отчёт графа |
+| `REVIEW_GRAPHIFY_DEPTH` | `2` | `--depth` для `graphify affected` (clamp 1…5) |
+| `REVIEW_GRAPHIFY_DROP_AMBIGUOUS` | `1` | `0`/`false`/`no`/`off` — оставлять AMBIGUOUS-рёбра в blast |
 
 Нет графа → blast-radius пустой, ревью продолжается.
+
+Движок после `affected` обогащает ответ из `graph.json`: имя caller, confidence
+(`EXTRACTED`/`INFERRED`), community (cross-community сильнее layer-эвристик). В метриках —
+`affected_files` (пути для swarm/оркестратора), `confidence`, `cross_community`.
 
 ## Бюджеты
 
