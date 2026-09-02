@@ -155,7 +155,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_STRUCTURE` | `1` | Structure producer доступен |
 | `REVIEW_STRUCTURE_GRAPH` | `GRAPH` | Graphify facts |
 | `REVIEW_STRUCTURE_GRAPH_REPORT` | `GRAPHIFY_REPORT` | Freshness |
-| `REVIEW_STRUCTURE_GRAPH_ANALYSIS` | `.graphify/graphify-out/.graphify_analysis.json` | Communities/god-nodes |
+| `REVIEW_STRUCTURE_GRAPH_ANALYSIS` | `.graphify_analysis.json` рядом с graph.json | Communities/god-nodes; sidecar в каталоге graph.json, следует за override `GRAPH`/`REVIEW_STRUCTURE_GRAPH` |
 | `REVIEW_STRUCTURE_SCIP` | пусто | SCIP semantic index |
 | `REVIEW_STRUCTURE_LCOV` | `paths.coverageLcov` | LCOV evidence |
 | `REVIEW_STRUCTURE_OBLIGATIONS` | пусто | cod-doc obligations export |

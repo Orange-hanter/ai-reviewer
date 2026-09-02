@@ -72,6 +72,10 @@ npx pr-review-structure --scip index.scip --graph .graphify/graphify-out/graph.j
 
 Graphify remains the fallback. The pilot should compare unresolved/ambiguous symbol joins before and after SCIP before making the indexer mandatory.
 
+For library consumers: `analyzeStructure({ scipIndex })` attests a re-serialized
+in-memory index under `memory:index.scip`; callers holding the serialized index
+should pass `scipBuffer` so the receipt hash matches the exact bytes.
+
 ## Mutation and property evidence
 
 Mutation reports are scoped to confirmed MUST contracts, changed contracts, god-nodes and high fan-in partial scenarios. Aggregate mutation score is inventory only; a scenario hint requires a contract-bound surviving or uncovered mutant.
@@ -91,6 +95,14 @@ The server exposes `structure_context`. Calls must include:
 - `factsPath` and `assessmentPath`;
 - either `headSha` or `snapshotFingerprint`;
 - scope/entity/contract refs and a token budget.
+
+Where `snapshotFingerprint` comes from: it is the `fingerprint` field of the
+`structure_facts` payload written by a prior `pr-review-structure` run (default
+`<exportDir>/structure-facts.json`). The client reads the exported facts artifact,
+takes its `fingerprint`, and passes it together with the same file as `factsPath` —
+this pins the context to that exact snapshot instead of an implicit "latest".
+There is no circularity: the fingerprint is produced by the export run, consumed
+by later MCP calls.
 
 There is no implicit “latest” for planning or fixing. The response is a bounded BFS slice with fingerprints, temporal alignment, relevant contracts, dependencies, scenarios, hints and suggested files.
 

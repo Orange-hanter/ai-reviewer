@@ -19,10 +19,20 @@
   "temporalAlignment": "aligned",
   "coverageObservations": [],
   "assessments": {
-    "codeCoverage": {},
-    "dependencyRisk": {},
+    "codeCoverage": { "totals": null, "files": 0 },
+    "dependencyRisk": { "highFanIn": [], "crossBoundaryEdges": 0, "godNodes": [] },
     "contractScenarios": [],
-    "dataQuality": {}
+    "dataQuality": {
+      "graphStatus": "unknown",
+      "truncated": false,
+      "testInventoryComplete": false,
+      "functionObservations": 0,
+      "unresolvedFunctionJoins": 0,
+      "unresolvedJoinRate": 0,
+      "missingAllowed": false,
+      "entityCount": 0,
+      "edgeCount": 0
+    }
   },
   "hints": [],
   "receipts": []

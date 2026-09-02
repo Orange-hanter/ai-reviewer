@@ -18,6 +18,8 @@ import {
   extractGraphifyFacts,
   extractScipFacts,
   generatePropertyDrafts,
+  loadReviewConfig,
+  matchLcovFunction,
   normalizeRepoPath,
   parseLcov,
   parseMutationReport,
@@ -230,16 +232,7 @@ test('reject invalid token', () => {
     graphReportText: `Built from commit: \`${HEAD}\``,
     lcovText: LCOV,
     mutationReport,
-    obligationsExport: {
-      schemaRef: 'code-structure/obligations-export.v1',
-      version: 1,
-      kind: 'obligations_export',
-      project: 'demo',
-      revision: 'docs-1',
-      headSha: HEAD,
-      exportedAt: '2026-09-02T00:00:00.000Z',
-      obligations: [obligation],
-    },
+    obligationsExport: makeObligationsExport([obligation]),
     repoRoot: '/repo',
     headSha: HEAD,
     branchRef: 'main',
@@ -365,6 +358,19 @@ test('structure_context requires and preserves a pinned snapshot', async () => {
   assert.ok(context.dependencies.length >= 1);
 });
 
+function makeObligationsExport(obligations) {
+  return {
+    schemaRef: 'code-structure/obligations-export.v1',
+    version: 1,
+    kind: 'obligations_export',
+    project: 'demo',
+    revision: 'docs-1',
+    headSha: HEAD,
+    exportedAt: '2026-09-02T00:00:00.000Z',
+    obligations,
+  };
+}
+
 function obligationFor(api, extras = {}) {
   const contractId = stableId('contract', 'entrypoint', api.observedId);
   return {
@@ -389,16 +395,7 @@ async function analyzeWith(overrides = {}, deps = {}) {
     graphText: JSON.stringify(GRAPH),
     graphReportText: `Built from commit: \`${HEAD}\``,
     lcovText: LCOV,
-    obligationsExport: {
-      schemaRef: 'code-structure/obligations-export.v1',
-      version: 1,
-      kind: 'obligations_export',
-      project: 'demo',
-      revision: 'docs-1',
-      headSha: HEAD,
-      exportedAt: '2026-09-02T00:00:00.000Z',
-      obligations: [obligationFor(api)],
-    },
+    obligationsExport: makeObligationsExport([obligationFor(api)]),
     repoRoot: '/repo',
     headSha: HEAD,
     branchRef: 'main',
@@ -431,16 +428,7 @@ test('coverage commit mismatch keeps scenarios unverifiable', async () => {
 test('unresolved contract links stay unverifiable, never missing', async () => {
   const api = extractGraphifyFacts(GRAPH).entities.find((entity) => entity.label === 'validate()');
   const result = await analyzeWith({
-    obligationsExport: {
-      schemaRef: 'code-structure/obligations-export.v1',
-      version: 1,
-      kind: 'obligations_export',
-      project: 'demo',
-      revision: 'docs-1',
-      headSha: HEAD,
-      exportedAt: '2026-09-02T00:00:00.000Z',
-      obligations: [obligationFor(api, { contractRefs: [] })],
-    },
+    obligationsExport: makeObligationsExport([obligationFor(api, { contractRefs: [] })]),
   });
   const scenario = result.assessment.assessments.contractScenarios[0];
   assert.equal(scenario.contractResolution, 'unresolved');
@@ -621,37 +609,36 @@ test('assessment coverageHash discriminates lcov payloads without a hash field',
   assert.notEqual(first.fingerprint, second.fingerprint);
 });
 
-test('structure_context MCP reads are confined to STRUCTURE_MCP_ROOT', async () => {
+test('structure_context MCP reads are confined to STRUCTURE_MCP_ROOT', async (t) => {
   const { facts, assessment } = await analyzeGraph();
   const root = await mkdtemp(join(tmpdir(), 'structure-mcp-'));
   await writeFile(join(root, 'facts.json'), JSON.stringify(facts));
   await writeFile(join(root, 'assessment.json'), JSON.stringify(assessment));
   const previous = process.env.STRUCTURE_MCP_ROOT;
   process.env.STRUCTURE_MCP_ROOT = root;
-  try {
-    const api = facts.facts.entities.find((entity) => entity.label === 'validate()');
-    const context = await callStructureContext({
-      factsPath: 'facts.json',
-      assessmentPath: 'assessment.json',
-      headSha: HEAD,
-      scopeRefs: [api.observedId],
-    });
-    assert.equal(context.kind, 'structure_context');
-    await assert.rejects(() => callStructureContext({
-      factsPath: '../facts.json',
-      assessmentPath: 'assessment.json',
-      headSha: HEAD,
-    }), /escapes allowed root/);
-    await assert.rejects(() => callStructureContext({
-      factsPath: '/etc/passwd',
-      assessmentPath: 'assessment.json',
-      headSha: HEAD,
-    }), /escapes allowed root/);
-  } finally {
+  t.after(async () => {
     if (previous === undefined) delete process.env.STRUCTURE_MCP_ROOT;
     else process.env.STRUCTURE_MCP_ROOT = previous;
     await rm(root, { recursive: true, force: true });
-  }
+  });
+  const api = facts.facts.entities.find((entity) => entity.label === 'validate()');
+  const context = await callStructureContext({
+    factsPath: 'facts.json',
+    assessmentPath: 'assessment.json',
+    headSha: HEAD,
+    scopeRefs: [api.observedId],
+  });
+  assert.equal(context.kind, 'structure_context');
+  await assert.rejects(() => callStructureContext({
+    factsPath: '../facts.json',
+    assessmentPath: 'assessment.json',
+    headSha: HEAD,
+  }), /escapes allowed root/);
+  await assert.rejects(() => callStructureContext({
+    factsPath: '/etc/passwd',
+    assessmentPath: 'assessment.json',
+    headSha: HEAD,
+  }), /escapes allowed root/);
 });
 
 test('writeStructureExports confines writes to the allowed root', async () => {
@@ -701,4 +688,153 @@ test('drift finding fingerprints are independent of subjectRefs order', async ()
   assert.ok(first);
   assert.equal(first.fingerprint, second.fingerprint);
   assert.deepEqual(first.subjectRefs, second.subjectRefs);
+});
+
+test('entrypoint contract dedupe uses the same key format as edge contracts', () => {
+  // два graph-узла с одинаковым observedId (дубликаты в выгрузке graphify)
+  const facts = extractGraphifyFacts({
+    nodes: [
+      { id: 'dup1', label: 'run()', file_type: 'code', source_file: 'src/run.ts', source_location: 'L10', _callable: true },
+      { id: 'dup2', label: 'run()', file_type: 'code', source_file: 'src/run.ts', source_location: 'L10', _callable: true },
+    ],
+    links: [],
+  });
+  const entrypoints = facts.contracts.filter((contract) => contract.kind === 'entrypoint');
+  assert.equal(entrypoints.length, 1);
+  // edge-контракт не подавляет entrypoint: форматы ключей согласованы, kind различается
+  const withImplements = extractGraphifyFacts(GRAPH, { maxEntities: 100, maxEdges: 100 });
+  const impl = withImplements.entities.find((entity) => entity.label === 'JwtValidator');
+  const kinds = withImplements.contracts
+    .filter((contract) => contract.entityRef === impl.observedId)
+    .map((contract) => contract.kind);
+  assert.ok(kinds.includes('implements'));
+  assert.ok(kinds.includes('entrypoint'));
+});
+
+test('mutation receipt attests raw file bytes, not re-serialized JSON', async () => {
+  // намеренно «неканоничный» JSON: лишние пробелы и порядок ключей
+  const raw = '{\n  "files": {},  "schemaVersion": "1"\n}\n';
+  const result = await analyzeStructure({
+    graphText: JSON.stringify(GRAPH),
+    graphReportText: `Built from commit: \`${HEAD}\``,
+    repoRoot: '/repo',
+    headSha: HEAD,
+    branchRef: 'main',
+    mutationReportPath: '/repo/mutation-report.json',
+    generatedAt: '2026-09-02T00:00:00.000Z',
+  }, {
+    readFile: async (path) => {
+      if (String(path).endsWith('mutation-report.json')) return raw;
+      throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+    },
+  });
+  const receipt = result.assessment.receipts.find((item) => item.provider === 'mutation-testing-elements');
+  assert.ok(receipt);
+  assert.equal(receipt.artifact.sha256, sha256(raw));
+  assert.notEqual(receipt.artifact.sha256, sha256(JSON.stringify(JSON.parse(raw))));
+});
+
+test('LCOV parser rejects absolute SF without explicit repoRoot', () => {
+  const text = 'TN:\nSF:/repo/src/x.ts\nDA:1,1\nend_of_record\n';
+  const parsed = parseLcov(text);
+  assert.equal(parsed.files.length, 0);
+  assert.ok(parsed.warnings.some((warning) => /repoRoot/.test(warning)));
+  const rooted = parseLcov(text, { repoRoot: '/repo' });
+  assert.equal(rooted.files[0].path, 'src/x.ts');
+});
+
+test('LCOV parser rejects DA/BRDA records with empty fields', () => {
+  const parsed = parseLcov('TN:\nSF:src/x.ts\nDA:,5\nDA:3,\nDA:4,2\nBRDA:4,0,0,\nBRDA:,0,0,1\nend_of_record\n');
+  const file = parsed.byPath.get('src/x.ts');
+  assert.deepEqual(file.lines.entries, [{ line: 4, hits: 2 }]);
+  assert.equal(file.branches.found, 0);
+});
+
+test('matchLcovFunction matches SCIP constructor-kind entities', () => {
+  const match = matchLcovFunction({ line: 3, name: 'Widget' }, [
+    { kind: 'constructor', label: 'Widget', line: 3, observedId: 'ctor' },
+  ]);
+  assert.equal(match.entity?.observedId, 'ctor');
+  assert.equal(match.confidence, 'exact');
+});
+
+test('identity reconciliation classifies path+label change as moved_renamed', () => {
+  const previous = [{
+    observedId: 'old', lineageId: 'lineage', path: 'src/old.ts',
+    label: 'run', qualifiedName: 'pkg/run', kind: 'function', signature: 'run(): void',
+  }];
+  const current = [{
+    observedId: 'new', lineageId: 'new', path: 'src/new.ts',
+    label: 'execute', qualifiedName: 'pkg/run', kind: 'function', signature: 'run(): void',
+  }];
+  const result = reconcileIdentity(current, previous);
+  assert.equal(result.events[0].kind, 'moved_renamed');
+  assert.equal(result.entities[0].lineageId, 'lineage');
+});
+
+test('identity event sort is separator-safe for ids containing colons', () => {
+  const previous = [
+    { observedId: 'x:y', lineageId: 'x:y', path: 'src/one.ts', label: 'one', qualifiedName: 'pkg/one', kind: 'function', signature: 's' },
+    { observedId: 'x', lineageId: 'x', path: 'src/two.ts', label: 'two', qualifiedName: 'pkg/two', kind: 'function', signature: 's' },
+  ];
+  const current = [
+    { observedId: 'p', lineageId: 'p', path: 'src/one.ts', label: 'oneRenamed', qualifiedName: 'pkg/one', kind: 'function', signature: 's' },
+    { observedId: 'y:p', lineageId: 'y:p', path: 'src/two.ts', label: 'twoRenamed', qualifiedName: 'pkg/two', kind: 'function', signature: 's' },
+  ];
+  const renamed = (prev, curr) => reconcileIdentity(curr, prev).events
+    .filter((event) => event.kind === 'renamed')
+    .map((event) => `${event.from}→${event.to}`);
+  const first = renamed(previous, current);
+  const second = renamed([...previous].reverse(), [...current].reverse());
+  // ':'-конкат дал бы одинаковые ключи 'renamed:x:y:p' — порядок зависел бы от входа
+  assert.deepEqual(first, ['x:y→p', 'x→y:p']);
+  assert.deepEqual(second, first);
+});
+
+test('structure graphAnalysis follows the graph override unless set explicitly', () => {
+  const cli = { dryRun: true, repo: '', prNumber: 0 };
+  const fallback = loadReviewConfig({ OLLAMA_API_KEY: 'x' }, cli);
+  assert.equal(fallback.structure.graph, '.graphify/graphify-out/graph.json');
+  assert.equal(fallback.structure.graphAnalysis, '.graphify/graphify-out/.graphify_analysis.json');
+  const custom = loadReviewConfig({ OLLAMA_API_KEY: 'x', GRAPH: 'out/custom/graph.json' }, cli);
+  assert.equal(custom.graphify.graph, 'out/custom/graph.json');
+  assert.equal(custom.structure.graph, 'out/custom/graph.json');
+  assert.equal(custom.structure.graphAnalysis, join('out', 'custom', '.graphify_analysis.json'));
+  const explicit = loadReviewConfig({
+    OLLAMA_API_KEY: 'x',
+    GRAPH: 'out/custom/graph.json',
+    REVIEW_STRUCTURE_GRAPH_ANALYSIS: 'analysis/custom.json',
+  }, cli);
+  assert.equal(explicit.structure.graphAnalysis, 'analysis/custom.json');
+});
+
+test('schema path pattern forbids backslashes and dot-dot segments', async () => {
+  for (const name of ['structure-facts.v1.schema.json', 'evidence-receipt.v1.schema.json']) {
+    const schema = JSON.parse(await readFile(new URL(`../schemas/${name}`, import.meta.url), 'utf8'));
+    const pattern = new RegExp(schema.$defs.path.pattern);
+    assert.ok(pattern.test('src/auth.ts'));
+    assert.ok(!pattern.test('src\\..\\secret'));
+    assert.ok(!pattern.test('../secret'));
+    assert.ok(!pattern.test('/etc/passwd'));
+  }
+});
+
+test('relative schema $refs resolve to files in schemas/', async () => {
+  for (const name of ['structure-facts.v1.schema.json', 'structure-assessment.v1.schema.json']) {
+    const schema = JSON.parse(await readFile(new URL(`../schemas/${name}`, import.meta.url), 'utf8'));
+    const refs = [];
+    const walk = (node) => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node && typeof node === 'object') {
+        if (typeof node.$ref === 'string' && !node.$ref.startsWith('#')) refs.push(node.$ref);
+        Object.values(node).forEach(walk);
+      }
+    };
+    walk(schema);
+    assert.ok(refs.length >= 1);
+    for (const ref of refs) {
+      const target = JSON.parse(await readFile(new URL(`../schemas/${ref}`, import.meta.url), 'utf8'));
+      assert.equal(target.$id, `https://orange-hanter.github.io/ai-reviewer/schemas/${ref}`);
+    }
+  }
 });

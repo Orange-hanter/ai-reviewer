@@ -58,12 +58,14 @@ export {
 } from './lib/structure.mjs';
 export {
   EVIDENCE_RECEIPT_VERSION, TRUST_TIERS, EVIDENCE_CEILINGS,
+  // generic-хелперы живут в lib/util.mjs, structure-evidence их реэкспортирует для совместимости
   canonicalJson, sha256, stableId, normalizeRepoPath,
   validateEvidenceReceipt, createEvidenceReceipt, receiptRef,
 } from './lib/structure-evidence.mjs';
 export {
-  STRUCTURE_PROTOCOL_VERSION, STRUCTURE_FACTS_SCHEMA, STRUCTURE_ASSESSMENT_SCHEMA,
-  OBLIGATIONS_SCHEMA, DEFAULT_STRUCTURE_LIMITS, assertPayloadSize,
+  STRUCTURE_PROTOCOL_VERSION, STRUCTURE_FACTS_VERSION, STRUCTURE_FACTS_SCHEMA,
+  STRUCTURE_ASSESSMENT_SCHEMA, OBLIGATIONS_SCHEMA, OBLIGATIONS_EXPORT_SCHEMA,
+  DEFAULT_STRUCTURE_LIMITS, assertPayloadSize,
   validateStructureFacts, validateStructureAssessment, validateObligationsExport,
   parseStructurePayload, factsFingerprint, assessmentFingerprint, temporalAlignment,
 } from './lib/structure-protocol.mjs';

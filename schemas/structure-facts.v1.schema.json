@@ -45,7 +45,11 @@
         "configHash": { "$ref": "#/$defs/sha256" },
         "scope": { "type": "string", "maxLength": 1000 },
         "graphStatus": { "enum": ["fresh", "stale", "unknown", "missing"] },
-        "providerCapabilities": { "type": "object" },
+        "providerCapabilities": {
+          "type": "object",
+          "additionalProperties": true,
+          "$comment": "намеренно расширяемо: набор capability-флагов зависит от провайдера (graphify/scip/...)"
+        },
         "warnings": {
           "type": "array",
           "maxItems": 100,
@@ -96,10 +100,10 @@
       "additionalProperties": false,
       "required": ["boundaryTree", "objectTree", "functionTree", "dependencyGraph"],
       "properties": {
-        "boundaryTree": { "type": "array" },
-        "objectTree": { "type": "array" },
-        "functionTree": { "type": "array" },
-        "dependencyGraph": { "type": "array" }
+        "boundaryTree": { "type": "array", "items": { "type": "object" } },
+        "objectTree": { "type": "array", "items": { "type": "object" } },
+        "functionTree": { "type": "array", "items": { "type": "object" } },
+        "dependencyGraph": { "type": "array", "items": { "type": "string", "maxLength": 500 } }
       }
     },
     "receipts": {
@@ -114,7 +118,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 1000,
-      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\u0000).+$"
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\u0000).+$"
     },
     "confidence": {
       "enum": ["exact", "extracted", "inferred", "heuristic", "ambiguous", "unresolved"]
@@ -172,7 +176,11 @@
         "isGodNode": { "type": "boolean" },
         "confidence": { "$ref": "#/$defs/confidence" },
         "evidence": { "$ref": "#/$defs/evidence" },
-        "externalIds": { "type": "object", "additionalProperties": { "type": "string" } }
+        "externalIds": {
+          "type": "object",
+          "maxProperties": 50,
+          "additionalProperties": { "type": "string", "maxLength": 500 }
+        }
       }
     },
     "contract": {
@@ -219,7 +227,19 @@
           "maxItems": 100,
           "items": { "type": "string", "maxLength": 500 }
         },
-        "assertions": { "type": "array", "maxItems": 100 },
+        "assertions": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "confidence"],
+            "properties": {
+              "kind": { "enum": ["throws", "rejects", "http_status", "equality", "property"] },
+              "confidence": { "$ref": "#/$defs/confidence" }
+            }
+          }
+        },
         "confidence": { "$ref": "#/$defs/confidence" },
         "evidence": { "$ref": "#/$defs/evidence" }
       }
@@ -229,7 +249,7 @@
       "additionalProperties": false,
       "required": ["kind", "from", "to", "confidence", "evidence"],
       "properties": {
-        "kind": { "enum": ["created", "renamed", "moved", "signature_changed", "removed", "identity_unresolved"] },
+        "kind": { "enum": ["created", "renamed", "moved", "moved_renamed", "signature_changed", "removed", "identity_unresolved"] },
         "from": { "type": ["string", "null"], "maxLength": 500 },
         "to": { "type": ["string", "null"], "maxLength": 500 },
         "confidence": { "$ref": "#/$defs/confidence" },
