@@ -1,11 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   analyzeStructure,
   applyStructureWaivers,
+  buildStructureAssessment,
   buildStructureContext,
+  callStructureContext,
   computeStructureDrift,
   handleStructureMcpRequest,
   createEvidenceReceipt,
@@ -24,6 +30,7 @@ import {
   validateEvidenceReceipt,
   validateStructureAssessment,
   validateStructureFacts,
+  writeStructureExports,
 } from '../index.mjs';
 
 const HEAD = 'abcdef1234567890';
@@ -481,4 +488,217 @@ test('MCP advertises structure_context and rejects unpinned calls', async () => 
   });
   assert.equal(called.error.code, -32602);
   assert.match(called.error.message, /headSha or snapshotFingerprint/);
+});
+
+async function analyzeGraph(graph = GRAPH) {
+  return analyzeStructure({
+    graphText: JSON.stringify(graph),
+    graphReportText: `Built from commit: \`${HEAD}\``,
+    repoRoot: '/repo',
+    headSha: HEAD,
+    branchRef: 'main',
+    generatedAt: '2026-09-02T00:00:00.000Z',
+  }, { readFile: async () => { throw new Error('no files'); } });
+}
+
+function parseMcpFrames(buffer) {
+  const messages = [];
+  let rest = buffer;
+  while (true) {
+    const headerEnd = rest.indexOf('\r\n\r\n');
+    if (headerEnd < 0) break;
+    const header = rest.subarray(0, headerEnd).toString('latin1');
+    const match = /content-length:\s*(\d+)/i.exec(header);
+    assert.ok(match, `missing Content-Length in frame: ${header}`);
+    const length = Number(match[1]);
+    assert.ok(rest.length >= headerEnd + 4 + length, 'truncated frame body');
+    messages.push(JSON.parse(rest.subarray(headerEnd + 4, headerEnd + 4 + length).toString('utf8')));
+    rest = rest.subarray(headerEnd + 4 + length);
+  }
+  assert.equal(rest.length, 0, 'unparsed trailing bytes');
+  return messages;
+}
+
+async function runMcpServer(payloads, { split = false } = {}) {
+  const child = spawn(process.execPath, [
+    fileURLToPath(new URL('../bin/pr-review-structure-mcp.mjs', import.meta.url)),
+  ]);
+  const stdout = [];
+  const stderr = [];
+  child.stdout.on('data', (chunk) => stdout.push(chunk));
+  child.stderr.on('data', (chunk) => stderr.push(chunk));
+  for (const payload of payloads) {
+    const body = Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload));
+    // регистр заголовка произвольный, неизвестный заголовок должен игнорироваться
+    const framed = Buffer.concat([
+      Buffer.from(`content-length: ${body.length}\r\nX-Unknown: ignored\r\n\r\n`),
+      body,
+    ]);
+    if (split) {
+      const mid = Math.floor(framed.length / 2);
+      child.stdin.write(framed.subarray(0, mid));
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+      child.stdin.write(framed.subarray(mid));
+    } else {
+      child.stdin.write(framed);
+    }
+  }
+  child.stdin.end();
+  const exitCode = await new Promise((resolvePromise) => child.on('close', resolvePromise));
+  assert.equal(exitCode, 0, Buffer.concat(stderr).toString());
+  return parseMcpFrames(Buffer.concat(stdout));
+}
+
+test('MCP stdio transport: Content-Length framing, partial reads, batches, invalid requests', async () => {
+  const [single, batch, emptyBatch, scalar, broken] = await runMcpServer([
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+    [{ jsonrpc: '2.0', id: 2, method: 'ping' }, 42, { jsonrpc: '2.0', id: 3, method: 'tools/list' }],
+    [],
+    42,
+    '{not json',
+  ], { split: true });
+  assert.equal(single.id, 1);
+  assert.equal(single.result.serverInfo.name, 'ai-reviewer-structure');
+  assert.ok(Array.isArray(batch));
+  assert.equal(batch.length, 3);
+  assert.deepEqual(batch[0], { jsonrpc: '2.0', id: 2, result: {} });
+  assert.equal(batch[1].error.code, -32600);
+  assert.equal(batch[2].result.tools[0].name, 'structure_context');
+  assert.equal(emptyBatch.error.code, -32600);
+  assert.equal(scalar.error.code, -32600);
+  assert.equal(broken.error.code, -32700);
+});
+
+test('structure_context clamps dependencyDepth to the configured maxDepth', async () => {
+  const chainGraph = {
+    nodes: [...GRAPH.nodes, {
+      id: 'deep', label: 'audit()', file_type: 'code',
+      source_file: 'src/audit.ts', source_location: 'L1', _callable: true, community: 2,
+    }],
+    links: [...GRAPH.links, { source: 'deep', target: 'caller1', relation: 'calls', confidence: 'EXTRACTED' }],
+  };
+  const result = await analyzeGraph(chainGraph);
+  const api = result.facts.facts.entities.find((entity) => entity.label === 'validate()');
+  const build = (limits) => buildStructureContext({
+    facts: result.facts,
+    assessment: result.assessment,
+    headSha: HEAD,
+    scopeRefs: [api.observedId],
+    dependencyDepth: 3,
+    limits,
+  });
+  const clamped = build({});
+  assert.ok(!clamped.entities.some((entity) => entity.label === 'audit()'),
+    'depth 2 neighbour must stay out of the default maxDepth=1 context');
+  const raised = build({ maxDepth: 2 });
+  assert.ok(raised.entities.some((entity) => entity.label === 'audit()'));
+});
+
+test('structure_context does not duplicate edges between selected seeds', async () => {
+  const result = await analyzeGraph();
+  const api = result.facts.facts.entities.find((entity) => entity.label === 'validate()');
+  const caller = result.facts.facts.entities.find((entity) => entity.label === 'login()');
+  const context = buildStructureContext({
+    facts: result.facts,
+    assessment: result.assessment,
+    headSha: HEAD,
+    scopeRefs: [api.observedId, caller.observedId],
+    dependencyDepth: 1,
+  });
+  const ids = context.dependencies.map((edge) => edge.id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('assessment coverageHash discriminates lcov payloads without a hash field', async () => {
+  const { facts } = await analyzeGraph();
+  const base = { factsPayload: facts, generatedAt: '2026-09-02T00:00:00.000Z' };
+  const first = buildStructureAssessment({ ...base, lcov: { totals: { lines: { found: 1, hit: 1 } }, files: [] } });
+  const second = buildStructureAssessment({ ...base, lcov: { totals: { lines: { found: 2, hit: 1 } }, files: [] } });
+  const absent = buildStructureAssessment(base);
+  assert.notEqual(first.coverageHash, second.coverageHash);
+  assert.notEqual(first.coverageHash, sha256('none'));
+  assert.equal(absent.coverageHash, sha256('none'));
+  assert.notEqual(first.fingerprint, second.fingerprint);
+});
+
+test('structure_context MCP reads are confined to STRUCTURE_MCP_ROOT', async () => {
+  const { facts, assessment } = await analyzeGraph();
+  const root = await mkdtemp(join(tmpdir(), 'structure-mcp-'));
+  await writeFile(join(root, 'facts.json'), JSON.stringify(facts));
+  await writeFile(join(root, 'assessment.json'), JSON.stringify(assessment));
+  const previous = process.env.STRUCTURE_MCP_ROOT;
+  process.env.STRUCTURE_MCP_ROOT = root;
+  try {
+    const api = facts.facts.entities.find((entity) => entity.label === 'validate()');
+    const context = await callStructureContext({
+      factsPath: 'facts.json',
+      assessmentPath: 'assessment.json',
+      headSha: HEAD,
+      scopeRefs: [api.observedId],
+    });
+    assert.equal(context.kind, 'structure_context');
+    await assert.rejects(() => callStructureContext({
+      factsPath: '../facts.json',
+      assessmentPath: 'assessment.json',
+      headSha: HEAD,
+    }), /escapes allowed root/);
+    await assert.rejects(() => callStructureContext({
+      factsPath: '/etc/passwd',
+      assessmentPath: 'assessment.json',
+      headSha: HEAD,
+    }), /escapes allowed root/);
+  } finally {
+    if (previous === undefined) delete process.env.STRUCTURE_MCP_ROOT;
+    else process.env.STRUCTURE_MCP_ROOT = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('writeStructureExports confines writes to the allowed root', async () => {
+  const result = await analyzeGraph();
+  const root = await mkdtemp(join(tmpdir(), 'structure-export-'));
+  try {
+    const written = await writeStructureExports(result, {
+      factsPath: join(root, 'facts.json'),
+      assessmentPath: join(root, 'nested', 'assessment.json'),
+      rootDir: root,
+    });
+    assert.equal(written.length, 2);
+    assert.ok(written.every((path) => path.startsWith(`${root}${sep}`)));
+    await assert.rejects(() => writeStructureExports(result, {
+      factsPath: join(root, '..', 'escape.json'),
+      rootDir: root,
+    }), /escapes allowed root/);
+    await assert.rejects(() => writeStructureExports(result, {
+      markdownPath: join(tmpdir(), 'escape.md'),
+      rootDir: root,
+    }), /escapes allowed root/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('drift finding fingerprints are independent of subjectRefs order', async () => {
+  const { facts, assessment } = await analyzeGraph();
+  const driftWith = (contractRefs) => computeStructureDrift({
+    facts,
+    assessment,
+    obligationsExport: {
+      revision: '1',
+      obligations: [{
+        id: 'obl:broken',
+        status: 'confirmed',
+        kind: 'happy_path',
+        statement: 'MUST keep links valid',
+        contentHash: sha256('broken'),
+        contractRefs,
+      }],
+    },
+    linkSuggestions: [],
+  }).findings.find((item) => item.ruleId === 'docs.contract_link_broken');
+  const first = driftWith(['contract:a', 'contract:b']);
+  const second = driftWith(['contract:b', 'contract:a']);
+  assert.ok(first);
+  assert.equal(first.fingerprint, second.fingerprint);
+  assert.deepEqual(first.subjectRefs, second.subjectRefs);
 });

@@ -126,6 +126,7 @@ try {
     driftPath: resolve(repoRoot, args.driftPath || join(outputDir, 'structure-drift.json')),
     markdownPath: resolve(repoRoot, args.markdownPath || join(outputDir, 'code-structure.md')),
     owner: cfg.profile.toolName,
+    rootDir: repoRoot,
   });
   const summary = {
     factsFingerprint: result.facts.fingerprint,
