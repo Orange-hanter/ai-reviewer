@@ -358,6 +358,108 @@ test('structure_context requires and preserves a pinned snapshot', async () => {
   assert.ok(context.dependencies.length >= 1);
 });
 
+function obligationFor(api, extras = {}) {
+  const contractId = stableId('contract', 'entrypoint', api.observedId);
+  return {
+    id: 'obl:auth#token',
+    source: 'cod-doc-section',
+    docRef: 'modules/auth/contracts',
+    sectionAnchor: 'token',
+    contentHash: sha256('token obligation'),
+    priority: 'must',
+    kind: 'happy_path',
+    statement: 'MUST accept a valid token',
+    status: 'confirmed',
+    contractRefs: [contractId],
+    provenance: 'manual',
+    ...extras,
+  };
+}
+
+async function analyzeWith(overrides = {}, deps = {}) {
+  const api = extractGraphifyFacts(GRAPH).entities.find((entity) => entity.label === 'validate()');
+  return analyzeStructure({
+    graphText: JSON.stringify(GRAPH),
+    graphReportText: `Built from commit: \`${HEAD}\``,
+    lcovText: LCOV,
+    obligationsExport: {
+      schemaRef: 'code-structure/obligations-export.v1',
+      version: 1,
+      kind: 'obligations_export',
+      project: 'demo',
+      revision: 'docs-1',
+      headSha: HEAD,
+      exportedAt: '2026-09-02T00:00:00.000Z',
+      obligations: [obligationFor(api)],
+    },
+    repoRoot: '/repo',
+    headSha: HEAD,
+    branchRef: 'main',
+    testHeadSha: HEAD,
+    generatedAt: '2026-09-02T00:00:00.000Z',
+    thresholds: { highFanIn: 2 },
+    ...overrides,
+  }, {
+    readFile: async (path) => {
+      if (String(path).endsWith('test/auth.test.ts')) {
+        return `import { test } from 'node:test';
+test('accepts a valid token', () => {
+  expect(validate('good')).toEqual(true);
+});`;
+      }
+      throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+    },
+    ...deps,
+  });
+}
+
+test('coverage commit mismatch keeps scenarios unverifiable', async () => {
+  const result = await analyzeWith({ testHeadSha: 'ffffffffffffffff' });
+  const scenario = result.assessment.assessments.contractScenarios[0];
+  assert.equal(result.assessment.temporalAlignment, 'mismatch');
+  assert.equal(scenario.status, 'unverifiable');
+  assert.ok(scenario.missingEvidence.includes('temporal_alignment'));
+});
+
+test('unresolved contract links stay unverifiable, never missing', async () => {
+  const api = extractGraphifyFacts(GRAPH).entities.find((entity) => entity.label === 'validate()');
+  const result = await analyzeWith({
+    obligationsExport: {
+      schemaRef: 'code-structure/obligations-export.v1',
+      version: 1,
+      kind: 'obligations_export',
+      project: 'demo',
+      revision: 'docs-1',
+      headSha: HEAD,
+      exportedAt: '2026-09-02T00:00:00.000Z',
+      obligations: [obligationFor(api, { contractRefs: [] })],
+    },
+  });
+  const scenario = result.assessment.assessments.contractScenarios[0];
+  assert.equal(scenario.contractResolution, 'unresolved');
+  assert.equal(scenario.status, 'unverifiable');
+  assert.notEqual(scenario.status, 'missing');
+});
+
+test('FNDA>0 without a linked test is partial, never covered', async () => {
+  const result = await analyzeWith({}, {
+    readFile: async () => {
+      throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+    },
+  });
+  const scenario = result.assessment.assessments.contractScenarios[0];
+  assert.equal(scenario.status, 'partial');
+  assert.ok(scenario.missingEvidence.includes('linked_test'));
+  assert.notEqual(scenario.status, 'covered');
+});
+
+test('happy_path is covered only with linked test, execution and assertion', async () => {
+  const result = await analyzeWith();
+  const scenario = result.assessment.assessments.contractScenarios[0];
+  assert.equal(scenario.status, 'covered');
+  assert.match(scenario.statusReason, /test link, execution and scenario-specific evidence/);
+});
+
 test('MCP advertises structure_context and rejects unpinned calls', async () => {
   const listed = await handleStructureMcpRequest({
     jsonrpc: '2.0',
