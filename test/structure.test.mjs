@@ -28,6 +28,7 @@ import {
   parseMutationReport,
   parseStructurePayload,
   reconcileIdentity,
+  reconcileStructureFindings,
   suggestObligationLinks,
   triageStructureFindings,
   sha256,
@@ -1046,4 +1047,60 @@ test('pr-review-structure rejects unknown options with exit code 2', async () =>
   clearTimeout(watchdog);
   assert.equal(exitCode, 2);
   assert.match(Buffer.concat(stderr).toString(), /unknown option: --bogus-flag/);
+});
+
+const priorFinding = (overrides = {}) => ({
+  id: 'f1',
+  fingerprint: 'f1',
+  ruleId: 'structure.contract_untested',
+  priority: 'medium',
+  status: 'open',
+  subjectRefs: ['contract:validate'],
+  summary: 'contract has no test',
+  evidence: [],
+  missingEvidence: [],
+  firstSeenSnapshot: 'snap-1',
+  lastSeenSnapshot: 'snap-1',
+  resolvedBySnapshot: null,
+  ...overrides,
+});
+
+test('reconcileStructureFindings closes a vanished finding in two snapshots', () => {
+  const [pending] = reconcileStructureFindings([priorFinding()], [], 'snap-2');
+  assert.equal(pending.status, 'pending_verify');
+  assert.equal(pending.resolvedBySnapshot, null);
+  // снапшот последнего наблюдения не двигается: находки в snap-2 уже нет
+  assert.equal(pending.lastSeenSnapshot, 'snap-1');
+
+  const [resolved] = reconcileStructureFindings([pending], [], 'snap-3');
+  assert.equal(resolved.status, 'resolved');
+  assert.equal(resolved.resolvedBySnapshot, 'snap-3');
+  assert.equal(resolved.lastSeenSnapshot, 'snap-1');
+
+  // терминальный статус идемпотентен: снапшот закрытия не переписывается следующими прогонами
+  const [again] = reconcileStructureFindings([resolved], [], 'snap-4');
+  assert.deepEqual(again, resolved);
+  assert.equal(triageStructureFindings([again]).length, 0);
+});
+
+test('reconcileStructureFindings reopens a finding that is observed again', () => {
+  const [pending] = reconcileStructureFindings([priorFinding()], [], 'snap-2');
+  const [resolved] = reconcileStructureFindings([pending], [], 'snap-3');
+  const current = priorFinding({ firstSeenSnapshot: 'snap-4', lastSeenSnapshot: 'snap-4' });
+
+  const [reopened] = reconcileStructureFindings([resolved], [current], 'snap-4');
+  assert.equal(reopened.status, 'open');
+  assert.equal(reopened.resolvedBySnapshot, null);
+  assert.equal(reopened.lastSeenSnapshot, 'snap-4');
+  // история находки сохраняется: первый снапшот берётся из прошлого состояния, а не из текущего
+  assert.equal(reopened.firstSeenSnapshot, 'snap-1');
+  assert.equal(triageStructureFindings([reopened]).length, 1);
+});
+
+test('reconcileStructureFindings supersedes an obligation link in one snapshot', () => {
+  const prior = priorFinding({ ruleId: 'docs.obligation_unlinked' });
+  const [superseded] = reconcileStructureFindings([prior], [], 'snap-2');
+  assert.equal(superseded.status, 'superseded');
+  assert.equal(superseded.resolvedBySnapshot, 'snap-2');
+  assert.deepEqual(reconcileStructureFindings([superseded], [], 'snap-3')[0], superseded);
 });
