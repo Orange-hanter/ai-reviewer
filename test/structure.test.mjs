@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,11 +15,14 @@ import {
   computeStructureDrift,
   handleStructureMcpRequest,
   createEvidenceReceipt,
+  decodeScipIndex,
   extractGraphifyFacts,
   extractScipFacts,
+  extractTestCasesFromSource,
   generatePropertyDrafts,
   loadReviewConfig,
   matchLcovFunction,
+  mergeScipWithGraphify,
   normalizeRepoPath,
   parseLcov,
   parseMutationReport,
@@ -320,7 +323,7 @@ test('drift suggestions, stable findings and expiring waivers preserve facts', a
   const drift = computeStructureDrift({
     facts: result.facts,
     assessment: result.assessment,
-    obligationsExport: { revision: '1', obligations: [obligation] },
+    obligationsExport: makeObligationsExport([obligation], { revision: '1' }),
     linkSuggestions: suggestions,
   });
   const unlinked = drift.findings.find((item) => item.ruleId === 'docs.obligation_unlinked');
@@ -358,7 +361,7 @@ test('structure_context requires and preserves a pinned snapshot', async () => {
   assert.ok(context.dependencies.length >= 1);
 });
 
-function makeObligationsExport(obligations) {
+function makeObligationsExport(obligations, extras = {}) {
   return {
     schemaRef: 'code-structure/obligations-export.v1',
     version: 1,
@@ -368,6 +371,7 @@ function makeObligationsExport(obligations) {
     headSha: HEAD,
     exportedAt: '2026-09-02T00:00:00.000Z',
     obligations,
+    ...extras,
   };
 }
 
@@ -511,11 +515,17 @@ async function runMcpServer(payloads, { split = false } = {}) {
   const child = spawn(process.execPath, [
     fileURLToPath(new URL('../bin/pr-review-structure-mcp.mjs', import.meta.url)),
   ]);
+  // watchdog: зависший child не должен вешать прогон тестов
+  const watchdog = setTimeout(() => child.kill('SIGKILL'), 10000);
   const stdout = [];
   const stderr = [];
   child.stdout.on('data', (chunk) => stdout.push(chunk));
   child.stderr.on('data', (chunk) => stderr.push(chunk));
   for (const payload of payloads) {
+    if (Buffer.isBuffer(payload)) { // готовый сырой кадр (например oversized)
+      child.stdin.write(payload);
+      continue;
+    }
     const body = Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload));
     // регистр заголовка произвольный, неизвестный заголовок должен игнорироваться
     const framed = Buffer.concat([
@@ -533,6 +543,7 @@ async function runMcpServer(payloads, { split = false } = {}) {
   }
   child.stdin.end();
   const exitCode = await new Promise((resolvePromise) => child.on('close', resolvePromise));
+  clearTimeout(watchdog);
   assert.equal(exitCode, 0, Buffer.concat(stderr).toString());
   return parseMcpFrames(Buffer.concat(stdout));
 }
@@ -567,15 +578,22 @@ test('structure_context clamps dependencyDepth to the configured maxDepth', asyn
   };
   const result = await analyzeGraph(chainGraph);
   const api = result.facts.facts.entities.find((entity) => entity.label === 'validate()');
-  const build = (limits) => buildStructureContext({
+  const build = (limits, depth = 3) => buildStructureContext({
     facts: result.facts,
     assessment: result.assessment,
     headSha: HEAD,
     scopeRefs: [api.observedId],
-    dependencyDepth: 3,
+    dependencyDepth: depth,
     limits,
   });
   const clamped = build({});
+  // clamp реально срабатывает: запрошенная глубина 3 схлопывается до дефолтной 1
+  const depthOne = build({}, 1);
+  assert.deepEqual(
+    clamped.entities.map((entity) => entity.observedId),
+    depthOne.entities.map((entity) => entity.observedId),
+  );
+  assert.deepEqual(clamped.dependencies, depthOne.dependencies);
   assert.ok(!clamped.entities.some((entity) => entity.label === 'audit()'),
     'depth 2 neighbour must stay out of the default maxDepth=1 context');
   const raised = build({ maxDepth: 2 });
@@ -612,57 +630,71 @@ test('assessment coverageHash discriminates lcov payloads without a hash field',
 test('structure_context MCP reads are confined to STRUCTURE_MCP_ROOT', async (t) => {
   const { facts, assessment } = await analyzeGraph();
   const root = await mkdtemp(join(tmpdir(), 'structure-mcp-'));
+  const outside = await mkdtemp(join(tmpdir(), 'structure-mcp-outside-'));
   await writeFile(join(root, 'facts.json'), JSON.stringify(facts));
   await writeFile(join(root, 'assessment.json'), JSON.stringify(assessment));
+  await writeFile(join(outside, 'facts.json'), JSON.stringify(facts));
+  // symlink внутри root → файл снаружи (обход lexical-проверки) и легитимный alias внутри root
+  await symlink(join(outside, 'facts.json'), join(root, 'linked-facts.json'));
+  await symlink(join(root, 'facts.json'), join(root, 'alias-facts.json'));
   const previous = process.env.STRUCTURE_MCP_ROOT;
   process.env.STRUCTURE_MCP_ROOT = root;
   t.after(async () => {
     if (previous === undefined) delete process.env.STRUCTURE_MCP_ROOT;
     else process.env.STRUCTURE_MCP_ROOT = previous;
     await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   });
   const api = facts.facts.entities.find((entity) => entity.label === 'validate()');
-  const context = await callStructureContext({
-    factsPath: 'facts.json',
-    assessmentPath: 'assessment.json',
+  const call = (factsPath, assessmentPath = 'assessment.json') => callStructureContext({
+    factsPath,
+    assessmentPath,
     headSha: HEAD,
     scopeRefs: [api.observedId],
   });
+  const context = await call('facts.json');
   assert.equal(context.kind, 'structure_context');
-  await assert.rejects(() => callStructureContext({
-    factsPath: '../facts.json',
-    assessmentPath: 'assessment.json',
-    headSha: HEAD,
-  }), /escapes allowed root/);
-  await assert.rejects(() => callStructureContext({
-    factsPath: '/etc/passwd',
-    assessmentPath: 'assessment.json',
-    headSha: HEAD,
-  }), /escapes allowed root/);
+  assert.equal((await call('alias-facts.json')).kind, 'structure_context', 'symlink внутри root легитимен');
+  await assert.rejects(() => call('../facts.json'), /escapes allowed root/);
+  await assert.rejects(() => call('/etc/passwd'), /escapes allowed root/);
+  await assert.rejects(() => call('facts.json', '../assessment.json'), /escapes allowed root/);
+  await assert.rejects(() => call('linked-facts.json'), /escapes allowed root/,
+    'symlink, указывающий за пределы root, отклоняется');
 });
 
-test('writeStructureExports confines writes to the allowed root', async () => {
+test('writeStructureExports confines writes to the allowed root', async (t) => {
   const result = await analyzeGraph();
   const root = await mkdtemp(join(tmpdir(), 'structure-export-'));
-  try {
-    const written = await writeStructureExports(result, {
-      factsPath: join(root, 'facts.json'),
-      assessmentPath: join(root, 'nested', 'assessment.json'),
-      rootDir: root,
-    });
-    assert.equal(written.length, 2);
-    assert.ok(written.every((path) => path.startsWith(`${root}${sep}`)));
-    await assert.rejects(() => writeStructureExports(result, {
-      factsPath: join(root, '..', 'escape.json'),
-      rootDir: root,
-    }), /escapes allowed root/);
-    await assert.rejects(() => writeStructureExports(result, {
-      markdownPath: join(tmpdir(), 'escape.md'),
-      rootDir: root,
-    }), /escapes allowed root/);
-  } finally {
+  const outside = await mkdtemp(join(tmpdir(), 'structure-export-outside-'));
+  // symlink-каталог внутри root, указывающий наружу
+  await symlink(outside, join(root, 'linked'));
+  t.after(async () => {
     await rm(root, { recursive: true, force: true });
-  }
+    await rm(outside, { recursive: true, force: true });
+  });
+  const written = await writeStructureExports(result, {
+    factsPath: join(root, 'facts.json'),
+    assessmentPath: join(root, 'nested', 'assessment.json'),
+    rootDir: root,
+  });
+  assert.equal(written.length, 2);
+  assert.ok(written.every((path) => path.startsWith(`${root}${sep}`)));
+  await assert.rejects(() => writeStructureExports(result, {
+    factsPath: join(root, '..', 'escape.json'),
+    rootDir: root,
+  }), /escapes allowed root/);
+  await assert.rejects(() => writeStructureExports(result, {
+    assessmentPath: join(root, '..', 'escape-assessment.json'),
+    rootDir: root,
+  }), /escapes allowed root/);
+  await assert.rejects(() => writeStructureExports(result, {
+    markdownPath: join(tmpdir(), 'escape.md'),
+    rootDir: root,
+  }), /escapes allowed root/);
+  await assert.rejects(() => writeStructureExports(result, {
+    factsPath: join(root, 'linked', 'facts.json'),
+    rootDir: root,
+  }), /escapes allowed root/);
 });
 
 test('drift finding fingerprints are independent of subjectRefs order', async () => {
@@ -670,17 +702,14 @@ test('drift finding fingerprints are independent of subjectRefs order', async ()
   const driftWith = (contractRefs) => computeStructureDrift({
     facts,
     assessment,
-    obligationsExport: {
-      revision: '1',
-      obligations: [{
-        id: 'obl:broken',
-        status: 'confirmed',
-        kind: 'happy_path',
-        statement: 'MUST keep links valid',
-        contentHash: sha256('broken'),
-        contractRefs,
-      }],
-    },
+    obligationsExport: makeObligationsExport([{
+      id: 'obl:broken',
+      status: 'confirmed',
+      kind: 'happy_path',
+      statement: 'MUST keep links valid',
+      contentHash: sha256('broken'),
+      contractRefs,
+    }], { revision: '1' }),
     linkSuggestions: [],
   }).findings.find((item) => item.ruleId === 'docs.contract_link_broken');
   const first = driftWith(['contract:a', 'contract:b']);
@@ -837,4 +866,184 @@ test('relative schema $refs resolve to files in schemas/', async () => {
       assert.equal(target.$id, `https://orange-hanter.github.io/ai-reviewer/schemas/${ref}`);
     }
   }
+});
+
+const SCIP_INDEX_TWO_DOCS = {
+  documents: [{
+    relativePath: 'src/a.ts',
+    language: 'typescript',
+    occurrences: [{
+      symbol: 'npm pkg 1 src/a.ts/foo().',
+      roles: 1,
+      range: { line: 1, endLine: 1 },
+    }],
+    symbols: [{
+      symbol: 'npm pkg 1 src/a.ts/foo().',
+      displayName: 'foo',
+      kind: 17,
+      signature: 'function foo(): void',
+      relationships: [],
+    }],
+  }, {
+    relativePath: 'src/b.ts',
+    language: 'typescript',
+    occurrences: [{
+      symbol: 'npm pkg 1 src/b.ts/bar().',
+      roles: 1,
+      range: { line: 1, endLine: 1 },
+    }],
+    symbols: [{
+      symbol: 'npm pkg 1 src/b.ts/bar().',
+      displayName: 'bar',
+      kind: 17,
+      signature: 'function bar(): void',
+      relationships: [],
+    }],
+  }],
+};
+
+const GRAPH_TWO_FUNCS = {
+  nodes: [
+    { id: 'a', label: 'foo', file_type: 'code', source_file: 'src/a.ts', source_location: 'L1', _callable: true },
+    { id: 'b', label: 'bar', file_type: 'code', source_file: 'src/b.ts', source_location: 'L1', _callable: true },
+  ],
+  links: [{ source: 'a', target: 'b', relation: 'calls', confidence: 'EXTRACTED' }],
+};
+
+test('mergeScipWithGraphify recomputes ids of rewritten edges and contracts', () => {
+  const graph = extractGraphifyFacts(GRAPH_TWO_FUNCS);
+  const scip = extractScipFacts(SCIP_INDEX_TWO_DOCS);
+  const merged = mergeScipWithGraphify(scip, graph);
+  const foo = merged.entities.find((entity) => entity.path === 'src/a.ts');
+  const bar = merged.entities.find((entity) => entity.path === 'src/b.ts');
+  assert.notEqual(foo.observedId, graph.entities[0].observedId, 'сущность заменена SCIP-версией');
+  const edge = merged.dependencies.find((item) => item.relation === 'calls');
+  assert.equal(edge.from, foo.observedId);
+  assert.equal(edge.to, bar.observedId);
+  assert.equal(edge.id, stableId('edge', foo.observedId, bar.observedId, 'calls'),
+    'id пересчитан из новых from/to — сортировка и lookup по id снова согласованы');
+  const entrypoint = merged.contracts.find((item) => item.kind === 'entrypoint' && item.entityRef === foo.observedId);
+  assert.equal(entrypoint.id, stableId('contract', 'entrypoint', foo.observedId));
+  const ids = merged.dependencies.map((item) => item.id);
+  assert.deepEqual(ids, [...ids].sort((a, b) => a.localeCompare(b)));
+});
+
+test('merged capabilities stay flat and combine providers', () => {
+  const graph = extractGraphifyFacts(GRAPH_TWO_FUNCS);
+  const scip = extractScipFacts(SCIP_INDEX_TWO_DOCS);
+  const merged = mergeScipWithGraphify(scip, graph);
+  // плоская форма (контракт provenance.providerCapabilities), не { graphify, scip }
+  assert.equal(merged.capabilities.graphify, undefined);
+  assert.equal(merged.capabilities.symbols, 'exact', 'лучший строковый уровень побеждает');
+  assert.equal(merged.capabilities.topology, true, 'capability доступна, если её даёт хотя бы один провайдер');
+  assert.equal(merged.capabilities.calls, true);
+  assert.equal(merged.capabilities.signatures, true);
+  assert.equal(merged.capabilities.positionEncoding, 'from-index');
+});
+
+test('SCIP contracts bind to test cases via entityRef-derived labels', () => {
+  const scip = extractScipFacts(SCIP_INDEX_TWO_DOCS);
+  const contract = scip.contracts.find((item) => item.kind === 'signature');
+  assert.ok(contract);
+  assert.equal(contract.label, undefined, 'SCIP-контракт не несёт label');
+  const source = `import { test } from 'node:test';
+test('foo works', () => {
+  expect(foo()).toEqual(true);
+});`;
+  const bound = extractTestCasesFromSource('test/a.test.ts', source, scip.contracts, scip.entities);
+  assert.deepEqual(bound[0].targetContractRefs, [contract.id]);
+  const bare = extractTestCasesFromSource('test/a.test.ts', source, scip.contracts);
+  assert.deepEqual(bare[0].targetContractRefs, [], 'без entities label вывести неоткуда');
+});
+
+test('SCIP decoder rejects truncated fixed-width fields', () => {
+  // tag: field 1, wire 1 (fixed64) — но в буфере меньше 8 байт payload'а
+  assert.throws(() => decodeScipIndex(Buffer.from([0b00001001, 0x00, 0x00])), /truncated SCIP protobuf/);
+});
+
+test('SCIP edge truncation is sorted-first and reported in warnings', () => {
+  const index = {
+    documents: [{
+      relativePath: 'src/a.ts',
+      language: 'typescript',
+      occurrences: [
+        { symbol: 'npm pkg 1 src/a.ts/foo().', roles: 1, range: { line: 1, endLine: 1 } },
+      ],
+      symbols: [{
+        symbol: 'npm pkg 1 src/a.ts/foo().',
+        displayName: 'foo',
+        kind: 17,
+        signature: 'function foo(): void',
+        relationships: [{ symbol: 'npm pkg 1 src/a.ts/Bar#.', isImplementation: true }],
+      }, {
+        symbol: 'npm pkg 1 src/a.ts/Bar#.',
+        displayName: 'Bar',
+        kind: 21,
+        signature: null,
+        relationships: [],
+      }],
+      occurrencesExtra: undefined,
+    }],
+  };
+  index.documents[0].occurrences.push({
+    symbol: 'npm pkg 1 src/a.ts/Bar#.', roles: 1, range: { line: 5, endLine: 5 },
+  });
+  const full = extractScipFacts(index);
+  assert.equal(full.dependencies.length, 1);
+  const limited = extractScipFacts(index, { maxEdges: 0 });
+  assert.equal(limited.dependencies.length, 0);
+  assert.equal(limited.truncated, true);
+  assert.ok(limited.warnings.some((warning) => /SCIP dependencies truncated at 0/.test(warning)));
+});
+
+test('invalid graph JSON fails clearly, invalid mutation JSON degrades to warning', async () => {
+  await assert.rejects(() => analyzeStructure({
+    graphText: '{nope',
+    repoRoot: '/repo',
+    headSha: HEAD,
+    branchRef: 'main',
+  }, { readFile: async () => { throw new Error('no files'); } }), /invalid structure graph JSON/);
+  const result = await analyzeStructure({
+    graphText: JSON.stringify(GRAPH),
+    graphReportText: `Built from commit: \`${HEAD}\``,
+    repoRoot: '/repo',
+    headSha: HEAD,
+    branchRef: 'main',
+    mutationReportPath: '/repo/mutation.json',
+    generatedAt: '2026-09-02T00:00:00.000Z',
+  }, {
+    readFile: async (path) => {
+      if (String(path).endsWith('mutation.json')) return '{broken';
+      throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+    },
+  });
+  assert.ok(result.diagnostics.warnings.some((warning) => /mutation report ignored: invalid JSON/.test(warning)));
+  assert.ok(!result.assessment.receipts.some((item) => item.provider === 'mutation-testing-elements'));
+});
+
+test('MCP stdio transport rejects oversized frames and stays in sync', async () => {
+  const bigBody = Buffer.alloc(8 * 1024 * 1024 + 1, 0x78);
+  const bigFrame = Buffer.concat([
+    Buffer.from(`Content-Length: ${bigBody.length}\r\n\r\n`),
+    bigBody,
+  ]);
+  const [tooBig, pong] = await runMcpServer([bigFrame, { jsonrpc: '2.0', id: 9, method: 'ping' }]);
+  assert.equal(tooBig.error.code, -32600);
+  assert.match(tooBig.error.message, /exceeds/);
+  assert.deepEqual(pong, { jsonrpc: '2.0', id: 9, result: {} });
+});
+
+test('pr-review-structure rejects unknown options with exit code 2', async () => {
+  const child = spawn(process.execPath, [
+    fileURLToPath(new URL('../bin/pr-review-structure.mjs', import.meta.url)),
+    '--bogus-flag',
+  ]);
+  const stderr = [];
+  child.stderr.on('data', (chunk) => stderr.push(chunk));
+  child.stdin.end();
+  const watchdog = setTimeout(() => child.kill('SIGKILL'), 10000);
+  const exitCode = await new Promise((resolvePromise) => child.on('close', resolvePromise));
+  clearTimeout(watchdog);
+  assert.equal(exitCode, 2);
+  assert.match(Buffer.concat(stderr).toString(), /unknown option: --bogus-flag/);
 });

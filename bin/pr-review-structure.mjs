@@ -1,11 +1,21 @@
 #!/usr/bin/env node
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { analyzeStructure } from '../lib/structure.mjs';
 import { writeStructureExports } from '../lib/structure-export.mjs';
 import { loadReviewConfig } from '../lib/config.mjs';
 
+const KNOWN_OPTIONS = new Set([
+  '--graph', '--graph-report', '--graph-analysis', '--scip', '--lcov', '--obligations',
+  '--mutation-report', '--property-report', '--previous-facts', '--repo-root', '--scope',
+  '--head-sha', '--branch', '--test-head-sha', '--test-run-id', '--facts-out',
+  '--assessment-out', '--property-drafts-out', '--drift-out', '--markdown', '--trust-tier',
+  '--include-ambiguous', '--json',
+]);
+
 function parseArgs(argv) {
+  const unknown = argv.find((arg) => arg.startsWith('--') && !KNOWN_OPTIONS.has(arg));
+  if (unknown) throw new Error(`unknown option: ${unknown}`);
   const value = (name) => {
     const index = argv.indexOf(name);
     return index >= 0 ? argv[index + 1] : undefined;
@@ -67,7 +77,14 @@ async function readable(path) {
   try { await access(path); return true; } catch { return false; }
 }
 
-const args = parseArgs(process.argv.slice(2));
+let args;
+try {
+  args = parseArgs(process.argv.slice(2));
+} catch (error) {
+  console.error(`[pr-review.structure] ${error.message}`);
+  console.error(usage());
+  process.exit(2);
+}
 if (args.help) {
   console.log(usage());
   process.exit(0);
@@ -80,21 +97,20 @@ const outputDir = resolve(repoRoot, structure.exportDir);
 const graphPath = resolve(repoRoot, args.graphPath || structure.graph);
 const graphReportPath = resolve(repoRoot, args.graphReportPath || structure.graphReport);
 const graphAnalysisPath = resolve(repoRoot, args.graphAnalysisPath || structure.graphAnalysis);
-const scipPath = args.scipPath || structure.scip ? resolve(repoRoot, args.scipPath || structure.scip) : '';
-const lcovPath = args.lcovPath || structure.lcov ? resolve(repoRoot, args.lcovPath || structure.lcov) : '';
-const obligationsPath = args.obligationsPath || structure.obligations
-  ? resolve(repoRoot, args.obligationsPath || structure.obligations) : '';
-const mutationReportPath = args.mutationReportPath || structure.mutationReport
-  ? resolve(repoRoot, args.mutationReportPath || structure.mutationReport) : '';
-const propertyReportPath = args.propertyReportPath || structure.propertyReport
-  ? resolve(repoRoot, args.propertyReportPath || structure.propertyReport) : '';
+// опциональный вход: отсутствующий путь → '', присутствующий — resolve от repoRoot
+const optionalInput = (value) => (value ? resolve(repoRoot, value) : '');
+const scipPath = optionalInput(args.scipPath || structure.scip);
+const lcovPath = optionalInput(args.lcovPath || structure.lcov);
+const obligationsPath = optionalInput(args.obligationsPath || structure.obligations);
+const mutationReportPath = optionalInput(args.mutationReportPath || structure.mutationReport);
+const propertyReportPath = optionalInput(args.propertyReportPath || structure.propertyReport);
 
 try {
   if (!await readable(graphPath) && !await readable(scipPath) && !await readable(lcovPath)) {
     throw new Error('no readable structure source: provide --graph, --scip or --lcov');
   }
   const previousFacts = args.previousFactsPath
-    ? JSON.parse(await (await import('node:fs/promises')).readFile(resolve(repoRoot, args.previousFactsPath), 'utf8'))
+    ? JSON.parse(await readFile(resolve(repoRoot, args.previousFactsPath), 'utf8'))
     : null;
   const result = await analyzeStructure({
     repoRoot,
@@ -146,5 +162,6 @@ try {
   }
 } catch (error) {
   console.error(`[pr-review.structure] ${error.message}`);
-  process.exitCode = /Usage:|unknown option/.test(error.message) ? 2 : 1;
+  // usage-ошибки (unknown option) уходят раньше с exit 2 — здесь только ошибки прогона
+  process.exitCode = 1;
 }

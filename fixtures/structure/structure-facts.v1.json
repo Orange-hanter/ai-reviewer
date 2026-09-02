@@ -14,9 +14,8 @@
     "scope": "src",
     "graphStatus": "fresh",
     "providerCapabilities": {
-      "graphify": {
-        "topology": true
-      }
+      "symbols": "inferred",
+      "topology": true
     },
     "warnings": [],
     "truncated": false

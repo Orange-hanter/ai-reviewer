@@ -48,7 +48,7 @@
         "providerCapabilities": {
           "type": "object",
           "additionalProperties": true,
-          "$comment": "намеренно расширяемо: набор capability-флагов зависит от провайдера (graphify/scip/...)"
+          "$comment": "плоская карта capability → флаг/уровень (намеренно расширяемо); при объединении провайдеров (graphify+scip) capability доступна, если её даёт хотя бы один"
         },
         "warnings": {
           "type": "array",

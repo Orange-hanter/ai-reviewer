@@ -163,7 +163,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_STRUCTURE_PROPERTIES` | пусто | Property execution report |
 | `REVIEW_STRUCTURE_EXPORT_DIR` | `paths.structureExportDir` | Facts/assessment/drift outputs |
 | `REVIEW_STRUCTURE_SCOPE` | пусто | Path-prefix scope |
-| `REVIEW_STRUCTURE_TRUST_TIER` | `trusted_local` | `signed_ci`, `trusted_local`, `untrusted` |
+| `REVIEW_STRUCTURE_TRUST_TIER` | `trusted_local` | `signed_ci`, `trusted_local`, `untrusted`. ⚠️ `untrusted` понижает evidence ceiling всех receipts: сценарии не поднимутся выше статического инвентаря, включайте только для недоверенных источников |
 | `REVIEW_STRUCTURE_INCLUDE_AMBIGUOUS` | `0` | Включать AMBIGUOUS Graphify edges |
 | `REVIEW_STRUCTURE_MAX_ENTITIES` | `5000` | Hard cap facts |
 | `REVIEW_STRUCTURE_MAX_EDGES` | `15000` | Hard cap dependencies |
