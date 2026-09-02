@@ -78,6 +78,12 @@ FP-learning-loop» пуста — конкурентов в ней нет; ри�
 23. Blast-radius graphify → scope задач swarm'а: метрика `blast_radius.affected_files`
     → **сделано** в пакете: `swarm.suggestedScopeFiles` (вне диффа PR). Оркестратор ZAIrgRush
     ещё должен начать читать артефакт.
+24. **Structure protocol / contracts / scenarios**: versioned facts + assessment +
+    obligations, EvidenceReceipt, Graphify/SCIP/LCOV, mutation/property evidence и pinned
+    `structure_context` MCP.
+    → **сделано в producer-пакете**: `lib/structure*.mjs`, `pr-review-structure`,
+    `pr-review-structure-mcp`, schemas и fixtures. Глубокое snapshot-хранилище и obligations
+    export остаются consumer-частью cod-doc.
 
 ## Отклонено сознательно
 

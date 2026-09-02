@@ -30,6 +30,7 @@ function parseArgs(argv) {
     factsPath: value('--facts-out'),
     assessmentPath: value('--assessment-out'),
     propertyDraftsPath: value('--property-drafts-out'),
+    driftPath: value('--drift-out'),
     markdownPath: value('--markdown'),
     trustTier: value('--trust-tier'),
     includeAmbiguous: argv.includes('--include-ambiguous'),
@@ -56,7 +57,8 @@ Scope and provenance:
 
 Outputs:
   --facts-out <facts.json> --assessment-out <assessment.json>
-  --property-drafts-out <drafts.json> --markdown <summary.md> --json
+  --property-drafts-out <drafts.json> --drift-out <drift.json>
+  --markdown <summary.md> --json
 `;
 }
 
@@ -121,6 +123,7 @@ try {
     factsPath: resolve(repoRoot, args.factsPath || join(outputDir, 'structure-facts.json')),
     assessmentPath: resolve(repoRoot, args.assessmentPath || join(outputDir, 'structure-assessment.json')),
     propertyDraftsPath: resolve(repoRoot, args.propertyDraftsPath || join(outputDir, 'property-drafts.json')),
+    driftPath: resolve(repoRoot, args.driftPath || join(outputDir, 'structure-drift.json')),
     markdownPath: resolve(repoRoot, args.markdownPath || join(outputDir, 'code-structure.md')),
     owner: cfg.profile.toolName,
   });

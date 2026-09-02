@@ -13,7 +13,7 @@ verifier → inline-замечания и один живой sticky-отчёт 
 ![deps](https://img.shields.io/badge/зависимостей-0-success)
 ![license](https://img.shields.io/badge/license-UNLICENSED-lightgrey)
 
-[Архитектура](docs/architecture.md) · [Профиль проекта](docs/profiles.md) · [Интеграция](docs/integration.md) · [Конфигурация](docs/configuration.md)
+[Архитектура](docs/architecture.md) · [Структура и сценарии](docs/structure.md) · [Профиль проекта](docs/profiles.md) · [Интеграция](docs/integration.md) · [Конфигурация](docs/configuration.md)
 
 </div>
 
@@ -118,6 +118,16 @@ GITHUB_TOKEN=… GITHUB_REPOSITORY=owner/repo PR_NUMBER=123 OLLAMA_API_KEY=… \
   REVIEW_PROFILE=ops/ai-review/profile.json npx pr-review
 ```
 
+Структура, контракты, dependencies и тестовые evidence вне merge-гейта:
+
+```bash
+npx pr-review-structure \
+  --graph .graphify/graphify-out/graph.json \
+  --lcov coverage/lcov.info \
+  --facts-out .ai-review/structure/structure-facts.json \
+  --assessment-out .ai-review/structure/structure-assessment.json
+```
+
 ## CLI
 
 | Команда | Назначение |
@@ -128,6 +138,8 @@ GITHUB_TOKEN=… GITHUB_REPOSITORY=owner/repo PR_NUMBER=123 OLLAMA_API_KEY=… \
 | `pr-review-metrics` | Сводка по логам прогонов |
 | `pr-review-probe-models` | Доступность, latency и JSON-mode моделей |
 | `pr-review-feedback` · `-batch` | Сбор 👍/👎 с PR |
+| `pr-review-structure` | Structure facts/assessment, drift, property drafts и Markdown |
+| `pr-review-structure-mcp` | Pinned-SHA `structure_context` MCP для агентов |
 
 ## Профиль проекта
 

@@ -4,7 +4,9 @@ import { readFile } from 'node:fs/promises';
 
 import {
   analyzeStructure,
+  applyStructureWaivers,
   buildStructureContext,
+  computeStructureDrift,
   handleStructureMcpRequest,
   createEvidenceReceipt,
   extractGraphifyFacts,
@@ -15,6 +17,8 @@ import {
   parseMutationReport,
   parseStructurePayload,
   reconcileIdentity,
+  suggestObligationLinks,
+  triageStructureFindings,
   sha256,
   stableId,
   validateEvidenceReceipt,
@@ -94,7 +98,7 @@ test('EvidenceReceipt strips agent-provided covered and validates provenance', (
   });
   assert.equal(receipt.observation.covered, undefined);
   assert.deepEqual(validateEvidenceReceipt(receipt), []);
-  assert.match(assert.throws(() => createEvidenceReceipt({ ...receipt, headSha: 'bad' })).message, /headSha/);
+  assert.throws(() => createEvidenceReceipt({ ...receipt, headSha: 'bad' }), /headSha/);
 });
 
 test('repository path normalization rejects escapes and absolute paths', () => {
@@ -290,6 +294,45 @@ test('property drafts are generated only for confirmed edge obligations', () => 
   assert.equal(drafts.length, 1);
   assert.ok(drafts[0].generators.includes('below_minimum'));
   assert.equal(drafts[0].requiresConfirmation, true);
+});
+
+test('drift suggestions, stable findings and expiring waivers preserve facts', async () => {
+  const result = await analyzeStructure({
+    graphText: JSON.stringify(GRAPH),
+    graphReportText: `Built from commit: \`${HEAD}\``,
+    repoRoot: '/repo',
+    headSha: HEAD,
+    branchRef: 'main',
+    generatedAt: '2026-09-02T00:00:00.000Z',
+  }, { readFile: async () => { throw new Error('no files'); } });
+  const obligation = {
+    id: 'obl:validate',
+    source: 'cod-doc-section',
+    contentHash: sha256('validate'),
+    priority: 'must',
+    kind: 'happy_path',
+    statement: 'validate MUST accept valid tokens',
+    status: 'confirmed',
+    contractRefs: [],
+  };
+  const suggestions = suggestObligationLinks([obligation], result.facts.facts);
+  assert.ok(suggestions[0].candidates.length >= 1);
+  const drift = computeStructureDrift({
+    facts: result.facts,
+    assessment: result.assessment,
+    obligationsExport: { revision: '1', obligations: [obligation] },
+    linkSuggestions: suggestions,
+  });
+  const unlinked = drift.findings.find((item) => item.ruleId === 'docs.obligation_unlinked');
+  assert.ok(unlinked);
+  const waived = applyStructureWaivers(drift.findings, [{
+    findingFingerprint: unlinked.fingerprint,
+    owner: 'team',
+    reason: 'legacy',
+    expiresAt: '2026-10-01T00:00:00.000Z',
+  }], new Date('2026-09-02T00:00:00.000Z'));
+  assert.equal(waived.find((item) => item.fingerprint === unlinked.fingerprint).suppressed, true);
+  assert.equal(triageStructureFindings(waived).some((item) => item.fingerprint === unlinked.fingerprint), false);
 });
 
 test('structure_context requires and preserves a pinned snapshot', async () => {

@@ -86,6 +86,10 @@ export {
   STRUCTURE_CONTEXT_TOOL, callStructureContext, handleStructureMcpRequest,
 } from './lib/structure-mcp.mjs';
 export { buildStructureMarkdown, writeStructureExports } from './lib/structure-export.mjs';
+export {
+  suggestObligationLinks, computeStructureDrift, reconcileStructureFindings,
+  applyStructureWaivers, triageStructureFindings,
+} from './lib/structure-drift.mjs';
 export { decideAutoTriage, buildTriageContext, runAutoTriage, findingLocationKey as triageLocationKey } from './lib/triage.mjs';
 export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog } from './lib/router.mjs';
 export { createReviewPipeline, runGateResolution, runReview } from './pipeline.mjs';
