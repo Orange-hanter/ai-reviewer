@@ -1,0 +1,29 @@
+{
+  "schemaRef": "code-structure/structure-assessment.v1",
+  "version": 1,
+  "kind": "structure_assessment",
+  "generatedAt": "2026-09-02T00:00:00.000Z",
+  "fingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+  "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "obligationsRevision": "docs-1",
+  "obligationContentHashes": {
+    "obl:demo#error": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "coverageHash": "4444444444444444444444444444444444444444444444444444444444444444",
+  "thresholdsHash": "5555555555555555555555555555555555555555555555555555555555555555",
+  "testRun": {
+    "id": "run-1",
+    "headSha": "abcdef1",
+    "producedAt": "2026-09-02T00:00:00.000Z"
+  },
+  "temporalAlignment": "aligned",
+  "coverageObservations": [],
+  "assessments": {
+    "codeCoverage": {},
+    "dependencyRisk": {},
+    "contractScenarios": [],
+    "dataQuality": {}
+  },
+  "hints": [],
+  "receipts": []
+}

@@ -53,6 +53,39 @@ export {
 export { publicErrorLabel, createAdaptiveSemaphore, redactSecretsForLog } from './lib/util.mjs';
 export { parseJsonl, aggregateMetrics, formatMetricsReport } from './lib/metrics.mjs';
 export { createGraphifyClient } from './lib/graphify.mjs';
+export {
+  analyzeStructure, STRUCTURE_TOOL_VERSION,
+} from './lib/structure.mjs';
+export {
+  EVIDENCE_RECEIPT_VERSION, TRUST_TIERS, EVIDENCE_CEILINGS,
+  canonicalJson, sha256, stableId, normalizeRepoPath,
+  validateEvidenceReceipt, createEvidenceReceipt, receiptRef,
+} from './lib/structure-evidence.mjs';
+export {
+  STRUCTURE_PROTOCOL_VERSION, STRUCTURE_FACTS_SCHEMA, STRUCTURE_ASSESSMENT_SCHEMA,
+  OBLIGATIONS_SCHEMA, DEFAULT_STRUCTURE_LIMITS, assertPayloadSize,
+  validateStructureFacts, validateStructureAssessment, validateObligationsExport,
+  parseStructurePayload, factsFingerprint, assessmentFingerprint, temporalAlignment,
+} from './lib/structure-protocol.mjs';
+export { parseLcov, lcovObservations, matchLcovFunction } from './lib/structure-lcov.mjs';
+export { extractGraphifyFacts, buildStructureViews } from './lib/structure-graphify.mjs';
+export {
+  decodeScipIndex, readScipIndex, extractScipFacts, mergeScipWithGraphify,
+} from './lib/structure-scip.mjs';
+export {
+  extractTestCasesFromSource, mergeTestCases, generatePropertyDrafts, parsePropertyReport,
+} from './lib/structure-tests.mjs';
+export { parseMutationReport, criticalContractRefs } from './lib/structure-mutation.mjs';
+export {
+  assessDependencyRisk, assessDataQuality, assessContractScenarios,
+  buildStructureHints, buildStructureAssessment,
+} from './lib/structure-assessments.mjs';
+export { reconcileIdentity } from './lib/structure-identity.mjs';
+export { buildStructureContext } from './lib/structure-context.mjs';
+export {
+  STRUCTURE_CONTEXT_TOOL, callStructureContext, handleStructureMcpRequest,
+} from './lib/structure-mcp.mjs';
+export { buildStructureMarkdown, writeStructureExports } from './lib/structure-export.mjs';
 export { decideAutoTriage, buildTriageContext, runAutoTriage, findingLocationKey as triageLocationKey } from './lib/triage.mjs';
 export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog } from './lib/router.mjs';
 export { createReviewPipeline, runGateResolution, runReview } from './pipeline.mjs';

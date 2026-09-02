@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orange-hanter.github.io/ai-reviewer/schemas/evidence-receipt.v1.schema.json",
+  "title": "Evidence receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "provider",
+    "toolVersion",
+    "capability",
+    "headSha",
+    "configHash",
+    "scopeHash",
+    "artifact",
+    "observation",
+    "trustTier",
+    "evidenceCeiling",
+    "limitations",
+    "observedAt"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "provider": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "toolVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "capability": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "headSha": { "type": "string", "pattern": "^[0-9a-fA-F]{7,64}$" },
+    "testRunId": { "type": ["string", "null"], "maxLength": 200 },
+    "configHash": { "$ref": "#/$defs/sha256" },
+    "scopeHash": { "$ref": "#/$defs/sha256" },
+    "subjectRefs": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 },
+      "uniqueItems": true
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "value": {},
+        "path": { "$ref": "#/$defs/path" },
+        "line": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "trustTier": {
+      "enum": ["signed_ci", "trusted_local", "untrusted"]
+    },
+    "evidenceCeiling": {
+      "enum": [
+        "static_inventory",
+        "aggregate_lcov",
+        "per_test_execution",
+        "assertion_bound",
+        "mutation_bound",
+        "property_bound",
+        "contract_verified"
+      ]
+    },
+    "limitations": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "complete": { "type": "boolean" },
+    "truncated": { "type": "boolean" },
+    "exitStatus": { "type": ["integer", "null"] },
+    "observedAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\u0000).+$"
+    }
+  }
+}

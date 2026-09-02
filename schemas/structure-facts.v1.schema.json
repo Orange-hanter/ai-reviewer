@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orange-hanter.github.io/ai-reviewer/schemas/structure-facts.v1.schema.json",
+  "title": "Structure facts v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaRef",
+    "version",
+    "kind",
+    "generatedAt",
+    "fingerprint",
+    "provenance",
+    "facts",
+    "identityEvents",
+    "views",
+    "receipts"
+  ],
+  "properties": {
+    "schemaRef": { "const": "code-structure/structure-facts.v1" },
+    "version": { "const": 1 },
+    "kind": { "const": "structure_facts" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "fingerprint": { "$ref": "#/$defs/sha256" },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headSha",
+        "branchRef",
+        "toolVersion",
+        "configHash",
+        "scope",
+        "graphStatus",
+        "providerCapabilities",
+        "warnings",
+        "truncated"
+      ],
+      "properties": {
+        "headSha": { "type": "string", "pattern": "^[0-9a-fA-F]{7,64}$" },
+        "branchRef": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "prNumber": { "type": ["integer", "null"], "minimum": 1 },
+        "isDefaultBranch": { "type": "boolean" },
+        "toolVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "configHash": { "$ref": "#/$defs/sha256" },
+        "scope": { "type": "string", "maxLength": 1000 },
+        "graphStatus": { "enum": ["fresh", "stale", "unknown", "missing"] },
+        "providerCapabilities": { "type": "object" },
+        "warnings": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 1000 }
+        },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundaries", "entities", "contracts", "dependencies", "testCases"],
+      "properties": {
+        "boundaries": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": { "$ref": "#/$defs/boundary" }
+        },
+        "entities": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": { "$ref": "#/$defs/entity" }
+        },
+        "contracts": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": { "$ref": "#/$defs/contract" }
+        },
+        "dependencies": {
+          "type": "array",
+          "maxItems": 15000,
+          "items": { "$ref": "#/$defs/dependency" }
+        },
+        "testCases": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": { "$ref": "#/$defs/testCase" }
+        }
+      }
+    },
+    "identityEvents": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "$ref": "#/$defs/identityEvent" }
+    },
+    "views": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundaryTree", "objectTree", "functionTree", "dependencyGraph"],
+      "properties": {
+        "boundaryTree": { "type": "array" },
+        "objectTree": { "type": "array" },
+        "functionTree": { "type": "array" },
+        "dependencyGraph": { "type": "array" }
+      }
+    },
+    "receipts": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "evidence-receipt.v1.schema.json" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\u0000).+$"
+    },
+    "confidence": {
+      "enum": ["exact", "extracted", "inferred", "heuristic", "ambiguous", "unresolved"]
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "name", "paths", "source", "confidence", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "kind": { "enum": ["repository", "workspace", "package", "service", "layer", "module"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": { "$ref": "#/$defs/path" },
+          "uniqueItems": true
+        },
+        "source": { "enum": ["manifest", "profile", "path", "community"] },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observedId",
+        "lineageId",
+        "label",
+        "kind",
+        "path",
+        "confidence",
+        "evidence",
+        "externalIds"
+      ],
+      "properties": {
+        "observedId": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "lineageId": { "type": ["string", "null"], "maxLength": 500 },
+        "boundaryId": { "type": ["string", "null"], "maxLength": 500 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "qualifiedName": { "type": ["string", "null"], "maxLength": 2000 },
+        "kind": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "path": { "$ref": "#/$defs/path" },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "endLine": { "type": ["integer", "null"], "minimum": 1 },
+        "signature": { "type": ["string", "null"], "maxLength": 10000 },
+        "community": { "type": ["string", "integer", "null"] },
+        "isGodNode": { "type": "boolean" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "externalIds": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "entityRef", "kind", "confidence", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "entityRef": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "kind": { "enum": ["export", "entrypoint", "implements", "inherits", "signature", "error"] },
+        "targetRef": { "type": ["string", "null"], "maxLength": 500 },
+        "signature": { "type": ["string", "null"], "maxLength": 10000 },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "from", "to", "relation", "confidence", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "from": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "to": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "relation": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "crossBoundary": { "type": "boolean" },
+        "crossCommunity": { "type": "boolean" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      }
+    },
+    "testCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "path", "line", "confidence", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "path": { "$ref": "#/$defs/path" },
+        "line": { "type": "integer", "minimum": 1 },
+        "framework": { "type": ["string", "null"], "maxLength": 100 },
+        "targetContractRefs": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "assertions": { "type": "array", "maxItems": 100 },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      }
+    },
+    "identityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "from", "to", "confidence", "evidence"],
+      "properties": {
+        "kind": { "enum": ["created", "renamed", "moved", "signature_changed", "removed", "identity_unresolved"] },
+        "from": { "type": ["string", "null"], "maxLength": 500 },
+        "to": { "type": ["string", "null"], "maxLength": 500 },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      }
+    }
+  }
+}

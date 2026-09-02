@@ -1,0 +1,53 @@
+{
+  "schemaRef": "code-structure/structure-facts.v1",
+  "version": 1,
+  "kind": "structure_facts",
+  "generatedAt": "2026-09-02T00:00:00.000Z",
+  "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "provenance": {
+    "headSha": "abcdef1",
+    "branchRef": "main",
+    "prNumber": null,
+    "isDefaultBranch": true,
+    "toolVersion": "1.0.0",
+    "configHash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "scope": "src",
+    "graphStatus": "fresh",
+    "providerCapabilities": {
+      "graphify": {
+        "topology": true
+      }
+    },
+    "warnings": [],
+    "truncated": false
+  },
+  "facts": {
+    "boundaries": [
+      {
+        "id": "boundary:repository",
+        "kind": "repository",
+        "name": "repository",
+        "paths": [
+          "."
+        ],
+        "source": "path",
+        "confidence": "exact",
+        "evidence": [
+          "repository-root"
+        ]
+      }
+    ],
+    "entities": [],
+    "contracts": [],
+    "dependencies": [],
+    "testCases": []
+  },
+  "identityEvents": [],
+  "views": {
+    "boundaryTree": [],
+    "objectTree": [],
+    "functionTree": [],
+    "dependencyGraph": []
+  },
+  "receipts": []
+}

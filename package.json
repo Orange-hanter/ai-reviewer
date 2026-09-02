@@ -16,7 +16,9 @@
     "pr-review-probe-models": "./bin/pr-review-probe-models.mjs",
     "pr-review-feedback": "./bin/pr-review-feedback.mjs",
     "pr-review-feedback-batch": "./bin/pr-review-feedback-batch.mjs",
-    "pr-review-benchmark": "./bin/pr-review-benchmark.mjs"
+    "pr-review-benchmark": "./bin/pr-review-benchmark.mjs",
+    "pr-review-structure": "./bin/pr-review-structure.mjs",
+    "pr-review-structure-mcp": "./bin/pr-review-structure-mcp.mjs"
   },
   "exports": {
     ".": "./index.mjs",
@@ -36,6 +38,7 @@
     "fixtures",
     "gold",
     "profiles",
+    "schemas",
     "docs"
   ],
   "scripts": {

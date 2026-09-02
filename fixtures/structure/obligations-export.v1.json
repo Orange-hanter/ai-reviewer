@@ -1,0 +1,30 @@
+{
+  "schemaRef": "code-structure/obligations-export.v1",
+  "version": 1,
+  "kind": "obligations_export",
+  "project": "demo",
+  "revision": "docs-1",
+  "headSha": "abcdef1",
+  "exportedAt": "2026-09-02T00:00:00.000Z",
+  "obligations": [
+    {
+      "id": "obl:demo#error",
+      "source": "cod-doc-section",
+      "docRef": "modules/demo/contracts",
+      "sectionAnchor": "error",
+      "storyRef": null,
+      "taskRef": null,
+      "moduleRef": "demo",
+      "contentHash": "2222222222222222222222222222222222222222222222222222222222222222",
+      "priority": "must",
+      "kind": "error_path",
+      "statement": "MUST reject invalid input",
+      "status": "confirmed",
+      "contractRefs": [],
+      "expected": {
+        "error": "InvalidInput"
+      },
+      "provenance": "manual"
+    }
+  ]
+}

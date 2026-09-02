@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orange-hanter.github.io/ai-reviewer/schemas/structure-assessment.v1.schema.json",
+  "title": "Structure assessment v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaRef",
+    "version",
+    "kind",
+    "generatedAt",
+    "fingerprint",
+    "factsFingerprint",
+    "obligationsRevision",
+    "coverageHash",
+    "thresholdsHash",
+    "testRun",
+    "temporalAlignment",
+    "coverageObservations",
+    "assessments",
+    "hints",
+    "receipts"
+  ],
+  "properties": {
+    "schemaRef": { "const": "code-structure/structure-assessment.v1" },
+    "version": { "const": 1 },
+    "kind": { "const": "structure_assessment" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "fingerprint": { "$ref": "#/$defs/sha256" },
+    "factsFingerprint": { "$ref": "#/$defs/sha256" },
+    "obligationsRevision": { "type": "string", "minLength": 1, "maxLength": 300 },
+    "obligationContentHashes": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/sha256" }
+    },
+    "coverageHash": { "$ref": "#/$defs/sha256" },
+    "thresholdsHash": { "$ref": "#/$defs/sha256" },
+    "testRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "headSha", "producedAt"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "headSha": { "type": "string", "pattern": "^[0-9a-fA-F]{7,64}$" },
+        "producedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "temporalAlignment": { "enum": ["aligned", "mismatch", "unknown"] },
+    "coverageObservations": {
+      "type": "array",
+      "maxItems": 50000,
+      "items": { "$ref": "#/$defs/coverageObservation" }
+    },
+    "assessments": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["codeCoverage", "dependencyRisk", "contractScenarios", "dataQuality"],
+      "properties": {
+        "codeCoverage": { "type": "object" },
+        "dependencyRisk": { "type": "object" },
+        "contractScenarios": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": { "$ref": "#/$defs/scenarioAssessment" }
+        },
+        "dataQuality": { "type": "object" }
+      }
+    },
+    "hints": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": { "$ref": "#/$defs/hint" }
+    },
+    "receipts": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": { "$ref": "evidence-receipt.v1.schema.json" }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "confidence": {
+      "enum": ["exact", "extracted", "inferred", "heuristic", "ambiguous", "unresolved"]
+    },
+    "coverageObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "level", "subjectRef", "status", "confidence", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "level": { "enum": ["code_coverage", "function_execution", "scenario_evidence", "contract_edge_coverage"] },
+        "subjectRef": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "status": { "enum": ["covered", "uncovered", "partial", "unavailable", "unresolved"] },
+        "hitCount": { "type": ["integer", "null"], "minimum": 0 },
+        "covered": { "type": ["integer", "null"], "minimum": 0 },
+        "total": { "type": ["integer", "null"], "minimum": 0 },
+        "contractRef": { "type": ["string", "null"], "maxLength": 500 },
+        "path": { "type": "string", "maxLength": 1000 },
+        "line": { "type": ["integer", "null"], "minimum": 1 },
+        "endLine": { "type": ["integer", "null"], "minimum": 1 },
+        "mutator": { "type": "string", "maxLength": 200 },
+        "replacement": { "type": ["string", "null"], "maxLength": 10000 },
+        "mutationStatus": {
+          "enum": ["killed", "survived", "no_coverage", "timeout", "compile_error", "runtime_error", "ignored", "unknown"]
+        },
+        "killedBy": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "evidence": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 1000 }
+        }
+      }
+    },
+    "scenarioAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "obligationRef",
+        "contractRefs",
+        "kind",
+        "status",
+        "statusReason",
+        "confidence",
+        "evidence",
+        "missingEvidence",
+        "contractResolution"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "obligationRef": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "contractRefs": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "testCaseRefs": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "kind": { "enum": ["happy_path", "error_path", "boundary_value", "invariant", "integration", "compatibility"] },
+        "status": { "enum": ["covered", "partial", "missing", "unverifiable"] },
+        "statusReason": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "contractResolution": { "enum": ["unique", "ambiguous", "unresolved"] },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "evidence": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 1000 }
+        },
+        "missingEvidence": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 300 }
+        }
+      }
+    },
+    "hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "priority",
+        "subjectRefs",
+        "evidence",
+        "missingEvidence",
+        "remediationTarget",
+        "remediation",
+        "confidence"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "ruleId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "priority": { "enum": ["info", "medium", "high"] },
+        "subjectRefs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 1000 }
+        },
+        "missingEvidence": {
+          "type": "array",
+          "maxItems": 100,
+          "items": { "type": "string", "maxLength": 300 }
+        },
+        "remediationTarget": { "enum": ["code", "test", "docs", "claim"] },
+        "remediation": { "type": "string", "minLength": 1, "maxLength": 5000 },
+        "promptSnippet": { "type": ["string", "null"], "maxLength": 5000 },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    }
+  }
+}
