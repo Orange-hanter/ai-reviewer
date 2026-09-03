@@ -15,6 +15,7 @@ pub mod fixtures;
 pub mod findings;
 pub mod json_repair;
 pub mod router;
+pub mod structure_assessments;
 pub mod structure_evidence;
 pub mod structure_graphify;
 pub mod structure_lcov;
