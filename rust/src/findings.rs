@@ -111,7 +111,7 @@ pub fn js_to_number(v: &Value) -> Option<f64> {
 }
 
 /// JS `Number(string)`; None соответствует NaN.
-fn js_string_to_number(s: &str) -> Option<f64> {
+pub fn js_string_to_number(s: &str) -> Option<f64> {
     let t = js_trim(s);
     if t.is_empty() {
         return Some(0.0); // Number('') === 0 (пустая строка ловится раньше у normalizeConfidence)
