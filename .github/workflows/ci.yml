@@ -25,3 +25,13 @@ jobs:
 
       - name: Eval harness fixtures (R1)
         run: npm run eval
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust build
+        working-directory: rust
+        run: cargo build
+
+      - name: Rust tests
+        working-directory: rust
+        run: cargo test

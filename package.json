@@ -44,6 +44,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "eval": "node bin/pr-review-eval.mjs",
-    "check": "npm test && npm run eval"
+    "check": "npm test && npm run eval && npm run check:rust",
+    "check:rust": "cargo build --manifest-path rust/Cargo.toml && cargo test --manifest-path rust/Cargo.toml"
   }
 }

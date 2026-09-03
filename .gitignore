@@ -4,3 +4,10 @@ node_modules/
 .DS_Store
 # локальные прогоны движка в его же репозитории
 .ai-review/
+
+# git-worktrees фоновых сессий Claude Code
+.claude/worktrees/
+
+# Rust build artifacts
+rust/target/
+rust/Cargo.lock
