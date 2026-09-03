@@ -17,5 +17,6 @@ pub mod json_repair;
 pub mod router;
 pub mod structure_graphify;
 pub mod structure_lcov;
+pub mod structure_mutation;
 pub mod structure_scip;
 pub mod structure_tests;
