@@ -1,0 +1,29 @@
+{
+  "id": "grafana-99911-graphite-ensure-frames-have-refi",
+  "type": "tp",
+  "description": "grafana/grafana#99911 «Graphite: Ensure frames have `refId` set» — дефект, который проект признал фиксом #101231",
+  "source": {
+    "repo": "grafana/grafana",
+    "pr": 99911,
+    "sha": "8a259ecafaf6c0141285c76a853f105bb95d1cce",
+    "fixPr": 101231,
+    "evidence": [
+      "фикс #101231 «Graphite: Handle graphite series' with spaces» ссылается на #99911 как на источник дефекта",
+      "дифф виновника: +40/-15 в 2 файл(ах)",
+      "дифф фикса: +56/-4",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #99911"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "public/app/plugins/datasource/graphite/datasource.ts",
+        "lines": [
+          296,
+          298
+        ]
+      }
+    ]
+  }
+}

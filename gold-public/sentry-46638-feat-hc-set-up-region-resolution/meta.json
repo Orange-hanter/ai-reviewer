@@ -1,0 +1,36 @@
+{
+  "id": "sentry-46638-feat-hc-set-up-region-resolution",
+  "type": "tp",
+  "description": "getsentry/sentry#46638 «feat(hc): Set up region resolution on RPC services» — дефект, который проект признал фиксом #46905",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 46638,
+    "sha": "859e76ead9e4cd04b8214b21800791a3e4321ef7",
+    "fixPr": 46905,
+    "evidence": [
+      "фикс #46905 «fix(hybrid-cloud): Fix org to region resolution logic» ссылается на #46638 как на источник дефекта",
+      "дифф виновника: +195/-25 в 7 файл(ах)",
+      "дифф фикса: +2/-2",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #46638"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "src/sentry/services/hybrid_cloud/region.py",
+        "lines": [
+          56,
+          56
+        ]
+      },
+      {
+        "file": "src/sentry/services/hybrid_cloud/region.py",
+        "lines": [
+          82,
+          82
+        ]
+      }
+    ]
+  }
+}

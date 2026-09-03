@@ -1,0 +1,29 @@
+{
+  "id": "sentry-15676-ref-remove-event-deletions",
+  "type": "tp",
+  "description": "getsentry/sentry#15676 «ref: Remove event deletions» — дефект, который проект признал фиксом #16564",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 15676,
+    "sha": "959fbbd8763e92e933cf0943595c652aa219177c",
+    "fixPr": 16564,
+    "evidence": [
+      "фикс #16564 «fix(deletion): Fix group deletion» ссылается на #15676 как на источник дефекта",
+      "дифф виновника: +1/-7 в 3 файл(ах)",
+      "дифф фикса: +1/-1",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #15676"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "src/sentry/runner/commands/cleanup.py",
+        "lines": [
+          185,
+          185
+        ]
+      }
+    ]
+  }
+}

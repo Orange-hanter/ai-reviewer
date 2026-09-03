@@ -20,6 +20,7 @@ const {
   parseDiffNewPath, parseDiffGitPath, unescapeGitPath, buildSummary, filterStalePriorFindings,
   filterFindingsFixedInDiff, findingFingerprint, createGraphifyClient, buildChangedFilesSection,
   dedupeSameModelFindings, createCostTracker, formatCostStickyLine, scoreGoldCase, aggregateBenchmark,
+  scoreFromRecord, locationMatches, DEFAULT_LOCATION_TOLERANCE,
   emitBlastRadiusFindings, resolveBlockers, normalizeFinding, setProfile, resetProfile,
   matchesKnownFalsePositive, redactSecretsForLog,
 } = await import('../index.mjs');
@@ -1222,6 +1223,66 @@ test('scoreGoldCase + aggregateBenchmark: title recall and wouldBlock', () => {
   assert.equal(agg.total, 2);
   assert.equal(agg.passed, 1);
   assert.equal(agg.recall.hits, 1);
+});
+
+test('locationMatches: файл, диапазон и допуск по строке', () => {
+  const findings = [{ file: 'src/a.ts', line: 42 }, { file: 'src/b.ts', line: 7 }];
+  // точное попадание и попадание в пределах диапазона
+  assert.equal(locationMatches(findings, { file: 'src/a.ts', lines: [42, 42] }), true);
+  assert.equal(locationMatches(findings, { file: 'src/a.ts', lines: [40, 45] }), true);
+  // граница допуска ±3 включительно, за границей — промах
+  assert.equal(locationMatches(findings, { file: 'src/a.ts', lines: [45, 45] }), true);
+  assert.equal(locationMatches(findings, { file: 'src/a.ts', lines: [46, 46] }), false);
+  assert.equal(locationMatches(findings, { file: 'src/a.ts', lines: [46, 46] }, 4), true);
+  // тот же номер строки в другом файле не засчитывается
+  assert.equal(locationMatches(findings, { file: 'src/c.ts', lines: [42, 42] }), false);
+  // локация без строк — «где-то в этом файле»
+  assert.equal(locationMatches(findings, { file: 'src/b.ts' }), true);
+  assert.equal(locationMatches([], { file: 'src/a.ts', lines: [42, 42] }), false);
+  assert.equal(DEFAULT_LOCATION_TOLERANCE, 3);
+});
+
+test('scoreGoldCase: mustFindLocations считается отдельно от title recall', () => {
+  const meta = {
+    id: 'loc', type: 'tp',
+    expect: {
+      wouldBlock: true,
+      mustFindLocations: [
+        { file: 'pkg/svc.go', lines: [100, 104] },
+        { file: 'pkg/other.go', lines: [10, 10] },
+      ],
+    },
+  };
+  const hit = scoreGoldCase(meta, {
+    wouldBlock: true,
+    findings: [{ title: 'что угодно по-русски', file: 'pkg/svc.go', line: 102 }],
+  });
+  // одна локация найдена, вторая нет → кейс не зачтён, но попадание учтено
+  assert.equal(hit.ok, false);
+  assert.equal(hit.locationHits.length, 1);
+  assert.equal(hit.locationMisses.length, 1);
+
+  const both = scoreGoldCase(meta, {
+    wouldBlock: true,
+    findings: [
+      { title: 'x', file: 'pkg/svc.go', line: 100 },
+      { title: 'y', file: 'pkg/other.go', line: 12 },
+    ],
+  });
+  assert.equal(both.ok, true);
+
+  const agg = aggregateBenchmark([{ id: 'loc', type: 'tp', expect: meta.expect, score: hit, wouldBlock: true }]);
+  assert.equal(agg.locationRecall.targets, 2);
+  assert.equal(agg.locationRecall.hits, 1);
+  assert.equal(agg.locationRecall.rate, 0.5);
+  // титульный recall не должен подхватывать локации
+  assert.equal(agg.recall.targets, 0);
+});
+
+test('scoreFromRecord: упавший кейс не считается пройденным', () => {
+  const r = scoreFromRecord({ id: 'boom', error: 'die: нет диффа' });
+  assert.equal(r.score.ok, false);
+  assert.match(r.score.precisionHints[0], /прогон упал/);
 });
 
 test('emitBlastRadiusFindings: cross-layer caller outside diff', () => {

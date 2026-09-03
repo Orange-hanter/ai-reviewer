@@ -1,0 +1,57 @@
+{
+  "id": "sentry-30463-refactor-user-and-identity-into",
+  "type": "tp",
+  "description": "getsentry/sentry#30463 «Refactor user and identity into AuthIdentityHandler instance variables» — дефект, который проект признал фиксом #30664",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 30463,
+    "sha": "b5e3584869e34a871c3b9bac2a764e95ec818073",
+    "fixPr": 30664,
+    "evidence": [
+      "фикс #30664 «fix(auth): Fix regressions with anonymous users» ссылается на #30463 как на источник дефекта",
+      "дифф виновника: +133/-154 в 3 файл(ах)",
+      "дифф фикса: +45/-16",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #30463"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "src/sentry/auth/helper.py",
+        "lines": [
+          391,
+          392
+        ]
+      },
+      {
+        "file": "src/sentry/auth/helper.py",
+        "lines": [
+          424,
+          424
+        ]
+      },
+      {
+        "file": "src/sentry/auth/helper.py",
+        "lines": [
+          436,
+          436
+        ]
+      },
+      {
+        "file": "src/sentry/auth/helper.py",
+        "lines": [
+          441,
+          441
+        ]
+      },
+      {
+        "file": "src/sentry/auth/helper.py",
+        "lines": [
+          540,
+          540
+        ]
+      }
+    ]
+  }
+}

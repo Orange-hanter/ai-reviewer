@@ -1,0 +1,19 @@
+{
+  "id": "discourse-clean-6867-feature-use-amazon-s3-invent",
+  "type": "clean",
+  "description": "discourse/discourse#6867 «FEATURE: Use amazon s3 inventory to manage upload stats» — clean-контроль: смержен до 2025-07-30, ни один PR на него не ссылается",
+  "source": {
+    "repo": "discourse/discourse",
+    "pr": 6867,
+    "sha": "b4f713ca523a3f684adf6e8b35b97138454dbf9e",
+    "evidence": [
+      "смержен 2019-02-01, отбор среди PR старше 400 дней",
+      "дифф: +388/-21 в 14 файл(ах)",
+      "поиск «#6867 in:body» по PR репозитория не дал ни одной ссылки"
+    ]
+  },
+  "expect": {
+    "wouldBlock": false,
+    "note": "Отсутствие ссылок доказывает лишь отсутствие ЗАМЕЧЕННОГО дефекта. Блокер здесь считается ложным."
+  }
+}

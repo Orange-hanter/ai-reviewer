@@ -235,7 +235,8 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_FEEDBACK_CONCURRENCY` | `6` | Параллельных запросов реакций |
 | `REVIEW_FP_PROMOTE_MIN` | `2` | Сколько одинаковых FP → новый паттерн |
 | `REVIEW_FIXTURES_DIR` | fixtures пакета | Куда промоутить fixtures |
-| `REVIEW_GOLD_DIR` | gold пакета | Набор для shadow-прогона с LLM |
+| `REVIEW_GOLD_DIR` | gold пакета | Набор для shadow-прогона с LLM (`gold-public` — публичный набор) |
+| `REVIEW_GOLD_CACHE` | `.ai-review/gold-public` | Кэш диффов публичных кейсов, скачанных по пину `source.sha` |
 
 ## Auto-triage
 

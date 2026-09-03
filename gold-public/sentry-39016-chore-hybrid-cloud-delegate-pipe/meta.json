@@ -1,0 +1,43 @@
+{
+  "id": "sentry-39016-chore-hybrid-cloud-delegate-pipe",
+  "type": "tp",
+  "description": "getsentry/sentry#39016 «chore(hybrid-cloud): Delegate pipeline redis store to propagate customer domain» — дефект, который проект признал фиксом #39449",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 39016,
+    "sha": "f12d759cc11dbbdae8ead2f89be06267e3f710e7",
+    "fixPr": 39449,
+    "evidence": [
+      "фикс #39449 «fix(oauth2): Do not generate login redirect URL too early» ссылается на #39016 как на источник дефекта",
+      "дифф виновника: +70/-36 в 4 файл(ах)",
+      "дифф фикса: +55/-14",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #39016"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "src/sentry/auth/helper.py",
+        "lines": [
+          198,
+          201
+        ]
+      },
+      {
+        "file": "src/sentry/auth/helper.py",
+        "lines": [
+          206,
+          206
+        ]
+      },
+      {
+        "file": "src/sentry/auth/helper.py",
+        "lines": [
+          213,
+          213
+        ]
+      }
+    ]
+  }
+}

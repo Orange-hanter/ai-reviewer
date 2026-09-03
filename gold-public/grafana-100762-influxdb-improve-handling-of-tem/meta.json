@@ -1,0 +1,29 @@
+{
+  "id": "grafana-100762-influxdb-improve-handling-of-tem",
+  "type": "tp",
+  "description": "grafana/grafana#100762 «InfluxDB: Improve handling of template variables contained in regular expressions (InfluxQL)» — дефект, который проект признал фиксом #104067",
+  "source": {
+    "repo": "grafana/grafana",
+    "pr": 100762,
+    "sha": "8b3047ba1e00779efedaae0eb6345b44cd8b90d5",
+    "fixPr": 104067,
+    "evidence": [
+      "фикс #104067 «InfluxDB: Fix nested variable interpolation» ссылается на #100762 как на источник дефекта",
+      "дифф виновника: +30/-5 в 2 файл(ах)",
+      "дифф фикса: +4/-2",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #100762"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "public/app/plugins/datasource/influxdb/datasource.ts",
+        "lines": [
+          362,
+          362
+        ]
+      }
+    ]
+  }
+}

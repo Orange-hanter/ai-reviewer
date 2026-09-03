@@ -81,6 +81,9 @@ async function main() {
   if (agg.recall.targets) {
     console.log(`title recall (substring): ${agg.recall.hits}/${agg.recall.targets} (${Math.round((agg.recall.rate || 0) * 100)}%)`);
   }
+  if (agg.locationRecall?.targets) {
+    console.log(`location recall (file:line): ${agg.locationRecall.hits}/${agg.locationRecall.targets} (${Math.round((agg.locationRecall.rate || 0) * 100)}%)`);
+  }
   if (agg.precision.fpViolations) {
     console.log(`mustNotFind violations: ${agg.precision.fpViolations}`);
   }
