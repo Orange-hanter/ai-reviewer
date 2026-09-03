@@ -28,3 +28,4 @@ indexmap = { version = "2", features = ["serde"] }
 sha2 = "0.10"
 # base64: бинарный SCIP-индекс приходит в JSON-контракт как {dataBase64}.
 base64 = "0.22"
+reqwest = { version = "0.13.4", features = ["blocking"] }
