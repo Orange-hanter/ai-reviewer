@@ -328,10 +328,9 @@ async function validateDataset(dir, cacheDir) {
     const caseDir = join(dir, id);
     const meta = await readCaseMeta(caseDir);
     const locations = meta.expect?.mustFindLocations || [];
-    if (!locations.length) {
-      console.log(`· ${id} — локаций нет (clean-контроль)`);
-      continue;
-    }
+    // Дифф тянем ДО проверки локаций: у clean-контролей их нет, но доставка по пину
+    // обязана быть проверена и прогреть кэш — иначе кейс падает на сети посреди прогона,
+    // который стоит десятки минут.
     let patch;
     try {
       const r = await ensureCaseDiff(caseDir, meta, { cacheDir });
@@ -339,6 +338,10 @@ async function validateDataset(dir, cacheDir) {
     } catch (e) {
       console.log(`💥 ${id} — ${e.message}`);
       bad++;
+      continue;
+    }
+    if (!locations.length) {
+      console.log(`· ${id} — локаций нет (clean-контроль), дифф по пину доставлен`);
       continue;
     }
     const added = addedLineNumbersByFile(patch);
