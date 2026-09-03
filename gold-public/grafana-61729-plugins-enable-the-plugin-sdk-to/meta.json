@@ -1,0 +1,29 @@
+{
+  "id": "grafana-61729-plugins-enable-the-plugin-sdk-to",
+  "type": "tp",
+  "description": "grafana/grafana#61729 «Plugins: enable the plugin sdk to get the json data for all datasources» — дефект, который проект признал фиксом #62328",
+  "source": {
+    "repo": "grafana/grafana",
+    "pr": 61729,
+    "sha": "3b718a3e8f971908b3465beda6e0f135753e95f3",
+    "fixPr": 62328,
+    "evidence": [
+      "фикс #62328 «Plugins: Fix circular reference in customOptions leading to MarshalJSON errors» ссылается на #61729 как на источник дефекта",
+      "дифф виновника: +2/-0 в 1 файл(ах)",
+      "дифф фикса: +8/-1",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #61729"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "pkg/services/datasources/service/datasource.go",
+        "lines": [
+          420,
+          420
+        ]
+      }
+    ]
+  }
+}

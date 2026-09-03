@@ -1,21 +1,27 @@
 #!/usr/bin/env node
 // Shadow eval ПОЛНОГО pipeline (с LLM) на gold-диффах с разметкой TP/FP (R-eval, backlog P0-3).
 // В отличие от eval.mjs (fixtures, post-processing без LLM) — здесь вызываются модели.
-// Запуск: OLLAMA_API_KEY=… npx pr-review-gold [--case <id>]
+// Запуск: OLLAMA_API_KEY=… npx pr-review-gold [--case <id>] [--jsonl out.jsonl]
+// Каталог набора — REVIEW_GOLD_DIR; диффы публичных кейсов тянутся по пину в REVIEW_GOLD_CACHE.
 // Blast-radius в gold-прогонах заглушен (детерминизм; на находки влияет слабо).
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadReviewConfig } from '../lib/config.mjs';
 import { createReviewPipeline } from '../pipeline.mjs';
 import { MARKERS } from '../lib/constants.mjs';
 import { scoreGoldCase } from '../lib/benchmark.mjs';
+import { ensureCaseDiff } from '../lib/gold-fetch.mjs';
 
 const GOLD_DIR = process.env.REVIEW_GOLD_DIR
   ? resolve(process.cwd(), process.env.REVIEW_GOLD_DIR)
   : join(dirname(fileURLToPath(import.meta.url)), '../gold');
+// Кэш диффов публичных кейсов: чужой код не вендорится, тянется по пину (RFC 03).
+const CACHE_DIR = resolve(process.cwd(), process.env.REVIEW_GOLD_CACHE || '.ai-review/gold-public');
 const onlyIdx = process.argv.indexOf('--case');
 const only = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
+const jsonlIdx = process.argv.indexOf('--jsonl');
+const jsonlPath = jsonlIdx >= 0 ? resolve(process.cwd(), process.argv[jsonlIdx + 1]) : null;
 
 function footerFindings(text) {
   const m = MARKERS.dataRe.exec(text);
@@ -26,13 +32,14 @@ function footerFindings(text) {
 async function runCase(id) {
   const dir = join(GOLD_DIR, id);
   const meta = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8'));
+  const diff = await ensureCaseDiff(dir, meta, { cacheDir: CACHE_DIR });
   const env = {
     ...process.env,
     REVIEW_OBSERVABILITY: '0',
     REVIEW_EXPORT: '0',
     REVIEW_AUTO_TRIAGE: '0',
   };
-  const cfg = loadReviewConfig(env, { dryRun: true, diffFile: join(dir, 'diff.patch'), repo: '', prNumber: 0 });
+  const cfg = loadReviewConfig(env, { dryRun: true, diffFile: diff.path, repo: '', prNumber: 0 });
   const captured = [];
   const origLog = console.log;
   console.log = (...a) => { captured.push(a.join(' ')); };
@@ -47,7 +54,13 @@ async function runCase(id) {
   } finally {
     console.log = origLog;
   }
-  return { meta, code, findings: footerFindings(captured.join('\n')), wallMs: Date.now() - t0 };
+  return {
+    meta,
+    code,
+    findings: footerFindings(captured.join('\n')),
+    wallMs: Date.now() - t0,
+    diffSource: diff.source,
+  };
 }
 
 if (!process.env.LLM_API_KEY && !process.env.OLLAMA_API_KEY) {
@@ -66,23 +79,35 @@ if (!ids.length) {
 }
 
 let failed = 0;
+// Записи прогона в формате, который читает `scoreFromRecord` в pr-review-benchmark:
+// без этого раннер и скорер остаются несвязанными половинами замера.
+const records = [];
 for (const id of ids) {
   process.stdout.write(`[gold] ${id} … `);
   try {
-    const { meta, code, findings, wallMs } = await runCase(id);
+    const { meta, code, findings, wallMs, diffSource } = await runCase(id);
     const wouldBlock = code === 1;
     const score = scoreGoldCase(meta, { wouldBlock, findings });
     const errors = score.precisionHints;
     const stat = errors.length ? '❌' : '✅';
     console.log(`${stat} wouldBlock=${code === 1} findings=${findings.length} wall=${(wallMs / 1000).toFixed(0)}с`);
+    records.push({ id, meta, findings, wouldBlock, code, wallMs, diffSource });
     for (const e of errors) {
       console.log(`   ✗ ${e}`);
       failed++;
     }
   } catch (e) {
     console.log(`💥 ${e.message}`);
+    records.push({ id, error: e.message });
     failed++;
   }
+}
+if (jsonlPath) {
+  // Каталог создаём здесь: прогон стоит десятки минут, и терять его на отсутствующем
+  // `.ai-review/` в самом конце — недопустимо.
+  await mkdir(dirname(jsonlPath), { recursive: true });
+  await writeFile(jsonlPath, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`, 'utf8');
+  console.log(`[gold] записи прогона → ${jsonlPath}`);
 }
 console.log(failed ? `⛔ gold: ${failed} несовпадение(й)` : '✅ gold: все кейсы совпали с разметкой');
 process.exit(failed ? 1 : 0);

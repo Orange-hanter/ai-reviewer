@@ -12,6 +12,8 @@ import {
   assessDataQuality,
   buildStructureAssessment,
   buildStructureContext,
+  buildStructureMarkdown,
+  buildStructureViews,
   callStructureContext,
   computeStructureDrift,
   handleStructureMcpRequest,
@@ -871,6 +873,68 @@ test('LCOV: разошедшиеся числа FN и FNDA оставляют и
   }
 });
 
+test('LCOV: объявленные писателем счётчики сверяются с посчитанными', () => {
+  // Согласованный отчёт: FNF/FNH/LF/LH совпадают с нашим счётом — расхождений нет.
+  const ok = parseLcov([
+    'SF:src/a.ts',
+    'FN:10,alpha',
+    'FN:50,beta',
+    'FNDA:7,alpha',
+    'FNDA:0,beta',
+    'FNF:2',
+    'FNH:1',
+    'DA:10,7',
+    'DA:50,0',
+    'LF:2',
+    'LH:1',
+    'end_of_record',
+  ].join('\n'));
+  assert.deepEqual(ok.files[0].declaredMismatches, []);
+  assert.deepEqual(ok.warnings, [], 'согласованный отчёт не шумит');
+  assert.deepEqual(ok.files[0].declared.functions, { found: 2, hit: 1 },
+    'объявленные счётчики сохранены, а не выброшены');
+
+  // Писатель объявил больше функций, чем записал FN: наша модель формата разошлась с его.
+  const bad = parseLcov([
+    'SF:src/a.ts',
+    'FN:10,alpha',
+    'FNDA:7,alpha',
+    'FNF:3',
+    'FNH:1',
+    'DA:10,7',
+    'LF:1',
+    'LH:1',
+    'end_of_record',
+  ].join('\n'));
+  assert.deepEqual(bad.files[0].declaredMismatches, [
+    { section: 'functions', kind: 'found', declared: 3, actual: 1 },
+  ]);
+  assert.ok(bad.warnings.some((w) => w.includes('declared/computed mismatch')
+    && w.includes('functions.found') && w.includes('declared=3') && w.includes('computed=1')),
+  'расхождение доезжает до потребителя, а не остаётся внутри парсера');
+});
+
+test('LCOV: FNH не сверяется там, где привязка не разрешилась', () => {
+  // Функции с hits: null не попадают в наш `hit` по построению, поэтому расхождение по FNH
+  // здесь ничего не доказывает — сверять нечем, и ложного предупреждения быть не должно.
+  const lcov = parseLcov([
+    'SF:src/a.ts',
+    'FN:10,handler',
+    'FN:50,handler',
+    'FNDA:7,handler',
+    'FNF:2',
+    'FNH:1',
+    'end_of_record',
+  ].join('\n'));
+  const file = lcov.files[0];
+  assert.equal(file.functions.hit, 0, 'неизвестное не засчитано покрытым');
+  assert.deepEqual(file.declaredMismatches, [],
+    'FNH пропущен: знаменатель неизвестен, расхождение не значит ошибку формата');
+  assert.ok(!lcov.warnings.some((w) => w.includes('declared/computed mismatch')));
+  assert.ok(lcov.warnings.some((w) => w.includes('unresolvable LCOV function names')),
+    'но сама неоднозначность по-прежнему видна');
+});
+
 test('LCOV: однозначное имя по-прежнему получает свои хиты', () => {
   const lcov = parseLcov([
     'SF:src/a.ts',
@@ -1397,4 +1461,188 @@ test('structure_context keeps refs inside the payload after secondary truncation
   for (const scenario of context.scenarios) {
     assert.ok(scenario.contractRefs.some((id) => contractIds.has(id)), `сценарий без живого контракта: ${scenario.obligationRef}`);
   }
+});
+
+// --- четвёртый раунд ревью: structure-graphify.mjs и structure-export.mjs ---
+
+const callableNodes = (count, prefix = 'n') => Array.from({ length: count }, (unused, index) => ({
+  id: `${prefix}${index}`,
+  label: `f${index}()`,
+  file_type: 'code',
+  source_file: `src/m${index}.ts`,
+  source_location: 'L1',
+  _callable: true,
+}));
+
+test('Graphify caps contracts and reports the truncation', () => {
+  const links = Array.from({ length: 100 }, (unused, index) => ({
+    source: `n${index}`, target: `n${index + 1}`, relation: 'implements', confidence: 'EXTRACTED',
+  }));
+  const facts = extractGraphifyFacts({ nodes: callableNodes(5200), links });
+  assert.equal(facts.entities.length, 5000);
+  assert.ok(facts.contracts.length <= 5000, `contracts must respect the schema cap, got ${facts.contracts.length}`);
+  assert.ok(facts.warnings.some((warning) => /contracts truncated/.test(warning)), 'truncation must be reported');
+  assert.equal(facts.truncated, true);
+  // при обрезке первыми выживают доказанные контракты, а не эвристические entrypoint:
+  // ни один implements не должен потеряться, пока есть что резать среди entrypoint
+  const implementsContracts = facts.contracts.filter((contract) => contract.kind === 'implements');
+  assert.ok(implementsContracts.length > 0);
+  assert.equal(implementsContracts.length, facts.dependencies.length);
+  assert.ok(facts.contracts.some((contract) => contract.kind === 'entrypoint'));
+});
+
+test('Graphify collapses duplicate edges into one dependency and one contract', () => {
+  const edge = { source: 'impl', target: 'iface', relation: 'implements', confidence: 'EXTRACTED' };
+  const facts = extractGraphifyFacts({
+    nodes: [
+      { id: 'impl', label: 'Jwt', file_type: 'code', source_file: 'src/a.ts', source_location: 'L2', _callable_class: true },
+      { id: 'iface', label: 'Validator', file_type: 'code', source_file: 'src/b.ts', source_location: 'L1', _callable_class: true },
+    ],
+    links: [edge, { ...edge }, { ...edge }],
+  });
+  assert.equal(facts.dependencies.length, 1);
+  assert.equal(new Set(facts.dependencies.map((item) => item.id)).size, facts.dependencies.length);
+  const implementsContracts = facts.contracts.filter((contract) => contract.kind === 'implements');
+  assert.equal(implementsContracts.length, 1);
+  assert.equal(new Set(facts.contracts.map((item) => item.id)).size, facts.contracts.length);
+  assert.equal(buildStructureViews(facts).dependencyGraph.length, 1);
+});
+
+test('Graphify does not mark a god node when the label is ambiguous', () => {
+  const nodes = [
+    { id: 'x', label: 'handler()', file_type: 'code', source_file: 'src/a.ts', source_location: 'L1', _callable: true },
+    { id: 'y', label: 'Handler()', file_type: 'code', source_file: 'src/b.ts', source_location: 'L1', _callable: true },
+  ];
+  const ambiguous = extractGraphifyFacts({ nodes, links: [] }, { analysis: { gods: ['handler()'] } });
+  assert.deepEqual(ambiguous.entities.filter((entity) => entity.isGodNode).map((entity) => entity.path), []);
+  assert.ok(ambiguous.warnings.some((warning) => /god node label is ambiguous/.test(warning)));
+
+  // однозначное имя по-прежнему помечается
+  const unique = extractGraphifyFacts({ nodes: [nodes[0]], links: [] }, { analysis: { gods: ['handler()'] } });
+  assert.deepEqual(unique.entities.filter((entity) => entity.isGodNode).map((entity) => entity.path), ['src/a.ts']);
+
+  // запись с конкретным узлом снимает неоднозначность и не требует понижения
+  const byId = extractGraphifyFacts({ nodes, links: [] }, { analysis: { gods: [{ id: 'y', label: 'Handler()' }] } });
+  assert.deepEqual(byId.entities.filter((entity) => entity.isGodNode).map((entity) => entity.path), ['src/b.ts']);
+});
+
+test('Graphify does not build a layer boundary from a file name', () => {
+  const facts = extractGraphifyFacts({
+    nodes: [
+      { id: 'n1', label: 'main()', file_type: 'code', source_file: 'src/index.ts', source_location: 'L1', _callable: true },
+      { id: 'n2', label: 'helper()', file_type: 'code', source_file: 'src/util/helper.ts', source_location: 'L1', _callable: true },
+    ],
+    links: [],
+  }, { layout: { appDir: 'src' } });
+  const layers = facts.boundaries.filter((boundary) => boundary.kind === 'layer').map((boundary) => boundary.name);
+  assert.deepEqual(layers, ['util'], 'src/index.ts is a file, not a layer');
+
+  // путь под appDir с незаявленным слоем не должен терять границу совсем
+  const restricted = extractGraphifyFacts({
+    nodes: [{ id: 'n3', label: 'x()', file_type: 'code', source_file: 'src/other/x.ts', source_location: 'L1', _callable: true }],
+    links: [],
+  }, { layout: { appDir: 'src', layerDirs: ['auth'] } });
+  assert.notEqual(restricted.entities[0].boundaryId, 'boundary:repository');
+});
+
+test('Graphify reads the line, not the column, from a source location', () => {
+  const parse = (location) => extractGraphifyFacts({
+    nodes: [{ id: 'k', label: 'f()', file_type: 'code', source_file: 'src/a.ts', source_location: location, _callable: true }],
+    links: [],
+  }).entities[0].line;
+  assert.equal(parse('L10'), 10);
+  assert.equal(parse('10'), 10);
+  assert.equal(parse('src/a.ts:10'), 10);
+  assert.equal(parse('src/a.ts:10:5'), 10, 'trailing column must not be read as the line');
+  assert.equal(parse('src/a.ts#L10'), 10);
+});
+
+test('Graphify reports nodes skipped for an unsafe path', () => {
+  const facts = extractGraphifyFacts({
+    nodes: [
+      { id: 'ok', label: 'good()', file_type: 'code', source_file: 'src/a.ts', source_location: 'L1', _callable: true },
+      { id: 'bad', label: 'evil()', file_type: 'code', source_file: '../../etc/passwd', source_location: 'L1', _callable: true },
+    ],
+    links: [],
+  });
+  assert.equal(facts.entities.length, 1);
+  assert.ok(facts.warnings.some((warning) => /skipped/.test(warning)), 'a dropped node must leave a trace');
+});
+
+const markdownInput = (hints, scenarios, hotspots = []) => ({
+  facts: {
+    generatedAt: '2026-09-03T00:00:00.000Z',
+    fingerprint: 'ff',
+    provenance: { headSha: 'abc', branchRef: 'main', graphStatus: 'ok', truncated: false },
+    facts: { entities: [], boundaries: [], dependencies: [] },
+  },
+  assessment: {
+    fingerprint: 'aa',
+    temporalAlignment: 'aligned',
+    hints,
+    assessments: {
+      dataQuality: { unresolvedJoinRate: 0 },
+      codeCoverage: { totals: null },
+      contractScenarios: scenarios,
+      dependencyRisk: { highFanIn: hotspots },
+    },
+  },
+});
+
+test('structure markdown states how much it truncated', () => {
+  const hints = Array.from({ length: 61 }, (unused, index) => ({
+    priority: 'high', ruleId: `rule${index}`, remediation: `do thing ${index}`,
+    subjectRefs: [`s${index}`], evidence: [], missingEvidence: [],
+  }));
+  const scenarios = Array.from({ length: 250 }, (unused, index) => ({
+    obligationRef: `o${index}`, kind: 'k', status: 'missing', contractRefs: [], statusReason: 'r',
+  }));
+  const markdown = buildStructureMarkdown(markdownInput(hints, scenarios));
+  assert.equal((markdown.match(/^### /gm) || []).length, 50);
+  assert.equal((markdown.match(/^\| o\d+ /gm) || []).length, 200);
+  assert.match(markdown, /50 of 61/, 'the document must admit the hints it dropped');
+  assert.match(markdown, /200 of 250/, 'the document must admit the scenarios it dropped');
+});
+
+test('structure markdown neutralises markdown injected through refs and remediation', () => {
+  const markdown = buildStructureMarkdown(markdownInput([{
+    priority: 'high',
+    ruleId: 'r|id',
+    remediation: 'line one\n## Injected heading',
+    subjectRefs: ['src/a`.ts'],
+    evidence: [],
+    missingEvidence: [],
+  }], []));
+  assert.doesNotMatch(markdown, /^## Injected heading$/m, 'remediation must not create headings');
+  assert.doesNotMatch(markdown, /^### HIGH — r\|id$/m, 'ruleId must be escaped');
+  const subjects = markdown.split('\n').find((line) => line.startsWith('Subjects:'));
+  // ограда длиннее самой длинной серии кавычек внутри значения — CommonMark-корректный span,
+  // значение при этом не искажено
+  assert.equal(subjects, 'Subjects: `` src/a`.ts ``');
+});
+
+test('validateStructureFacts rejects contract and boundary counts above the schema cap', async () => {
+  const base = JSON.parse(await readFile(new URL('../fixtures/structure/structure-facts.v1.json', import.meta.url), 'utf8'));
+  const entity = { ...(base.facts.entities[0] || {}), observedId: 'entity:one', path: 'src/a.ts' };
+  const contract = (index) => ({ id: `contract:${index}`, entityRef: 'entity:one', kind: 'entrypoint', targetRef: null });
+  const overContracts = {
+    ...base,
+    facts: {
+      ...base.facts,
+      entities: [entity],
+      contracts: Array.from({ length: 5001 }, (unused, index) => contract(index)),
+    },
+  };
+  assert.throws(() => validateStructureFacts(overContracts), /contract limit exceeded/);
+
+  const overBoundaries = {
+    ...base,
+    facts: {
+      ...base.facts,
+      boundaries: Array.from({ length: 5001 }, (unused, index) => ({
+        id: `boundary:module:m${index}`, kind: 'module', name: `m${index}`, paths: [`m${index}`],
+      })),
+    },
+  };
+  assert.throws(() => validateStructureFacts(overBoundaries), /boundary limit exceeded/);
 });

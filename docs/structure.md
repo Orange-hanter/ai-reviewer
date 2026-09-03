@@ -55,6 +55,20 @@ npx pr-review-structure \
 
 At least one of Graphify, SCIP or LCOV must be readable. Missing optional providers produce warnings and lower the evidence ceiling.
 
+## Limits and honesty of the output
+
+Entities, dependencies and contracts are capped at the `maxItems` values declared in
+`schemas/structure-facts.v1.schema.json`. `REVIEW_STRUCTURE_MAX_ENTITIES` and
+`REVIEW_STRUCTURE_MAX_EDGES` can lower those caps but not raise them: the producer must not be
+able to emit facts its own schema rejects. When a cap bites, the run reports it in `warnings`
+and sets `provenance.truncated`. Contracts are cut weakest-evidence-first, so heuristic
+`entrypoint` candidates go before proven `implements`/`inherits` contracts.
+
+Anything dropped leaves a trace. Nodes skipped for an unsafe `source_file`, unparsed
+`source_location` values and god-node labels that resolve to more than one entity are counted
+in `warnings` rather than discarded silently. The generated `code-structure.md` states how many
+hints, scenarios and hotspots it omitted — the JSON assessment always holds the full set.
+
 Exit codes:
 
 - `0`: artifacts written, including degraded partial analysis;
@@ -106,6 +120,28 @@ by later MCP calls.
 
 There is no implicit “latest” for planning or fixing. The response is a bounded BFS slice with fingerprints, temporal alignment, relevant contracts, dependencies, scenarios, hints and suggested files.
 
+### Confinement: what the server is allowed to read
+
+`factsPath` and `assessmentPath` arrive **from the client**, so the server treats them as
+untrusted input and never reads them as given. Both are resolved through
+`resolveContainedPath` against a single allowed root:
+
+| | |
+|---|---|
+| Root | `STRUCTURE_MCP_ROOT`, or the process working directory when it is unset |
+| Escape attempt | throws `path escapes allowed root: <path>` — the call fails, nothing is read |
+| Symlinks | resolved with `realpath` **before** the containment check, so a link pointing outside the root does not get through |
+| Missing file | containment is still checked against the nearest existing ancestor; only if that ancestor is inside the root does the original `ENOENT` propagate — an absent path outside the root reports the escape, not the absence |
+
+Two consequences worth stating plainly:
+
+- **Set `STRUCTURE_MCP_ROOT` explicitly** when the server is not launched from the
+  repository root. The fallback is the working directory, so an agent started elsewhere
+  silently gets a different — possibly wider — root than intended.
+- The root bounds **reading of the artifacts**, not the content of the answer. Facts and
+  assessment written outside the root are simply unreachable; put the export directory
+  inside the root you allow.
+
 Example MCP configuration:
 
 ```json
@@ -113,7 +149,8 @@ Example MCP configuration:
   "mcpServers": {
     "ai-reviewer-structure": {
       "command": "npx",
-      "args": ["pr-review-structure-mcp"]
+      "args": ["pr-review-structure-mcp"],
+      "env": { "STRUCTURE_MCP_ROOT": "/abs/path/to/repo" }
     }
   }
 }

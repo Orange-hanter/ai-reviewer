@@ -1,0 +1,19 @@
+{
+  "id": "sentry-clean-93134-feat-feedback-api-endpoint-f",
+  "type": "clean",
+  "description": "getsentry/sentry#93134 «feat(feedback): API endpoint for AI feedback summary» — clean-контроль: смержен до 2025-07-30, ни один PR на него не ссылается",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 93134,
+    "sha": "50c438bd2b6d20a7e84b12dcaabe7c2e9f7f16fc",
+    "evidence": [
+      "смержен 2025-06-12, отбор среди PR старше 400 дней",
+      "дифф: +457/-0 в 6 файл(ах)",
+      "поиск «#93134 in:body» по PR репозитория не дал ни одной ссылки"
+    ]
+  },
+  "expect": {
+    "wouldBlock": false,
+    "note": "Отсутствие ссылок доказывает лишь отсутствие ЗАМЕЧЕННОГО дефекта. Блокер здесь считается ложным."
+  }
+}

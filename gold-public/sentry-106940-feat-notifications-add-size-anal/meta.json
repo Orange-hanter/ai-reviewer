@@ -1,0 +1,29 @@
+{
+  "id": "sentry-106940-feat-notifications-add-size-anal",
+  "type": "tp",
+  "description": "getsentry/sentry#106940 «feat(notifications): Add Size Analysis to notification settings UI» — дефект, который проект признал фиксом #107418",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 106940,
+    "sha": "927d8a8ebd2c7218cc4eb309c5540612fb738a8d",
+    "fixPr": 107418,
+    "evidence": [
+      "фикс #107418 «fix(notifications): Fix Size Analysis feature flag filter typo» ссылается на #106940 как на источник дефекта",
+      "дифф виновника: +14/-1 в 7 файл(ах)",
+      "дифф фикса: +1/-1",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #106940"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "static/app/views/settings/account/notifications/notificationSettingsByType.tsx",
+        "lines": [
+          253,
+          253
+        ]
+      }
+    ]
+  }
+}

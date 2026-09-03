@@ -1,0 +1,36 @@
+{
+  "id": "sentry-78722-feat-scim-prevent-changes-via-ap",
+  "type": "tp",
+  "description": "getsentry/sentry#78722 «feat(scim): Prevent changes via API to SCIM-linked teams» — дефект, который проект признал фиксом #79276",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 78722,
+    "sha": "11fb23049d68906b38b195a96727e1e7878ab0d1",
+    "fixPr": 79276,
+    "evidence": [
+      "фикс #79276 «fix(scim): Repair DELETE SCIM Team endpoint» ссылается на #78722 как на источник дефекта",
+      "дифф виновника: +34/-0 в 2 файл(ах)",
+      "дифф фикса: +18/-6",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #78722"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "src/sentry/api/endpoints/team_details.py",
+        "lines": [
+          111,
+          111
+        ]
+      },
+      {
+        "file": "src/sentry/api/endpoints/team_details.py",
+        "lines": [
+          152,
+          152
+        ]
+      }
+    ]
+  }
+}
