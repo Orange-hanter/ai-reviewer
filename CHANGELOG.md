@@ -9,7 +9,9 @@
   по SZZ-lite из фиксов самих проектов, а не из нашего суждения. Чужие диффы **не вендорятся**:
   кейс — это `meta.json` с пином `source.sha`, патч тянется в `REVIEW_GOLD_CACHE`
   (`.ai-review/gold-public`). Новое: `bin/pr-review-gold-harvest.mjs` (добыча пар,
-  clean-контроли, `--validate` сверки разметки с диффом), `npm run benchmark:public`
+  clean-контроли, `--validate` сверки разметки с диффом), `npm run benchmark:public`.
+  Первый замер и его разбор — [benchmark-public.md](docs/benchmark-public.md): на дефолтном
+  профиле location recall 4/13 кейсов, ложный блокер на 3 из 5 clean-контролей
 - **Скоринг по локации** в `lib/benchmark.mjs`: `expect.mustFindLocations` + `locationMatches`
   — попадание засчитывается по `file:line ± допуск`, а не по подстроке в заголовке. Нужно
   там, где разметка приходит из чужого репозитория: подстрочная сверка меряла бы совпадение
