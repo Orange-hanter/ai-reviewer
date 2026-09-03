@@ -35,7 +35,7 @@ verifier → inline-замечания и один живой sticky-отчёт 
 - **Память между прогонами.** Sticky несёт машинный футер с отпечатками кода и историей:
   починенное снимается, перенесённое не переоткрывается новыми словами, Δ-блок показывает
   разницу прогонов.
-- **Петля обучения на FP.** 👎 или метка → журнал → промоут в FP-паттерн **и** eval-fixture,
+- **Петля обучения на FP.** <img src=".github/icons/fp-down.svg" alt="👎" height="15"> или метка → журнал → промоут в FP-паттерн **и** eval-fixture,
   который держит регрессию. Ошибка не повторяется из PR в PR.
 - **Ноль зависимостей.** Node ≥ 22 и всё: `npm install` не нужен, движок пинится по тегу
   или SHA и никогда не исполняется из кода PR.
@@ -44,28 +44,29 @@ verifier → inline-замечания и один живой sticky-отчёт 
 
 ## Что видит разработчик
 
-Один sticky-комментарий на PR, который переписывается на каждом прогоне (реальный вывод движка):
+Один sticky-комментарий на PR, который переписывается на каждом прогоне (вывод движка; статусы
+здесь показаны пиктограммами — в самом комментарии на их месте стоят те же эмодзи):
 
-> ## 🤖 Авто код-ревью — 🔴 нужны правки
+> ## <img src=".github/icons/bot.svg" alt="🤖" height="21"> Авто код-ревью — <img src=".github/icons/sev-critical.svg" alt="🔴" height="18"> нужны правки
 >
-> ⛔ **Merge заблокирован:** 2 замечания. Правило блокировки: critical/major — от MoA-aggregator; confidence ≥0.8.
+> <img src=".github/icons/gate-blocked.svg" alt="⛔" height="16"> **Merge заблокирован:** 2 замечания. Правило блокировки: critical/major — от MoA-aggregator; confidence ≥0.8.
 >
 > ### Оценки моделей
-> - **moa-specialist(minimax-m3←security+correctness+architecture)** — 3 (🔴1 🟠1 🟡1 🔵0): две проблемы уровня блока: IDOR и потеря копеек.
+> - **moa-specialist(minimax-m3←security+correctness+architecture)** — 3 (<img src=".github/icons/sev-critical.svg" alt="🔴" height="13">1 <img src=".github/icons/sev-major.svg" alt="🟠" height="13">1 <img src=".github/icons/sev-minor.svg" alt="🟡" height="13">1 <img src=".github/icons/sev-nit.svg" alt="🔵" height="13">0): две проблемы уровня блока: IDOR и потеря копеек.
 >   - specialist **security/deepseek-v4-flash** — ok
 >   - specialist **correctness/kimi-k2.7-code** — ok
 >   - specialist **architecture/glm-5.2** — ok
 >
 > **Итого:** 3 замечания. Файлов в диффе: 3.
 >
-> 🔄 **С прошлого прогона (`4b1e07c`):** +1 новых, −1 закрыто, 1 без изменений.
+> <img src=".github/icons/delta.svg" alt="🔄" height="16"> **С прошлого прогона (`4b1e07c`):** +1 новых, −1 закрыто, 1 без изменений.
 > Раскрывается в «что изменилось» и таблицу истории прогонов.
 >
-> 🔎 Verifier (Pass B, deepseek-v4-pro): подтверждено 2, отклонено FP 1, понижено 1.
+> <img src=".github/icons/verifier.svg" alt="🔎" height="16"> Verifier (Pass B, deepseek-v4-pro): подтверждено 2, отклонено FP 1, понижено 1.
 >
-> ⚖️ Refutation (жюри): dropped 2, downgraded 1, kept 3.
+> <img src=".github/icons/jury.svg" alt="⚖️" height="16"> Refutation (жюри): dropped 2, downgraded 1, kept 3.
 >
-> 🔧 Prescan (eslint + ast-grep): 1 детерминированная находка на 3 файлах.
+> <img src=".github/icons/prescan.svg" alt="🔧" height="16"> Prescan (eslint + ast-grep): 1 детерминированная находка на 3 файлах.
 
 Плюс inline-треды на самих строках — но только для находок, доказуемость которых движок может
 обосновать; остальное сворачивается в сводку, чтобы PR оставался читаемым.
@@ -76,7 +77,7 @@ verifier → inline-замечания и один живой sticky-отчёт 
 Каждый sticky несёт машинный блок `<!-- ai-review-data:{…} -->` со списком находок,
 отпечатками кода под ними и историей последних прогонов. Из него следующий прогон узнаёт,
 что уже было сказано: код под находкой изменился — снимаем, остался прежним — переносим и не
-переоткрываем тему новыми словами. Оттуда же берут данные Δ-блок и harvest 👍/👎.
+переоткрываем тему новыми словами. Оттуда же берут данные Δ-блок и harvest <img src=".github/icons/fp-up.svg" alt="👍" height="15">/<img src=".github/icons/fp-down.svg" alt="👎" height="15">.
 
 </details>
 
@@ -89,7 +90,7 @@ verifier → inline-замечания и один живой sticky-отчёт 
 | Прогоны не сходятся: находок всё больше | Sticky несёт машинный футер с отпечатками кода и историей; повтор снимается, если код починен, а Δ-блок показывает разницу прогонов |
 | Ревью тонет в стилистических придирках | eslint и ast-grep проходят первыми: их находки идут в гейт и в промпт как «уже сказано» |
 | Замечания «где-то рядом» без последствий | Маршрут находки считается по **доказуемости** (prescan, verifier, повтор, консенсус, чувствительная зона), а не по ярлыку severity от модели |
-| Ошибки повторяются из PR в PR | 👎 или метка → журнал → промоут в FP-паттерн **и** eval fixture, который держит регрессию |
+| Ошибки повторяются из PR в PR | <img src=".github/icons/fp-down.svg" alt="👎" height="15"> или метка → журнал → промоут в FP-паттерн **и** eval fixture, который держит регрессию |
 | Ревьюер видит файл, но не его последствия | blast-radius по графу кода: кто зависит от изменённых символов вне диффа |
 
 ## Как устроен прогон
@@ -140,7 +141,7 @@ MCP-сервер `pr-review-structure-mcp` и его метод `structure_conte
   кода, что видело ревью;
 - ответ — ограниченный бюджетом токенов BFS-срез: релевантные контракты, зависимости,
   сценарии, подсказки и файлы, а не простыня всего графа;
-- обратная связь замыкается: 👎 на находке становится FP-паттерном и eval-fixture,
+- обратная связь замыкается: <img src=".github/icons/fp-down.svg" alt="👎" height="15"> на находке становится FP-паттерном и eval-fixture,
   а подтверждённые пробелы в evidence — задачами для агента.
 
 ```json
@@ -190,7 +191,7 @@ npx pr-review-structure \
 | `pr-review-gold` | Shadow-прогон с LLM на размеченных TP/FP диффах |
 | `pr-review-metrics` | Сводка по логам прогонов |
 | `pr-review-probe-models` | Доступность, latency и JSON-mode моделей |
-| `pr-review-feedback` · `-batch` | Сбор 👍/👎 с PR |
+| `pr-review-feedback` · `-batch` | Сбор <img src=".github/icons/fp-up.svg" alt="👍" height="15">/<img src=".github/icons/fp-down.svg" alt="👎" height="15"> с PR |
 | `pr-review-structure` | Structure facts/assessment, drift, property drafts и Markdown |
 | `pr-review-structure-mcp` | Pinned-SHA `structure_context` MCP для агентов |
 
