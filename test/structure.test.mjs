@@ -15,6 +15,7 @@ import {
   callStructureContext,
   computeStructureDrift,
   handleStructureMcpRequest,
+  STRUCTURE_CONTEXT_TOOL,
   createEvidenceReceipt,
   decodeScipIndex,
   extractGraphifyFacts,
@@ -627,6 +628,45 @@ test('assessment coverageHash discriminates lcov payloads without a hash field',
   assert.notEqual(first.coverageHash, sha256('none'));
   assert.equal(absent.coverageHash, sha256('none'));
   assert.notEqual(first.fingerprint, second.fingerprint);
+});
+
+test('SCIP varint: величина выше безопасного целого называется своим именем', () => {
+  // 8 байт, где последний завершает varint на сдвиге 49: величина выходит за 2^53 и число
+  // теряет точность. Раньше страж смотрел только на сдвиг, порча низких битов искажала
+  // wire type, и разбор падал с ложным диагнозом «truncated» — то есть ошибка указывала
+  // не туда, где сломалось.
+  const buffer = Buffer.from([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F]);
+  assert.throws(() => decodeScipIndex(buffer), /exceeds JavaScript safe integer/);
+});
+
+test('structure_context: сервер соблюдает границы собственного inputSchema', async (t) => {
+  // inputSchema объявлен в tools/list, но клиент не обязан ему следовать: доверять чужой
+  // валидации сервер не может. matchesScope перебирает scopeRefs на каждую сущность.
+  const { facts, assessment } = await analyzeGraph();
+  const root = await mkdtemp(join(tmpdir(), 'structure-mcp-bounds-'));
+  await writeFile(join(root, 'facts.json'), JSON.stringify(facts));
+  await writeFile(join(root, 'assessment.json'), JSON.stringify(assessment));
+  const previous = process.env.STRUCTURE_MCP_ROOT;
+  process.env.STRUCTURE_MCP_ROOT = root;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.STRUCTURE_MCP_ROOT;
+    else process.env.STRUCTURE_MCP_ROOT = previous;
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const schema = STRUCTURE_CONTEXT_TOOL.inputSchema.properties;
+  const context = await callStructureContext({
+    factsPath: 'facts.json',
+    assessmentPath: 'assessment.json',
+    headSha: HEAD,
+    scopeRefs: Array.from({ length: schema.scopeRefs.maxItems + 5 }, (unused, i) => `scope-${i}`),
+    contractRefs: Array.from({ length: schema.contractRefs.maxItems + 5 }, (unused, i) => `c-${i}`),
+    tokenBudget: 10_000_000,
+    dependencyDepth: 99,
+  });
+  assert.equal(context.scopeRefs.length, schema.scopeRefs.maxItems,
+    'список обрезан до объявленного maxItems, а не принят как есть');
+  assert.equal(context.kind, 'structure_context', 'запрос за границами не роняет сервер');
 });
 
 test('structure_context MCP reads are confined to STRUCTURE_MCP_ROOT', async (t) => {
