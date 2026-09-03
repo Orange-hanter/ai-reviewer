@@ -17,6 +17,7 @@ pub mod findings;
 pub mod json_repair;
 pub mod llm;
 pub mod router;
+pub mod specialists;
 pub mod structure_assessments;
 pub mod structure_evidence;
 pub mod structure_graphify;

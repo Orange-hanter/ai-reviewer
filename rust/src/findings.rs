@@ -201,7 +201,8 @@ pub fn normalize_confidence(raw: &Value) -> f64 {
 /// Порт normalizeAdvisorClaims (lib/specialists.mjs): фильтр ролей/статусов,
 /// reason по умолчанию '', severity только у downgraded minor/nit.
 /// None соответствует undefined (поле пропускается).
-fn normalize_advisor_claims(raw: Option<&Value>) -> Option<Vec<Value>> {
+/// pub: переиспользуется бинарём specialists (op normalizeAdvisorClaims).
+pub fn normalize_advisor_claims(raw: Option<&Value>) -> Option<Vec<Value>> {
     let arr = raw?.as_array()?;
     let claims: Vec<Value> = arr
         .iter()
