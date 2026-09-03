@@ -28,3 +28,4 @@ pub mod structure_mutation;
 pub mod structure_protocol;
 pub mod structure_scip;
 pub mod structure_tests;
+pub mod verifier;
