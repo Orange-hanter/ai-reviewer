@@ -23,5 +23,8 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 regex = "1"
 indexmap = { version = "2", features = ["serde"] }
-# sha256 для findingFingerprint (12-hex-символьный отпечаток кода в локации находки).
+# sha256 для findingFingerprint (12-hex-символьный отпечаток кода в локации находки)
+# и stableId из lib/util.mjs (sha256 parts.join('\0'), 24 hex).
 sha2 = "0.10"
+# base64: бинарный SCIP-индекс приходит в JSON-контракт как {dataBase64}.
+base64 = "0.22"

@@ -15,3 +15,4 @@ pub mod fixtures;
 pub mod findings;
 pub mod json_repair;
 pub mod router;
+pub mod structure_scip;
