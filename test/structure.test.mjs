@@ -23,6 +23,7 @@ import {
   extractTestCasesFromSource,
   generatePropertyDrafts,
   loadReviewConfig,
+  lcovObservations,
   matchLcovFunction,
   mergeScipWithGraphify,
   normalizeRepoPath,
@@ -803,6 +804,92 @@ test('mutation receipt attests raw file bytes, not re-serialized JSON', async ()
   assert.ok(receipt);
   assert.equal(receipt.artifact.sha256, sha256(raw));
   assert.notEqual(receipt.artifact.sha256, sha256(JSON.stringify(JSON.parse(raw))));
+});
+
+test('LCOV: одноимённые функции получают свои хиты по порядку записей', () => {
+  // istanbul пишет FN обходом Object.values(fnMap), а FNDA — обходом Object.entries(fnMap):
+  // один и тот же map в одном порядке. Значит при совпадении числа записей N-я FNDA
+  // относится к N-й одноимённой FN. Раньше обе записи получали последний счётчик, и
+  // непокрытая функция объявлялась covered с чужими хитами вопреки DA той же строки.
+  const lcov = parseLcov([
+    'SF:src/a.ts',
+    'FN:10,handler',
+    'FN:50,handler',
+    'FNDA:7,handler',
+    'FNDA:0,handler',
+    'DA:10,7',
+    'DA:50,0',
+    'end_of_record',
+  ].join('\n'));
+  const file = lcov.files[0];
+  assert.deepEqual(
+    file.functions.entries.map((fn) => [fn.line, fn.hits, fn.attribution]),
+    [[10, 7, 'order'], [50, 0, 'order']],
+    'каждая функция получила свой счётчик, а не счётчик соседа',
+  );
+  assert.equal(file.functions.hit, 1, 'покрыта одна из двух — как и говорит DA');
+  assert.deepEqual(lcov.warnings, [], 'порядок разрешил неоднозначность, предупреждать не о чем');
+
+  const entities = [
+    { observedId: 'E10', kind: 'function', label: 'handler', line: 10 },
+    { observedId: 'E50', kind: 'function', label: 'handler', line: 50 },
+  ];
+  const observations = lcovObservations(lcov, new Map([['src/a.ts', entities]]))
+    .filter((item) => item.level === 'function_execution');
+  const byRef = Object.fromEntries(observations.map((item) => [item.subjectRef, item]));
+  assert.equal(byRef.E10.status, 'covered');
+  assert.equal(byRef.E50.status, 'uncovered');
+  assert.equal(byRef.E10.confidence, 'extracted',
+    'привязка по порядку опирается на поведение писателя, а не на ключ формата — не exact');
+});
+
+test('LCOV: разошедшиеся числа FN и FNDA оставляют исполнение неизвестным', () => {
+  // Типично после слияния отчётов: FNDA схлопнуты по имени, привязать по порядку нечего.
+  const lcov = parseLcov([
+    'SF:src/a.ts',
+    'FN:10,handler',
+    'FN:50,handler',
+    'FNDA:7,handler',
+    'DA:10,7',
+    'DA:50,0',
+    'end_of_record',
+  ].join('\n'));
+  const file = lcov.files[0];
+  assert.deepEqual(file.functions.entries.map((fn) => fn.hits), [null, null],
+    'ни одной из двух нельзя приписать 7 хитов');
+  assert.equal(file.functions.hit, 0, 'неизвестное не засчитывается как покрытое');
+  assert.equal(file.functions.ratio, null, 'доля не считается, когда знаменатель пуст');
+  assert.ok(lcov.warnings.some((warning) => warning.includes('unresolvable LCOV function names')),
+    'неоднозначность видна потребителю, а не проглатывается');
+
+  const observations = lcovObservations(lcov).filter((item) => item.level === 'function_execution');
+  assert.equal(observations.length, 2);
+  for (const observation of observations) {
+    assert.equal(observation.status, 'unresolved', 'ни covered, ни uncovered — доказательства нет');
+    assert.equal(observation.hitCount, null);
+    assert.equal(observation.confidence, 'ambiguous');
+  }
+});
+
+test('LCOV: однозначное имя по-прежнему получает свои хиты', () => {
+  const lcov = parseLcov([
+    'SF:src/a.ts',
+    'FN:10,alpha',
+    'FN:50,beta',
+    'FNDA:7,alpha',
+    'FNDA:0,beta',
+    'DA:10,7',
+    'end_of_record',
+  ].join('\n'));
+  const file = lcov.files[0];
+  assert.deepEqual(
+    file.functions.entries.map((fn) => [fn.name, fn.hits, fn.attribution]),
+    [['alpha', 7, 'name'], ['beta', 0, 'name']],
+    'обычный случай не задет: хиты привязаны по имени, как раньше',
+  );
+  assert.equal(file.functions.hit, 1);
+  assert.equal(file.functions.ratio, 0.5);
+  assert.deepEqual(lcov.warnings, []);
 });
 
 test('LCOV parser rejects absolute SF without explicit repoRoot', () => {
