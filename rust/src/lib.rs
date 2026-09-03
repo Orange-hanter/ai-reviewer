@@ -11,6 +11,7 @@
 pub mod actionability;
 pub mod config;
 pub mod diff;
+pub mod engine;
 pub mod fixtures;
 pub mod findings;
 pub mod json_repair;
