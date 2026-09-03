@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   analyzeStructure,
   applyStructureWaivers,
+  assessDataQuality,
   buildStructureAssessment,
   buildStructureContext,
   callStructureContext,
@@ -1103,4 +1104,84 @@ test('reconcileStructureFindings supersedes an obligation link in one snapshot',
   assert.equal(superseded.status, 'superseded');
   assert.equal(superseded.resolvedBySnapshot, 'snap-2');
   assert.deepEqual(reconcileStructureFindings([superseded], [], 'snap-3')[0], superseded);
+});
+
+test('assessDataQuality does not allow missing evidence without observations', () => {
+  const quality = (coverageObservations) => assessDataQuality({ entities: [], dependencies: [] }, coverageObservations, {
+    graphStatus: 'fresh',
+    testInventoryComplete: true,
+    truncated: false,
+  });
+
+  // прогон без lcov: наблюдений нет, значит и судить о полноте нечего
+  const blind = quality([]);
+  assert.equal(blind.functionObservations, 0);
+  assert.equal(blind.unresolvedJoinRate, 0);
+  assert.equal(blind.missingAllowed, false);
+
+  // наблюдения есть и джойны разрешены — тогда отсутствие теста можно считать наблюдённым
+  const seeing = quality([{ level: 'function_execution', confidence: 'exact' }]);
+  assert.equal(seeing.functionObservations, 1);
+  assert.equal(seeing.missingAllowed, true);
+
+  // джойны есть, но не резолвятся — гейт снова закрыт
+  const noisy = quality([{ level: 'function_execution', confidence: 'unresolved' }]);
+  assert.equal(noisy.unresolvedJoinRate, 1);
+  assert.equal(noisy.missingAllowed, false);
+});
+
+test('parseMutationReport does not bind a mutant without a line to an arbitrary contract', () => {
+  const facts = {
+    entities: [
+      { observedId: 'e1', path: 'src/a.ts', line: 10, endLine: 20 },
+      { observedId: 'e2', path: 'src/a.ts', line: 30, endLine: 40 },
+    ],
+    contracts: [{ id: 'c1', entityRef: 'e1' }, { id: 'c2', entityRef: 'e2' }],
+  };
+  const report = (mutant) => ({ files: { 'src/a.ts': { mutants: [{ id: 'm1', mutatorName: 'BooleanLiteral', status: 'Survived', ...mutant }] } } });
+
+  const [blind] = parseMutationReport(report({}), facts).observations;
+  assert.equal(blind.line, null);
+  assert.equal(blind.contractRef, null);
+  assert.equal(blind.subjectRef, 'file:src/a.ts');
+  assert.equal(blind.confidence, 'heuristic');
+
+  // строка известна — привязка обычная, по вмещающему контракту
+  const [located] = parseMutationReport(report({ location: { start: { line: 35 } } }), facts).observations;
+  assert.equal(located.contractRef, 'c2');
+  assert.equal(located.confidence, 'exact');
+
+  // единственный контракт в файле — привязка однозначна и без строки
+  const [only] = parseMutationReport(report({}), {
+    entities: [facts.entities[0]],
+    contracts: [facts.contracts[0]],
+  }).observations;
+  assert.equal(only.contractRef, 'c1');
+});
+
+test('structure_context keeps refs inside the payload after secondary truncation', async () => {
+  const result = await analyzeGraph();
+  const api = result.facts.facts.entities.find((entity) => entity.label === 'validate()');
+  const context = buildStructureContext({
+    facts: result.facts,
+    assessment: result.assessment,
+    headSha: HEAD,
+    scopeRefs: [api.observedId],
+    dependencyDepth: 2,
+    limits: { maxBytes: 1, maxSeeds: 1 },
+  });
+
+  assert.equal(context.truncated, true);
+  const entityIds = new Set(context.entities.map((entity) => entity.observedId));
+  assert.ok(entityIds.size >= 1);
+  for (const contract of context.contracts) {
+    assert.ok(entityIds.has(contract.entityRef), `висячий contract.entityRef: ${contract.entityRef}`);
+  }
+  for (const edge of context.dependencies) {
+    assert.ok(entityIds.has(edge.from) && entityIds.has(edge.to), `висячее ребро: ${edge.id}`);
+  }
+  const contractIds = new Set(context.contracts.map((contract) => contract.id));
+  for (const scenario of context.scenarios) {
+    assert.ok(scenario.contractRefs.some((id) => contractIds.has(id)), `сценарий без живого контракта: ${scenario.obligationRef}`);
+  }
 });
