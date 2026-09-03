@@ -30,7 +30,13 @@ async function main() {
   const metaIdx = args.indexOf('--meta');
   const findingsIdx = args.indexOf('--findings');
   const goldDirFlag = args.includes('--gold-dir');
-  const file = args.find((a) => !a.startsWith('--') && a !== args[metaIdx + 1] && a !== args[findingsIdx + 1]);
+  // Значения флагов исключаем ПО ИНДЕКСУ: при отсутствии флага `indexOf` даёт -1, и
+  // сравнение с `args[-1 + 1]` отбрасывало сам файл — основной вход CLI не работал.
+  const flagValueIdxs = new Set([
+    metaIdx >= 0 ? metaIdx + 1 : -1,
+    findingsIdx >= 0 ? findingsIdx + 1 : -1,
+  ]);
+  const file = args.find((a, i) => !a.startsWith('--') && !flagValueIdxs.has(i));
 
   let results = [];
 
@@ -80,6 +86,12 @@ async function main() {
   }
   if (agg.recall.targets) {
     console.log(`title recall (substring): ${agg.recall.hits}/${agg.recall.targets} (${Math.round((agg.recall.rate || 0) * 100)}%)`);
+  }
+  if (agg.locationCaseRecall?.cases) {
+    console.log(`location recall (кейсы, ≥1 попадание): ${agg.locationCaseRecall.hits}/${agg.locationCaseRecall.cases} (${Math.round((agg.locationCaseRecall.rate || 0) * 100)}%)`);
+  }
+  if (agg.locationRecall?.targets) {
+    console.log(`  · строже, по локациям: ${agg.locationRecall.hits}/${agg.locationRecall.targets} (${Math.round((agg.locationRecall.rate || 0) * 100)}%)`);
   }
   if (agg.precision.fpViolations) {
     console.log(`mustNotFind violations: ${agg.precision.fpViolations}`);

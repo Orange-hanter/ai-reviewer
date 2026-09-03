@@ -1,0 +1,19 @@
+{
+  "id": "sentry-clean-73318-feat-frontend-implement-a-gl",
+  "type": "clean",
+  "description": "getsentry/sentry#73318 «feat(frontend): Implement a GlobalDrawer» — clean-контроль: смержен до 2025-07-30, ни один PR на него не ссылается",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 73318,
+    "sha": "4bb6ded6fc9dfb0ff433daf6956ff86d12967251",
+    "evidence": [
+      "смержен 2024-06-28, отбор среди PR старше 400 дней",
+      "дифф: +530/-74 в 12 файл(ах)",
+      "поиск «#73318 in:body» по PR репозитория не дал ни одной ссылки"
+    ]
+  },
+  "expect": {
+    "wouldBlock": false,
+    "note": "Отсутствие ссылок доказывает лишь отсутствие ЗАМЕЧЕННОГО дефекта. Блокер здесь считается ложным."
+  }
+}

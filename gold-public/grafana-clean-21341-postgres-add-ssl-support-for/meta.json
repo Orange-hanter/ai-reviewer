@@ -1,0 +1,19 @@
+{
+  "id": "grafana-clean-21341-postgres-add-ssl-support-for",
+  "type": "clean",
+  "description": "grafana/grafana#21341 «Postgres: Add SSL support for datasource» — clean-контроль: смержен до 2025-07-30, ни один PR на него не ссылается",
+  "source": {
+    "repo": "grafana/grafana",
+    "pr": 21341,
+    "sha": "1f0e1b33bc1be969b034062f6c303066361e1c88",
+    "evidence": [
+      "смержен 2020-04-09, отбор среди PR старше 400 дней",
+      "дифф: +85/-21 в 3 файл(ах)",
+      "поиск «#21341 in:body» по PR репозитория не дал ни одной ссылки"
+    ]
+  },
+  "expect": {
+    "wouldBlock": false,
+    "note": "Отсутствие ссылок доказывает лишь отсутствие ЗАМЕЧЕННОГО дефекта. Блокер здесь считается ложным."
+  }
+}

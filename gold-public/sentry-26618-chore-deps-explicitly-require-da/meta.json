@@ -1,0 +1,29 @@
+{
+  "id": "sentry-26618-chore-deps-explicitly-require-da",
+  "type": "tp",
+  "description": "getsentry/sentry#26618 «chore(deps): Explicitly require dataclasses» — дефект, который проект признал фиксом #26661",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 26618,
+    "sha": "20579e484428a2a3d200d65582bc2bb80675389b",
+    "fixPr": 26661,
+    "evidence": [
+      "фикс #26661 «fix(dev): dataclasses should not install for Python 3.8» ссылается на #26618 как на источник дефекта",
+      "дифф виновника: +1/-0 в 1 файл(ах)",
+      "дифф фикса: +1/-1",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #26618"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "requirements-base.txt",
+        "lines": [
+          9,
+          9
+        ]
+      }
+    ]
+  }
+}

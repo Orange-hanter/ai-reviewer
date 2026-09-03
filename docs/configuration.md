@@ -169,6 +169,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_STRUCTURE_MAX_EDGES` | `15000` | Hard cap dependencies |
 | `REVIEW_STRUCTURE_HIGH_FAN_IN` | `5` | Hotspot threshold |
 | `REVIEW_STRUCTURE_MAX_UNRESOLVED_RATE` | `0.1` | Выше порога запрещён строгий `missing` |
+| `STRUCTURE_MCP_ROOT` | рабочий каталог процесса | Единственный корень, из которого MCP-серверу разрешено читать `factsPath`/`assessmentPath`. Пути приходят от клиента и проверяются через `realpath` (symlink наружу не проходит), выход за корень — ошибка `path escapes allowed root`. Задавайте явно: дефолт зависит от того, откуда запущен агент — см. [structure.md](structure.md#confinement-what-the-server-is-allowed-to-read) |
 
 Подробности протокола и MCP — в [structure.md](structure.md).
 
@@ -235,7 +236,8 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_FEEDBACK_CONCURRENCY` | `6` | Параллельных запросов реакций |
 | `REVIEW_FP_PROMOTE_MIN` | `2` | Сколько одинаковых FP → новый паттерн |
 | `REVIEW_FIXTURES_DIR` | fixtures пакета | Куда промоутить fixtures |
-| `REVIEW_GOLD_DIR` | gold пакета | Набор для shadow-прогона с LLM |
+| `REVIEW_GOLD_DIR` | gold пакета | Набор для shadow-прогона с LLM (`gold-public` — публичный набор) |
+| `REVIEW_GOLD_CACHE` | `.ai-review/gold-public` | Кэш диффов публичных кейсов, скачанных по пину `source.sha` |
 
 ## Auto-triage
 

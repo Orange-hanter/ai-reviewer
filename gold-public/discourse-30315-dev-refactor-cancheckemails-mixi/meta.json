@@ -1,0 +1,29 @@
+{
+  "id": "discourse-30315-dev-refactor-cancheckemails-mixi",
+  "type": "tp",
+  "description": "discourse/discourse#30315 «DEV: Refactor CanCheckEmails mixin to helper class» — дефект, который проект признал фиксом #30359",
+  "source": {
+    "repo": "discourse/discourse",
+    "pr": 30315,
+    "sha": "f8837e1a8a0841dd0aebc37f2944596e73ee9d30",
+    "fixPr": 30359,
+    "evidence": [
+      "фикс #30359 «FIX: CanCheckEmailsHelper should handle null this.model gracefully» ссылается на #30315 как на источник дефекта",
+      "дифф виновника: +133/-47 в 9 файл(ах)",
+      "дифф фикса: +2/-1",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #30315"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "app/assets/javascripts/discourse/app/lib/can-check-emails-helper.js",
+        "lines": [
+          20,
+          20
+        ]
+      }
+    ]
+  }
+}

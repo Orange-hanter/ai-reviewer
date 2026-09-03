@@ -34,7 +34,9 @@ export { createReviewEngine } from './lib/engine.mjs';
 export { createLlmClient } from './lib/llm.mjs';
 export { createOllamaClient } from './lib/ollama.mjs';
 export { createCostTracker, estimateCost, formatCostStickyLine, loadPriceMap } from './lib/cost.mjs';
-export { scoreGoldCase, aggregateBenchmark, scoreFromRecord } from './lib/benchmark.mjs';
+export {
+  scoreGoldCase, aggregateBenchmark, scoreFromRecord, locationMatches, DEFAULT_LOCATION_TOLERANCE,
+} from './lib/benchmark.mjs';
 export { emitBlastRadiusFindings, parseBlastDependentPaths, parseBlastDependents } from './lib/blast-findings.mjs';
 export {
   buildReviewJson, buildSarif, writeReviewExports, selectSarifFindings,

@@ -1,0 +1,36 @@
+{
+  "id": "sentry-24840-fix-dashboards-ensure-only-legal",
+  "type": "tp",
+  "description": "getsentry/sentry#24840 «fix(dashboards): Ensure only legal function options can be graphed» — дефект, который проект признал фиксом #24899",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 24840,
+    "sha": "cbce746e391bee59dbc610ca816d8a8ef1c03367",
+    "fixPr": 24899,
+    "evidence": [
+      "фикс #24899 «fix(dashboards): Do not validate y-axis options for non-timeseries widgets» ссылается на #24840 как на источник дефекта",
+      "дифф виновника: +40/-7 в 4 файл(ах)",
+      "дифф фикса: +126/-2",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #24840"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "src/sentry/static/sentry/app/components/dashboards/widgetQueryFields.tsx",
+        "lines": [
+          122,
+          122
+        ]
+      },
+      {
+        "file": "src/sentry/static/sentry/app/components/dashboards/widgetQueryFields.tsx",
+        "lines": [
+          136,
+          136
+        ]
+      }
+    ]
+  }
+}

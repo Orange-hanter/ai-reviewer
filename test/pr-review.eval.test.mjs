@@ -803,6 +803,25 @@ test('routeDiff R4: server logic → full', () => {
   assert.equal(routeDiff(['shared/foo.ts'], diff.replace(/server/g, 'shared')).route, 'full');
 });
 
+test('routeDiff R4: исходники не-JS языков — logic, а не other', () => {
+  // Регрессия: раньше список расширений был только JS/TS-семейством, и PR по одному
+  // `.go`/`.py` уходил в light — ревью не запускалось, sticky сообщал «docs/config-only».
+  for (const path of [
+    'pkg/services/datasources/service/datasource.go',
+    'src/sentry/auth/helper.py',
+    'app/models/topic.rb',
+    'src/main/java/org/keycloak/Foo.java',
+    'crates/engine/src/lib.rs',
+    'app/components/modal.gjs',
+  ]) {
+    assert.equal(classifyFilePath(path), 'logic', path);
+    assert.equal(routeDiff([path], 'diff').route, 'full', path);
+  }
+  // Конфиги и документация класс не меняют
+  assert.equal(classifyFilePath('ops/deploy.yml'), 'config');
+  assert.equal(classifyFilePath('docs/guide.md'), 'docs');
+});
+
 test('routeDiff R4: docs + server → full', () => {
   const route = routeDiff(['docs/a.md', 'app/server/x.ts'], 'diff');
   assert.equal(route.route, 'full');

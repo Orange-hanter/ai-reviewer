@@ -1,0 +1,29 @@
+{
+  "id": "sentry-33950-fix-issue-alerts-make-sure-that",
+  "type": "tp",
+  "description": "getsentry/sentry#33950 «fix(issue_alerts): Make sure that we update cached groups after flushing buffers.» — дефект, который проект признал фиксом #33982",
+  "source": {
+    "repo": "getsentry/sentry",
+    "pr": 33950,
+    "sha": "59ba4e6e92eb446bd7bdeeadbc1d4231e1ccaa7f",
+    "fixPr": 33982,
+    "evidence": [
+      "фикс #33982 «fix(buffer): Fix noisy error when processing buffer entries for a group that no longer exists» ссылается на #33950 как на источник дефекта",
+      "дифф виновника: +33/-8 в 2 файл(ах)",
+      "дифф фикса: +8/-2",
+      "локации выведены сопоставлением текста удалённых фиксом строк с добавленными в #33950"
+    ]
+  },
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      {
+        "file": "src/sentry/buffer/base.py",
+        "lines": [
+          85,
+          86
+        ]
+      }
+    ]
+  }
+}

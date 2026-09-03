@@ -17,6 +17,7 @@
     "pr-review-feedback": "./bin/pr-review-feedback.mjs",
     "pr-review-feedback-batch": "./bin/pr-review-feedback-batch.mjs",
     "pr-review-benchmark": "./bin/pr-review-benchmark.mjs",
+    "pr-review-gold-harvest": "./bin/pr-review-gold-harvest.mjs",
     "pr-review-structure": "./bin/pr-review-structure.mjs",
     "pr-review-structure-mcp": "./bin/pr-review-structure-mcp.mjs"
   },
@@ -37,6 +38,7 @@
     "ast-grep",
     "fixtures",
     "gold",
+    "gold-public",
     "profiles",
     "schemas",
     "docs"
@@ -44,6 +46,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "eval": "node bin/pr-review-eval.mjs",
-    "check": "npm test && npm run eval"
+    "check": "npm test && npm run eval",
+    "benchmark:public": "REVIEW_PROFILE=profiles/public-benchmark.json REVIEW_GOLD_DIR=gold-public node bin/pr-review-gold.mjs --jsonl .ai-review/benchmark-public.jsonl && node bin/pr-review-benchmark.mjs .ai-review/benchmark-public.jsonl"
   }
 }

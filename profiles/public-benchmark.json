@@ -1,0 +1,32 @@
+{
+  "name": "public-benchmark",
+  "markerNamespace": "ai-review-bench",
+  "toolName": "ai-review-bench",
+  "sarifRulePrefix": "ai-review-bench",
+  "repositoryUri": "",
+  "repoRules": "Дифф взят из чужого открытого репозитория (grafana, sentry, discourse). Соглашений проекта, его истории и внутренних инвариантов у тебя нет — вне диффа известно только то, что видно в самом диффе.\n\nИз этого следуют три правила разметки severity, и они про честность вывода, а не про мягкость:\n\n1. Блокирующей (critical/major) называй находку только тогда, когда неверность видна ПРЯМО В ДИФФЕ: перепутанный флаг или поле, потерянная проверка, недостижимая ветка, нарушенный инвариант, который тут же рядом и объявлен. Если для вывода нужно знать, как устроен остальной репозиторий, — это minor, а не major.\n2. Отличай дефект от осознанного решения автора. Комментарий вида `# edge case`, `TODO`, явная запись в лог вместо ошибки — признак, что автор случай видел и выбрал такое поведение. Это повод для minor-замечания о риске, но не для блокировки merge.\n3. Свойство, присущее самой задаче PR, не является дефектом этого PR. Эндпоинт, который по замыслу отдаёт пользовательский текст в LLM, не «уязвим к prompt injection» сам по себе; фича, меняющая вёрстку, не «ломает вёрстку».\n\nЯзыки в наборе разные (Python, Go, TypeScript, JavaScript, Ruby). Не переноси идиомы одного языка на другой.",
+  "prompts": {
+    "aggregatorExtra": "Порог блокировки держи строго: между «здесь есть риск» и «этот дифф нельзя мержить» выбирай второе только при неверности, доказуемой содержимым диффа.",
+    "verifierExtra": "Отклоняй повышение до блокирующей severity, если обоснование опирается на предположения о коде вне диффа."
+  },
+  "layout": {
+    "appDir": "",
+    "layerDirs": [],
+    "lintable": "\\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$",
+    "e2eSpec": "(?:^|/)(?:e2e|tests?)/.+\\.(?:spec|test)\\.[cm]?[jt]sx?$",
+    "logic": "\\.(?:ts|tsx|js|jsx|mjs|cjs|vue|svelte|gjs|gts|go|py|rb|java|kt|rs|php|cs|swift|scala|ex|exs)$",
+    "sensitive": ""
+  },
+  "astgrep": {
+    "scopes": {},
+    "allow": {}
+  },
+  "paths": {
+    "feedbackLog": ".ai-review/public-benchmark/fp-feedback.jsonl",
+    "feedbackCandidatesDir": ".ai-review/public-benchmark/candidates",
+    "fpPatterns": "",
+    "fpMarkdown": ".ai-review/public-benchmark/false-positives.md",
+    "observabilityDir": ".ai-review/public-benchmark/observability",
+    "exportDir": ".ai-review/public-benchmark/export"
+  }
+}

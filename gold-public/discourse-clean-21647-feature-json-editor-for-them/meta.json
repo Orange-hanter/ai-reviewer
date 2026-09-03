@@ -1,0 +1,19 @@
+{
+  "id": "discourse-clean-21647-feature-json-editor-for-them",
+  "type": "clean",
+  "description": "discourse/discourse#21647 «FEATURE: JSON editor for theme settings» — clean-контроль: смержен до 2025-07-30, ни один PR на него не ссылается",
+  "source": {
+    "repo": "discourse/discourse",
+    "pr": 21647,
+    "sha": "80f5018924e689e40daaedcb5b1896978de87378",
+    "evidence": [
+      "смержен 2023-07-27, отбор среди PR старше 400 дней",
+      "дифф: +450/-1 в 9 файл(ах)",
+      "поиск «#21647 in:body» по PR репозитория не дал ни одной ссылки"
+    ]
+  },
+  "expect": {
+    "wouldBlock": false,
+    "note": "Отсутствие ссылок доказывает лишь отсутствие ЗАМЕЧЕННОГО дефекта. Блокер здесь считается ложным."
+  }
+}
