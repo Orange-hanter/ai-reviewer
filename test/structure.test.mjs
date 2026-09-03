@@ -873,6 +873,68 @@ test('LCOV: разошедшиеся числа FN и FNDA оставляют и
   }
 });
 
+test('LCOV: объявленные писателем счётчики сверяются с посчитанными', () => {
+  // Согласованный отчёт: FNF/FNH/LF/LH совпадают с нашим счётом — расхождений нет.
+  const ok = parseLcov([
+    'SF:src/a.ts',
+    'FN:10,alpha',
+    'FN:50,beta',
+    'FNDA:7,alpha',
+    'FNDA:0,beta',
+    'FNF:2',
+    'FNH:1',
+    'DA:10,7',
+    'DA:50,0',
+    'LF:2',
+    'LH:1',
+    'end_of_record',
+  ].join('\n'));
+  assert.deepEqual(ok.files[0].declaredMismatches, []);
+  assert.deepEqual(ok.warnings, [], 'согласованный отчёт не шумит');
+  assert.deepEqual(ok.files[0].declared.functions, { found: 2, hit: 1 },
+    'объявленные счётчики сохранены, а не выброшены');
+
+  // Писатель объявил больше функций, чем записал FN: наша модель формата разошлась с его.
+  const bad = parseLcov([
+    'SF:src/a.ts',
+    'FN:10,alpha',
+    'FNDA:7,alpha',
+    'FNF:3',
+    'FNH:1',
+    'DA:10,7',
+    'LF:1',
+    'LH:1',
+    'end_of_record',
+  ].join('\n'));
+  assert.deepEqual(bad.files[0].declaredMismatches, [
+    { section: 'functions', kind: 'found', declared: 3, actual: 1 },
+  ]);
+  assert.ok(bad.warnings.some((w) => w.includes('declared/computed mismatch')
+    && w.includes('functions.found') && w.includes('declared=3') && w.includes('computed=1')),
+  'расхождение доезжает до потребителя, а не остаётся внутри парсера');
+});
+
+test('LCOV: FNH не сверяется там, где привязка не разрешилась', () => {
+  // Функции с hits: null не попадают в наш `hit` по построению, поэтому расхождение по FNH
+  // здесь ничего не доказывает — сверять нечем, и ложного предупреждения быть не должно.
+  const lcov = parseLcov([
+    'SF:src/a.ts',
+    'FN:10,handler',
+    'FN:50,handler',
+    'FNDA:7,handler',
+    'FNF:2',
+    'FNH:1',
+    'end_of_record',
+  ].join('\n'));
+  const file = lcov.files[0];
+  assert.equal(file.functions.hit, 0, 'неизвестное не засчитано покрытым');
+  assert.deepEqual(file.declaredMismatches, [],
+    'FNH пропущен: знаменатель неизвестен, расхождение не значит ошибку формата');
+  assert.ok(!lcov.warnings.some((w) => w.includes('declared/computed mismatch')));
+  assert.ok(lcov.warnings.some((w) => w.includes('unresolvable LCOV function names')),
+    'но сама неоднозначность по-прежнему видна');
+});
+
 test('LCOV: однозначное имя по-прежнему получает свои хиты', () => {
   const lcov = parseLcov([
     'SF:src/a.ts',
