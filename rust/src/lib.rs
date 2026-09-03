@@ -14,6 +14,7 @@ pub mod diff;
 pub mod engine;
 pub mod fixtures;
 pub mod findings;
+pub mod github;
 pub mod json_repair;
 pub mod llm;
 pub mod prompt;
