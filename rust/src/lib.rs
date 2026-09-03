@@ -16,6 +16,7 @@ pub mod fixtures;
 pub mod findings;
 pub mod json_repair;
 pub mod llm;
+pub mod prompt;
 pub mod router;
 pub mod specialists;
 pub mod structure_assessments;
