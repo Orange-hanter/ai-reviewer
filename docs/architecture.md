@@ -65,6 +65,9 @@ flowchart TB
 | `lib/feedback.mjs`, `feedback/*` | Сбор 👍/👎 → JSONL → паттерны и fixtures |
 | `lib/export.mjs` | JSON + SARIF артефакт прогона (+ sidecar swarm) |
 | `lib/swarm.mjs` | E22/E23: `strong` verdict + `suggestedScopeFiles` для оркестратора |
+| `lib/structure*.mjs` | Off-PR structure facts/assessment: Graphify + SCIP + LCOV + scenario evidence |
+| `bin/pr-review-structure.mjs` | CLI structure facts, assessments, drift и cod-doc Markdown projection |
+| `bin/pr-review-structure-mcp.mjs` | Pinned-SHA `structure_context` для агентов |
 | `lib/observability.mjs`, `lib/metrics.mjs` | JSONL-лог прогонов и сводка по нему |
 | `lib/eval.mjs` | Golden fixtures без LLM |
 
@@ -124,6 +127,15 @@ verifier проверяет кандидатов в блокеры. Агрега
 
 **Consensus.** `REVIEW_MODE=consensus`: каждая модель проходит каждый чанк, блокером
 становится кластер, набравший `REVIEW_CONSENSUS` независимых подтверждений.
+
+### Structure — отдельный доказательный контур
+
+[`docs/structure.md`](structure.md) описывает анализ структуры, контрактов и тестовых
+сценариев. Он не участвует в merge-гейте. Graphify даёт topology, SCIP уточняет semantic
+symbols/ranges, LCOV фиксирует execution, mutation/property providers — качество сценариев.
+Провайдеры отдают receipts; статусы `covered|partial|missing|unverifiable` считает только
+детерминированный assessment engine. Контекст для планирования всегда привязан к SHA или
+fingerprint snapshot.
 
 ## Границы
 

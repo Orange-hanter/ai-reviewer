@@ -146,6 +146,32 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 (`EXTRACTED`/`INFERRED`), community (cross-community сильнее layer-эвристик). В метриках —
 `affected_files` (пути для swarm/оркестратора), `confidence`, `cross_community`.
 
+## Structure / contracts / scenarios
+
+Отдельный `pr-review-structure` использует профиль, но не влияет на PR merge-гейт.
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_STRUCTURE` | `1` | Structure producer доступен |
+| `REVIEW_STRUCTURE_GRAPH` | `GRAPH` | Graphify facts |
+| `REVIEW_STRUCTURE_GRAPH_REPORT` | `GRAPHIFY_REPORT` | Freshness |
+| `REVIEW_STRUCTURE_GRAPH_ANALYSIS` | `.graphify_analysis.json` рядом с graph.json | Communities/god-nodes; sidecar в каталоге graph.json, следует за override `GRAPH`/`REVIEW_STRUCTURE_GRAPH` |
+| `REVIEW_STRUCTURE_SCIP` | пусто | SCIP semantic index |
+| `REVIEW_STRUCTURE_LCOV` | `paths.coverageLcov` | LCOV evidence |
+| `REVIEW_STRUCTURE_OBLIGATIONS` | пусто | cod-doc obligations export |
+| `REVIEW_STRUCTURE_MUTATION` | пусто | Mutation Testing Elements report |
+| `REVIEW_STRUCTURE_PROPERTIES` | пусто | Property execution report |
+| `REVIEW_STRUCTURE_EXPORT_DIR` | `paths.structureExportDir` | Facts/assessment/drift outputs |
+| `REVIEW_STRUCTURE_SCOPE` | пусто | Path-prefix scope |
+| `REVIEW_STRUCTURE_TRUST_TIER` | `trusted_local` | `signed_ci`, `trusted_local`, `untrusted`. ⚠️ `untrusted` понижает evidence ceiling всех receipts: сценарии не поднимутся выше статического инвентаря, включайте только для недоверенных источников |
+| `REVIEW_STRUCTURE_INCLUDE_AMBIGUOUS` | `0` | Включать AMBIGUOUS Graphify edges |
+| `REVIEW_STRUCTURE_MAX_ENTITIES` | `5000` | Hard cap facts |
+| `REVIEW_STRUCTURE_MAX_EDGES` | `15000` | Hard cap dependencies |
+| `REVIEW_STRUCTURE_HIGH_FAN_IN` | `5` | Hotspot threshold |
+| `REVIEW_STRUCTURE_MAX_UNRESOLVED_RATE` | `0.1` | Выше порога запрещён строгий `missing` |
+
+Подробности протокола и MCP — в [structure.md](structure.md).
+
 ## Бюджеты
 
 | Переменная | Default | Описание |

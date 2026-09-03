@@ -1567,3 +1567,54 @@ test('fp-patterns: round4 cross-chunk + findings cluster + test nits', async () 
     true,
   );
 });
+
+test('fp-patterns: structure platform, 29 находок PR #6 (dry-run 2026-09-02)', async () => {
+  resetFpPatternsCache();
+  // заголовки — дословно из отчёта прогона; каждая проверена по коду и признана не-дефектом
+  const cases = [
+    ['plan-todo-completeness', 'Несогласованность статусов todo и заявлений о завершённости', '.cursor/plans/structure-platform-integration.plan.md'],
+    ['mcp-oversized-eof-tail', 'Незавершённое поглощение oversized-кадра при обрыве потока', 'bin/pr-review-structure-mcp.mjs'],
+    ['structure-cli-base-source-required', 'Проверка «есть хотя бы один источник» не учитывает --obligations/--mutation-report/--property-report', 'bin/pr-review-structure.mjs'],
+    ['trust-tier-default-documented', 'Дефолт REVIEW_STRUCTURE_TRUST_TIER=trusted_local потенциально небезопасен для CI недоверенных PR', 'docs/configuration.md'],
+    ['index-reexport-primitives-ok', 'Дублирование пути импорта канонических примитивов через structure-evidence.mjs', 'index.mjs'],
+    ['trust-tier-validated-in-receipt', 'trustTier из env не валидируется по whitelist', 'lib/config.mjs'],
+    ['structure-namespace-parallel-ok', 'Параллельный namespace structure.* дублирует часть graphify.*', 'lib/config.mjs'],
+    ['hotspot-confidence-conservative', 'Возможно инвертированная семантика confidence для hotspot', 'lib/structure-assessments.mjs'],
+    ['property-evidence-vs-bound', 'evidence добавляется по property.status без учёта confidence, используемого в propertyBound', 'lib/structure-assessments.mjs'],
+    ['context-truncated-conservative', 'Ложное срабатывание флага truncated при точном совпадении лимита', 'lib/structure-context.mjs'],
+    ['drift-unique-threshold-strict-by-design', 'Слишком строгий порог для resolution=unique', 'lib/structure-drift.mjs'],
+    ['drift-path-overlap-heuristic', 'Ложные совпадения document-path-overlap по подстроке', 'lib/structure-drift.mjs'],
+    ['export-env-read-intentional', 'Скрытая конфигурация через process.env внутри lib-модуля', 'lib/structure-export.mjs'],
+    ['crossboundary-deepest-prefix-ok', 'crossBoundary считается по самому глубокому совпавшему префиксу, включая шумные module-границы', 'lib/structure-graphify.mjs'],
+    ['lcov-match-edge-case-heuristic', 'Неоднозначный edge-case в matchLcovFunction: одинаковая строка, разные имена, обе не совпали', 'lib/structure-lcov.mjs'],
+    ['lcov-kind-list-coupling-ok', 'Неявная связь между lcov-матчингом и списком kind\'ов из других экстракторов', 'lib/structure-lcov.mjs'],
+    ['mcp-pin-args-both-allowed', 'callStructureContext допускает одновременную передачу headSha и snapshotFingerprint без проверки согласованности', 'lib/structure-mcp.mjs'],
+    ['scip-truncation-drops-edges-by-design', 'Усечение entities по maxEntities молча теряет связи relationships', 'lib/structure-scip.mjs'],
+    ['scip-definition-choice-deterministic', 'Недетерминированный выбор definition при нескольких документах', 'lib/structure-scip.mjs'],
+    ['test-body-boundary-heuristic', 'Эвристическая граница тела теста может обрезаться внутри строк/комментариев', 'lib/structure-tests.mjs'],
+    ['short-contract-labels-heuristic', 'Короткие labels контрактов могут давать ложные совпадения в targetContractRefs', 'lib/structure-tests.mjs'],
+    ['structure-primitives-single-source', 'Возможное дублирование канонических примитивов normalizeRepoPath/sha256', 'lib/structure.mjs'],
+    ['structure-symlink-guard-landed', 'Чтение тестовых файлов без защиты от symlink-escape', 'lib/structure.mjs'],
+    ['graph-sha-prefix-compare-ok', 'Ложное совпадение статуса графа при коротких SHA-префиксах', 'lib/structure.mjs'],
+    ['schema-path-pattern-duplication-ok', 'Дублирование определения path-паттерна между схемами', 'schemas/structure-facts.v1.schema.json'],
+    ['schema-no-cross-field-check-ok', 'Отсутствие кросс-полевой проверки согласованности числовых метрик dataQuality', 'schemas/structure-assessment.v1.schema.json'],
+    ['clamp-test-asserts-behaviour', 'Тест клэмпинга dependencyDepth не проверяет фактическое значение maxDepth в ответе', 'test/structure.test.mjs'],
+    ['mcp-test-watchdog-ok', 'Watchdog-таймаут 10s на весь набор с искусственными паузами split-режима может давать флаки на медленном CI', 'test/structure.test.mjs'],
+    ['mutation-line-zero-unreachable', 'Number(...) || null теряет валидное значение 0', 'lib/structure-mutation.mjs'],
+  ];
+  assert.equal(cases.length, 29);
+  for (const [id, title, path] of cases) {
+    assert.equal(matchesKnownFalsePositive(title, [path]), true, `паттерн не сработал: ${id}`);
+  }
+
+  // контроль на переглушение: настоящая находка в том же файле гаситься не должна
+  const realFindings = [
+    ['Гонка при записи snapshot: два процесса перезаписывают файл', 'lib/structure.mjs'],
+    ['SQL-инъекция в построении запроса', 'lib/structure-scip.mjs'],
+    ['Утечка токена в лог при ошибке конфигурации', 'lib/config.mjs'],
+    ['Пропущен await у записи отчёта — файл может быть пустым', 'lib/structure-export.mjs'],
+  ];
+  for (const [text, path] of realFindings) {
+    assert.equal(matchesKnownFalsePositive(text, [path]), false, `переглушение: ${text}`);
+  }
+});

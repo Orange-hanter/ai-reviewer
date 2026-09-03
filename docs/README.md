@@ -10,6 +10,7 @@
 | [benchmark.md](benchmark.md) | Precision/recall gold-бенчмарк |
 | [false-positives.md](false-positives.md) | Семейства ложных срабатываний, защиты, петля обучения |
 | [model-tuning.md](model-tuning.md) | Роли моделей, температуры, размер чанка, reasoning effort |
+| [review-quality.md](review-quality.md) | Разбор низкого сигнала ревью: замер, причины по коду, план |
 
 Рядом с кодом:
 
