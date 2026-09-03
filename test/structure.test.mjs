@@ -912,6 +912,92 @@ const GRAPH_TWO_FUNCS = {
   links: [{ source: 'a', target: 'b', relation: 'calls', confidence: 'EXTRACTED' }],
 };
 
+test('mergeScipWithGraphify: символы, различающиеся регистром, не схлопываются', () => {
+  // Ключ слияния был регистронезависимым, и файл с `class User` и `const user` терял одну
+  // сущность: SCIP-данные про `User` приписывались `user`, а ребро на выбывшую сущность
+  // оставалось висеть на несуществующем observedId — валидация фактов такого не ловила.
+  const entity = (id, label) => ({
+    observedId: id, lineageId: id, boundaryId: 'b1', label, qualifiedName: label,
+    kind: 'function', path: 'src/a.ts', line: 1, endLine: 2, signature: null,
+    community: 'c1', isGodNode: false, confidence: 'extracted',
+    evidence: [`graphify:${id}`], externalIds: {},
+  });
+  const graph = {
+    entities: [entity('g_upper', 'User'), entity('g_lower', 'user')],
+    dependencies: [{
+      id: 'e1', from: 'g_upper', to: 'g_lower', relation: 'calls',
+      confidence: 'extracted', evidence: [],
+    }],
+    contracts: [], warnings: [], truncated: false, capabilities: {},
+  };
+  const scip = {
+    entities: [{ ...entity('s_upper', 'User'), confidence: 'exact', evidence: ['scip:User'] }],
+    dependencies: [], contracts: [], warnings: [], truncated: false, capabilities: {},
+  };
+
+  const merged = mergeScipWithGraphify(scip, graph);
+  assert.equal(merged.entities.length, 2, 'обе сущности пережили слияние');
+  assert.deepEqual(
+    merged.entities.map((item) => item.label).sort(),
+    ['User', 'user'],
+    'SCIP уточнил только совпавшую по регистру метку',
+  );
+  const ids = new Set(merged.entities.map((item) => item.observedId));
+  for (const dependency of merged.dependencies) {
+    assert.ok(ids.has(dependency.from), `from=${dependency.from} указывает на существующую сущность`);
+    assert.ok(ids.has(dependency.to), `to=${dependency.to} указывает на существующую сущность`);
+  }
+});
+
+test('mergeScipWithGraphify: неоднозначный кандидат не сливается и попадает в warnings', () => {
+  // Две graphify-сущности с одинаковыми путём и меткой: выбрать «последнюю» — значит молча
+  // потерять первую. Честнее не сливать вовсе и сказать об этом в warnings.
+  const twin = (id) => ({
+    observedId: id, lineageId: id, boundaryId: 'b1', label: 'handler', qualifiedName: 'handler',
+    kind: 'function', path: 'src/a.ts', line: 1, endLine: 2, signature: null,
+    community: 'c1', isGodNode: false, confidence: 'extracted', evidence: [], externalIds: {},
+  });
+  const graph = {
+    entities: [twin('g1'), twin('g2')],
+    dependencies: [], contracts: [], warnings: [], truncated: false, capabilities: {},
+  };
+  const scip = {
+    entities: [{ ...twin('s1'), confidence: 'exact', evidence: ['scip:handler'] }],
+    dependencies: [], contracts: [], warnings: [], truncated: false, capabilities: {},
+  };
+
+  const merged = mergeScipWithGraphify(scip, graph);
+  assert.equal(merged.entities.length, 3, 'ни одна graphify-сущность не выброшена');
+  assert.ok(
+    merged.warnings.some((warning) => warning.includes('ambiguous')),
+    'неоднозначность видна потребителю, а не проглатывается',
+  );
+});
+
+test('validateStructureFacts: ребро на неизвестную сущность отклоняется', async () => {
+  // База — контрактная фикстура схемы, чтобы тест падал именно на целостности, а не на
+  // форме payload'а.
+  const fixture = JSON.parse(await readFile(
+    fileURLToPath(new URL('../fixtures/structure/structure-facts.v1.json', import.meta.url)), 'utf8',
+  ));
+  fixture.facts.entities = [{
+    observedId: 'known', lineageId: 'known', boundaryId: null, label: 'a', qualifiedName: 'a',
+    kind: 'function', path: 'src/a.ts', line: 1, endLine: 2, signature: null,
+    community: null, isGodNode: false, confidence: 'extracted', evidence: [], externalIds: {},
+  }];
+  assert.doesNotThrow(() => validateStructureFacts(fixture), 'здоровый набор проходит');
+
+  fixture.facts.dependencies = [{
+    id: 'e1', from: 'known', to: 'gone', relation: 'calls',
+    crossBoundary: false, crossCommunity: false, confidence: 'extracted', evidence: [],
+  }];
+  assert.throws(
+    () => validateStructureFacts(fixture),
+    /references unknown entity/,
+    'висячая ссылка не должна доезжать до потребителя молча',
+  );
+});
+
 test('mergeScipWithGraphify recomputes ids of rewritten edges and contracts', () => {
   const graph = extractGraphifyFacts(GRAPH_TWO_FUNCS);
   const scip = extractScipFacts(SCIP_INDEX_TWO_DOCS);
