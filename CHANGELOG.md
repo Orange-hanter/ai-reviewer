@@ -11,7 +11,10 @@
   (`.ai-review/gold-public`). Новое: `bin/pr-review-gold-harvest.mjs` (добыча пар,
   clean-контроли, `--validate` сверки разметки с диффом), `npm run benchmark:public`.
   Первый замер и его разбор — [benchmark-public.md](docs/benchmark-public.md): на дефолтном
-  профиле location recall 4/13 кейсов, ложный блокер на 3 из 5 clean-контролей
+  профиле location recall 4/13 кейсов; ручной разбор всех 7 блокирующих находок на
+  clean-контролях не нашёл ни одной ложной — слабость движка не в выдумывании, а в
+  калибровке severity. Профиль набора зафиксирован в `profiles/public-benchmark.json`,
+  отбракованные кандидаты — в `gold-public/rejected.json`
 - **Скоринг по локации** в `lib/benchmark.mjs`: `expect.mustFindLocations` + `locationMatches`
   — попадание засчитывается по `file:line ± допуск`, а не по подстроке в заголовке. Нужно
   там, где разметка приходит из чужого репозитория: подстрочная сверка меряла бы совпадение

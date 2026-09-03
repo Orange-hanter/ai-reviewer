@@ -47,6 +47,6 @@
     "test": "node --test test/*.test.mjs",
     "eval": "node bin/pr-review-eval.mjs",
     "check": "npm test && npm run eval",
-    "benchmark:public": "REVIEW_GOLD_DIR=gold-public node bin/pr-review-gold.mjs --jsonl .ai-review/benchmark-public.jsonl && node bin/pr-review-benchmark.mjs .ai-review/benchmark-public.jsonl"
+    "benchmark:public": "REVIEW_PROFILE=profiles/public-benchmark.json REVIEW_GOLD_DIR=gold-public node bin/pr-review-gold.mjs --jsonl .ai-review/benchmark-public.jsonl && node bin/pr-review-benchmark.mjs .ai-review/benchmark-public.jsonl"
   }
 }

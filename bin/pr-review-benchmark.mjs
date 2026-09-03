@@ -87,8 +87,11 @@ async function main() {
   if (agg.recall.targets) {
     console.log(`title recall (substring): ${agg.recall.hits}/${agg.recall.targets} (${Math.round((agg.recall.rate || 0) * 100)}%)`);
   }
+  if (agg.locationCaseRecall?.cases) {
+    console.log(`location recall (кейсы, ≥1 попадание): ${agg.locationCaseRecall.hits}/${agg.locationCaseRecall.cases} (${Math.round((agg.locationCaseRecall.rate || 0) * 100)}%)`);
+  }
   if (agg.locationRecall?.targets) {
-    console.log(`location recall (file:line): ${agg.locationRecall.hits}/${agg.locationRecall.targets} (${Math.round((agg.locationRecall.rate || 0) * 100)}%)`);
+    console.log(`  · строже, по локациям: ${agg.locationRecall.hits}/${agg.locationRecall.targets} (${Math.round((agg.locationRecall.rate || 0) * 100)}%)`);
   }
   if (agg.precision.fpViolations) {
     console.log(`mustNotFind violations: ${agg.precision.fpViolations}`);

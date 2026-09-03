@@ -1275,8 +1275,28 @@ test('scoreGoldCase: mustFindLocations считается отдельно от 
   assert.equal(agg.locationRecall.targets, 2);
   assert.equal(agg.locationRecall.hits, 1);
   assert.equal(agg.locationRecall.rate, 0.5);
+  // заголовочная величина — по кейсам: один дефект, размазанный по двум строкам, не должен
+  // считаться наполовину найденным
+  assert.equal(agg.locationCaseRecall.cases, 1);
+  assert.equal(agg.locationCaseRecall.hits, 1);
+  assert.equal(agg.locationCaseRecall.rate, 1);
   // титульный recall не должен подхватывать локации
   assert.equal(agg.recall.targets, 0);
+});
+
+test('aggregateBenchmark: кейс без единого попадания не идёт в locationCaseRecall', () => {
+  const expect = { wouldBlock: true, mustFindLocations: [{ file: 'a.ts', lines: [1, 1] }] };
+  const miss = scoreGoldCase({ expect }, { wouldBlock: true, findings: [{ file: 'b.ts', line: 1 }] });
+  const hit = scoreGoldCase({ expect }, { wouldBlock: true, findings: [{ file: 'a.ts', line: 1 }] });
+  const agg = aggregateBenchmark([
+    { id: 'miss', type: 'tp', expect, score: miss, wouldBlock: true },
+    { id: 'hit', type: 'tp', expect, score: hit, wouldBlock: true },
+    // clean-контроль локаций не несёт и в знаменатель попадать не должен
+    { id: 'clean', type: 'clean', expect: { wouldBlock: false }, score: scoreGoldCase({ expect: { wouldBlock: false } }, { wouldBlock: false, findings: [] }), wouldBlock: false },
+  ]);
+  assert.equal(agg.locationCaseRecall.cases, 2, 'clean не в знаменателе');
+  assert.equal(agg.locationCaseRecall.hits, 1);
+  assert.equal(agg.locationCaseRecall.rate, 0.5);
 });
 
 test('scoreFromRecord: упавший кейс не считается пройденным', () => {
