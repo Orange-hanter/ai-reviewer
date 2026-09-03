@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src=".github/hero.svg" alt="ai-reviewer — детерминированный prescan, жюри специалистов, verifier, merge-гейт" width="100%">
+<img src=".github/hero.png" alt="ai-reviewer — code review that has to prove itself: prescan, jury, verifier, merge gate, MCP" width="100%">
 
 [![CI](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml)
 [![version](https://img.shields.io/badge/version-0.2.4-blue)](CHANGELOG.md)
