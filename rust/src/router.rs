@@ -41,7 +41,12 @@ fn path_regexes() -> &'static PathRegexes {
             r"(?i)^(?:app/)?(?:server|shared|client)/.+\.(?:ts|tsx|js|jsx|mjs|cjs)$",
         )
         .unwrap(),
-        code: regex::Regex::new(r"(?i)\.(?:ts|tsx|js|jsx|mjs|cjs|vue|svelte)$").unwrap(),
+        // Исходники любого языка — logic (паритет с lib/router.mjs: список из PR #17;
+        // только JS/TS-семейство отправляет не-JS репозитории в light без ревью).
+        code: regex::Regex::new(
+            r"(?i)\.(?:ts|tsx|js|jsx|mjs|cjs|cts|mts|vue|svelte|gjs|gts|go|py|pyi|rb|rake|php|java|kt|kts|scala|groovy|rs|c|h|cc|cpp|cxx|hpp|hxx|m|mm|cs|swift|ex|exs|erl|hrl|clj|cljs|dart|lua|pl|pm|r)$",
+        )
+        .unwrap(),
         config: regex::Regex::new(r"(?i)\.(?:yml|yaml|json|toml|sh|sql|env\.example)$").unwrap(),
     })
 }

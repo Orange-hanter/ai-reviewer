@@ -4,13 +4,22 @@
 //! Паритет с JS сохранён, включая:
 //! - `||`-семантику (0/''/null → fallback) в label/line/community/scope;
 //! - file_type: truthy и не 'code' → узел пропускается;
+//! - lineNumber: /(?:^|[:#])L?(\d+)(?::\d+)?$/ — строка, а не хвостовая колонка;
+//! - dropped-узлы: unsafe source_file и unparsed source_location считаются и пишутся
+//!   в warnings (молча терять узел нельзя);
+//! - god-узлы: id/файл+имя однозначны, голое имя при count > 1 понижается
+//!   с предупреждением «god node label is ambiguous», а не метится наугад;
 //! - confidence эджей (EXTRACTED/INFERRED/AMBIGUOUS → extracted/inferred/ambiguous,
 //!   иначе heuristic) и фильтр includeAmbiguous;
-//! - boundary-кандидатов: layout.appDir/layerDirs из профиля, module-префиксы
-//!   с чёрным списком (node_modules/vendor/dist/build/coverage); boundary для пути —
-//!   по самому длинному совпавшему префиксу (первый выигрывает при равенстве);
+//! - boundary-кандидатов: layout.appDir/layerDirs (слой только при parts > 2, иначе
+//!   parts[1] — файл), module-префиксы с чёрным списком (node_modules/vendor/dist/
+//!   build/coverage); boundary для пути — по самому длинному совпавшему префиксу
+//!   (первый выигрывает при равенстве);
 //! - отсечение сущностей ДО построения boundaries, рёбер — после сортировки по id;
-//! - контракты: implements/inherits из рёбер + entrypoint-дедуп по единому ключу;
+//! - рёбра дедуплицируются по stableId (одинаковые рёбра иначе удваивают fanIn);
+//! - контракты: implements/inherits из рёбер + entrypoint-дедуп по единому ключу,
+//!   при обрезке maxContracts первыми уходят entrypoint (rank-сортировка), затем
+//!   список пересортировывается по id;
 //! - testCases: путь похож на тест И kind function/method; line = entity.line || 1;
 //! - сортировки localeCompare (ICU root из structure_scip), дефолтный Array.sort —
 //!   побайтовый; stableId — stable_id из structure_scip.
@@ -20,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 use regex::Regex;
 use serde_json::{json, Map, Value};
 
-use crate::findings::{js_number_or_zero, js_to_string, js_truthy};
+use crate::findings::{js_number_or_zero, js_string_to_number, js_to_string, js_truthy};
 use crate::structure_scip::{locale_compare, normalize_repo_path, stable_id};
 
 const DEP_RELATIONS: &[&str] = &[
@@ -60,15 +69,32 @@ fn js_string(v: Option<&Value>) -> String {
 }
 
 fn line_number_re() -> Regex {
-    Regex::new(r"(?:^|:)L?([0-9]+)$").unwrap()
+    // /(?:^|[:#])L?(\d+)(?::\d+)?$/ — номер строки, а не хвостовая колонка:
+    // 'src/a.ts:10:5' → 10, 'src/a.ts#L10' → 10
+    Regex::new(r"(?:^|[:#])L?([0-9]+)(?::[0-9]+)?$").unwrap()
 }
 
-/// lineNumber: /(?:^|:)L?(\d+)$/ на String(value || '').
+/// lineNumber: /(?:^|[:#])L?(\d+)(?::\d+)?$/ на String(value || '').
 fn line_number(value: Option<&Value>) -> Value {
     let raw = string_or_empty(value);
     match line_number_re().captures(&raw) {
         Some(caps) => json!(caps.get(1).unwrap().as_str().parse::<u64>().unwrap_or(0)),
         None => Value::Null,
+    }
+}
+
+/// clampLimit из JS: Number(value); !isFinite → max; min(max(1, floor), max).
+/// Number(null) === 0, Number(true) === 1 — как в JS.
+pub fn clamp_limit(value: Option<&Value>, max: usize) -> usize {
+    let n = match value {
+        None => return max,
+        Some(Value::Null) => Some(0.0),
+        Some(Value::Bool(b)) => Some(u8::from(*b) as f64),
+        Some(v) => js_string_to_number(&js_to_string(v)),
+    };
+    match n {
+        Some(n) if n.is_finite() => (n.floor().max(1.0) as usize).min(max),
+        _ => max,
     }
 }
 
@@ -131,10 +157,18 @@ fn boundary_candidates(paths: &[String], layout: Option<&Value>) -> Vec<Value> {
     let mut found_keys: HashSet<String> = HashSet::new();
     for path in paths {
         let parts: Vec<&str> = path.split('/').collect();
-        if !app_dir.is_empty() && parts.first() == Some(&app_dir.as_str()) && parts.len() > 1 {
-            let layer = parts[1].to_string();
-            // !layout.layerDirs?.length || layerDirs.includes(layer)
-            let allowed = match layer_dirs {
+        // parts.len() > 2 обязателен: иначе parts[1] — файл (src/index.ts), а не слой
+        let layer = if !app_dir.is_empty()
+            && parts.first() == Some(&app_dir.as_str())
+            && parts.len() > 2
+        {
+            parts[1].to_string()
+        } else {
+            String::new()
+        };
+        // !layout.layerDirs?.length || layerDirs.includes(layer)
+        let layered = !layer.is_empty()
+            && match layer_dirs {
                 None | Some(Value::Null) => true,
                 Some(Value::Array(items)) => {
                     items.is_empty() || items.iter().any(|item| js_to_string(item) == layer)
@@ -142,21 +176,24 @@ fn boundary_candidates(paths: &[String], layout: Option<&Value>) -> Vec<Value> {
                 Some(Value::String(s)) => s.contains(&layer),
                 Some(other) => !js_truthy(other),
             };
-            if allowed {
-                let key = format!("layer:{layer}");
-                if found_keys.insert(key) {
-                    found.push(json!({
-                        "id": format!("boundary:layer:{layer}"),
-                        "kind": "layer",
-                        "name": layer,
-                        "paths": [format!("{app_dir}/{layer}")],
-                        "source": "profile",
-                        "confidence": "exact",
-                        "evidence": [format!("profile:layout:{app_dir}/{layer}")],
-                    }));
-                }
+        if layered {
+            let key = format!("layer:{layer}");
+            if found_keys.insert(key) {
+                found.push(json!({
+                    "id": format!("boundary:layer:{layer}"),
+                    "kind": "layer",
+                    "name": layer,
+                    "paths": [format!("{app_dir}/{layer}")],
+                    "source": "profile",
+                    "confidence": "exact",
+                    "evidence": [format!("profile:layout:{app_dir}/{layer}")],
+                }));
             }
-        } else if parts.len() > 1 {
+            continue;
+        }
+        // путь под appDir с незаявленным слоем раньше проваливался мимо обеих веток
+        // и молча оказывался в boundary:repository — теперь у него остаётся модуль
+        if parts.len() > 1 {
             let module = parts[0].to_string();
             if !excluded.contains(&module.as_str()) {
                 let key = format!("module:{module}");
@@ -220,6 +257,7 @@ pub struct GraphifyOptions {
     pub include_ambiguous: bool,
     pub max_entities: usize,
     pub max_edges: usize,
+    pub max_contracts: usize,
 }
 
 impl Default for GraphifyOptions {
@@ -231,6 +269,7 @@ impl Default for GraphifyOptions {
             include_ambiguous: false,
             max_entities: 5000,
             max_edges: 15000,
+            max_contracts: 5000,
         }
     }
 }
@@ -274,16 +313,41 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
         }
     }
 
-    let gods: HashSet<String> = as_array(get_opt(options.analysis.as_ref(), "gods"))
-        .iter()
-        .map(|god| match god {
+    // god-узел, адресованный id или файлом, однозначен; голое имя — нет:
+    // неоднозначное имя понижается с предупреждением, а не метится наугад.
+    let mut god_ids: HashSet<String> = HashSet::new();
+    let mut god_paths: HashSet<String> = HashSet::new();
+    let mut god_labels: HashSet<String> = HashSet::new();
+    for god in as_array(get_opt(options.analysis.as_ref(), "gods")) {
+        let label = match god {
             Value::String(s) => s.to_lowercase(),
             other => string_or_empty(other.get("label")).to_lowercase(),
-        })
-        .filter(|s| !s.is_empty())
-        .collect();
+        };
+        if let Value::Object(o) = god {
+            if let Some(id) = o.get("id").filter(|v| !matches!(v, Value::Null)) {
+                god_ids.insert(js_to_string(id));
+                continue;
+            }
+            if !label.is_empty() {
+                if let Some(src) = o.get("source_file").filter(|v| js_truthy(v)) {
+                    match normalize_repo_path(&js_to_string(src)) {
+                        Ok(p) => {
+                            god_paths.insert(format!("{p}\0{label}"));
+                            continue;
+                        }
+                        Err(_) => { /* небезопасный путь — понижаем до голого имени ниже */ }
+                    }
+                }
+            }
+        }
+        if !label.is_empty() {
+            god_labels.insert(label);
+        }
+    }
 
     let mut candidates: Vec<Map<String, Value>> = Vec::new();
+    let mut skipped_unsafe_path = 0usize;
+    let mut unparsed_location = 0usize;
     for node in nodes {
         if matches!(node, Value::Null) || node.get("id").is_none() {
             continue;
@@ -299,7 +363,10 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
         let raw_path = string_or_empty(node.get("source_file"));
         let path = match normalize_repo_path(&raw_path) {
             Ok(p) => p,
-            Err(_) => continue,
+            Err(_) => {
+                skipped_unsafe_path += 1;
+                continue;
+            }
         };
         if !path_in_scope(&path, &options.scope) {
             continue;
@@ -324,15 +391,23 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
         } else {
             "heuristic"
         };
+        let line = line_number(node.get("source_location"));
+        // String(node.source_location ?? '').trim() — null/undefined → '', иначе голый String
+        let location_raw = match node.get("source_location") {
+            None | Some(Value::Null) => String::new(),
+            Some(v) => js_to_string(v),
+        };
+        if line.is_null() && !location_raw.trim().is_empty() {
+            unparsed_location += 1;
+        }
         let mut candidate = Map::new();
         candidate.insert("graphId".into(), json!(graph_id));
         candidate.insert("label".into(), json!(label));
         candidate.insert("qualifiedName".into(), qualified_name);
         candidate.insert("kind".into(), json!(kind));
         candidate.insert("path".into(), json!(path));
-        candidate.insert("line".into(), line_number(node.get("source_location")));
+        candidate.insert("line".into(), line);
         candidate.insert("community".into(), community);
-        candidate.insert("isGodNode".into(), json!(gods.contains(&label.to_lowercase())));
         candidate.insert("confidence".into(), json!(confidence));
         candidate.insert("evidence".into(), json!([format!("graphify:node:{graph_id}")]));
         candidates.push(candidate);
@@ -352,12 +427,30 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
             b.get("label").and_then(Value::as_str).unwrap_or(""),
         ))
     });
-    let truncated_entities = candidates.len() > options.max_entities;
-    let kept = &candidates[..candidates.len().min(options.max_entities)];
     let mut warnings: Vec<String> = Vec::new();
+    if skipped_unsafe_path > 0 {
+        warnings.push(format!("{skipped_unsafe_path} node(s) skipped: unsafe source_file path"));
+    }
+    if unparsed_location > 0 {
+        warnings.push(format!("{unparsed_location} node(s) kept without a line: unparsed source_location"));
+    }
+    let truncated_entities = candidates.len() > options.max_entities;
     if truncated_entities {
         warnings.push(format!("entities truncated at {}", options.max_entities));
     }
+    let kept = &candidates[..candidates.len().min(options.max_entities)];
+
+    // имена среди выживших: голое имя god-узла однозначно только при count === 1
+    let mut label_counts: HashMap<String, usize> = HashMap::new();
+    for candidate in kept {
+        let key = candidate
+            .get("label")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_lowercase();
+        *label_counts.entry(key).or_default() += 1;
+    }
+    let mut ambiguous_gods: HashMap<String, usize> = HashMap::new();
 
     let kept_paths: Vec<String> = {
         let mut seen: HashSet<String> = HashSet::new();
@@ -379,6 +472,28 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
             sid_num(candidate.get("line")),
         ]);
         let boundary_id = boundary_for_path(&path, &boundaries);
+        let graph_id = string_or_empty(candidate.get("graphId"));
+        let label_lower = candidate
+            .get("label")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_lowercase();
+        let is_god_node = if god_ids.contains(&graph_id) {
+            true
+        } else if god_paths.contains(&format!("{path}\0{label_lower}")) {
+            true
+        } else if !god_labels.contains(&label_lower) {
+            false
+        } else {
+            let count = label_counts.get(&label_lower).copied().unwrap_or(0);
+            if count > 1 {
+                // имя встречается в нескольких файлах — метить наугад нельзя, понижаем
+                ambiguous_gods.insert(label_lower.clone(), count);
+                false
+            } else {
+                true
+            }
+        };
         let mut entity = Map::new();
         entity.insert("observedId".into(), json!(observed_id));
         entity.insert("lineageId".into(), json!(observed_id));
@@ -391,7 +506,7 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
         entity.insert("endLine".into(), Value::Null);
         entity.insert("signature".into(), Value::Null);
         entity.insert("community".into(), candidate.get("community").cloned().unwrap_or(Value::Null));
-        entity.insert("isGodNode".into(), candidate.get("isGodNode").cloned().unwrap_or(Value::Bool(false)));
+        entity.insert("isGodNode".into(), json!(is_god_node));
         entity.insert("confidence".into(), candidate.get("confidence").cloned().unwrap_or(Value::Null));
         entity.insert("evidence".into(), candidate.get("evidence").cloned().unwrap_or(Value::Null));
         entity.insert(
@@ -406,7 +521,14 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
         entities.push(value);
     }
 
+    let mut ambiguous_sorted: Vec<(String, usize)> = ambiguous_gods.into_iter().collect();
+    ambiguous_sorted.sort_by(|a, b| locale_compare(&a.0, &b.0));
+    for (label, count) in ambiguous_sorted {
+        warnings.push(format!("god node label is ambiguous: {label} ({count} entities)"));
+    }
+
     let mut dependency_candidates: Vec<Value> = Vec::new();
+    let mut seen_dependency_ids: HashSet<String> = HashSet::new();
     for (i, edge) in links.iter().enumerate() {
         if matches!(edge, Value::Null) {
             continue;
@@ -433,8 +555,13 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
             (Some(a), Some(b)) => !matches!(a, Value::Null) && !matches!(b, Value::Null) && a != b,
             _ => false,
         };
+        let dependency_id = stable_id("edge", &[from_id.into(), to_id.into(), relation.clone()]);
+        // одинаковые рёбра дают один и тот же stableId; без дедупа удваивают fanIn
+        if !seen_dependency_ids.insert(dependency_id.clone()) {
+            continue;
+        }
         dependency_candidates.push(json!({
-            "id": stable_id("edge", &[from_id.into(), to_id.into(), relation.clone()]),
+            "id": dependency_id,
             "from": from_id,
             "to":to_id,
             "relation": relation,
@@ -510,7 +637,28 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
             "evidence": evidence,
         }));
     }
+    // при обрезке первыми уходят эвристические entrypoint, доказанные контракты остаются
+    let contract_rank = |v: &Value| {
+        if v.get("kind").and_then(Value::as_str) == Some("entrypoint") {
+            1
+        } else {
+            0
+        }
+    };
     contracts.sort_by(|a, b| {
+        contract_rank(a)
+            .cmp(&contract_rank(b))
+            .then(locale_compare(
+                a.get("id").and_then(Value::as_str).unwrap_or(""),
+                b.get("id").and_then(Value::as_str).unwrap_or(""),
+            ))
+    });
+    let truncated_contracts = contracts.len() > options.max_contracts;
+    if truncated_contracts {
+        warnings.push(format!("contracts truncated at {}", options.max_contracts));
+    }
+    let mut kept_contracts = contracts[..contracts.len().min(options.max_contracts)].to_vec();
+    kept_contracts.sort_by(|a, b| {
         locale_compare(
             a.get("id").and_then(Value::as_str).unwrap_or(""),
             b.get("id").and_then(Value::as_str).unwrap_or(""),
@@ -553,11 +701,14 @@ pub fn extract_graphify_facts(raw: Option<&Value>, options: &GraphifyOptions) ->
     let mut out = Map::new();
     out.insert("boundaries".into(), json!(boundaries));
     out.insert("entities".into(), json!(entities));
-    out.insert("contracts".into(), json!(contracts));
+    out.insert("contracts".into(), json!(kept_contracts));
     out.insert("dependencies".into(), json!(dependencies));
     out.insert("testCases".into(), json!(test_cases));
     out.insert("warnings".into(), json!(warnings));
-    out.insert("truncated".into(), json!(truncated_entities || truncated_edges));
+    out.insert(
+        "truncated".into(),
+        json!(truncated_entities || truncated_edges || truncated_contracts),
+    );
     out.insert(
         "capabilities".into(),
         json!({

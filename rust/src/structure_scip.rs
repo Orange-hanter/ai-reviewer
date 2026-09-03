@@ -128,6 +128,9 @@ fn posix_normalize(path: &str) -> String {
         }
     }
     let out = parts.join("/");
+    if out.is_empty() {
+        return ".".to_string();
+    }
     let trailing = path.len() > 1 && path.ends_with('/') && out != "..";
     if trailing {
         format!("{out}/")

@@ -141,6 +141,8 @@ struct RawRecord {
     functions: Vec<(f64, String)>,
     function_hits: Vec<(String, f64)>,
     branches: Vec<RawBranch>,
+    // итоговые счётчики, объявленные писателем отчёта (LF/LH/FNF/FNH/BRF/BRH)
+    declared: Map<String, Value>,
 }
 
 struct RawBranch {
@@ -168,6 +170,64 @@ fn is_integer_str(s: &str) -> Option<f64> {
     } else {
         None
     }
+}
+
+/// DECLARED_KEYS из JS: префикс объявленного писателем счётчика → (section, kind).
+/// Порядок проверки в цепочке else-if важен: FN:/FNDA: перехватываются раньше,
+/// сюда доходят только LF:/LH:/FNF:/FNH:/BRF:/BRH:.
+fn declared_section_kind(line: &str) -> Option<(&'static str, &'static str, usize)> {
+    let (prefix, _rest) = line.split_once(':')?;
+    let (section, kind) = match prefix {
+        "LF" => ("lines", "found"),
+        "LH" => ("lines", "hit"),
+        "FNF" => ("functions", "found"),
+        "FNH" => ("functions", "hit"),
+        "BRF" => ("branches", "found"),
+        "BRH" => ("branches", "hit"),
+        _ => return None,
+    };
+    Some((section, kind, prefix.len() + 1))
+}
+
+/// declaredMismatches из JS: сверка «посчитали сами» против «объявил писатель».
+/// Значения берутся из собираемого computed-объекта (found/hit по секциям).
+fn declared_mismatches(
+    declared: &Map<String, Value>,
+    computed: &Map<String, Value>,
+) -> Vec<Value> {
+    let ambiguous = computed
+        .get("ambiguousFunctionNames")
+        .and_then(Value::as_array)
+        .is_some_and(|a| !a.is_empty());
+    let mut out = Vec::new();
+    for (section, values) in declared.iter() {
+        let Some(values) = values.as_object() else { continue };
+        for (kind, declared_v) in values.iter() {
+            let declared_n = declared_v.as_f64().unwrap_or(f64::NAN);
+            let actual = computed
+                .get(section)
+                .and_then(|m| m.get(kind))
+                .and_then(Value::as_f64);
+            let Some(actual) = actual else { continue };
+            if !declared_n.is_finite() || !actual.is_finite() {
+                continue;
+            }
+            // Функции с неразрешённой привязкой не попадают в наш hit по построению,
+            // поэтому по FNH такой файл сверять нечем.
+            if section == "functions" && kind == "hit" && ambiguous {
+                continue;
+            }
+            if declared_n != actual {
+                out.push(json!({
+                    "section": section,
+                    "kind": kind,
+                    "declared": num_json(declared_n),
+                    "actual": num_json(actual),
+                }));
+            }
+        }
+    }
+    out
 }
 
 /// finishRecord из JS: привязка FNDA к FN (по имени или по порядку записей),
@@ -306,6 +366,11 @@ fn finish_record(record: RawRecord) -> Value {
     out.insert("lines".into(), Value::Object(lines_map));
     out.insert("functions".into(), Value::Object(functions_map));
     out.insert("branches".into(), Value::Object(branches_map));
+    // порядок ключей как в JS (от него зависит canonicalJson-хеш lcov);
+    // сверка считается до move полей record
+    let mismatches = declared_mismatches(&record.declared, &out);
+    out.insert("declared".into(), json!(record.declared));
+    out.insert("declaredMismatches".into(), json!(mismatches));
     Value::Object(out)
 }
 
@@ -333,6 +398,7 @@ pub fn parse_lcov(text: &str, repo_root: &str) -> Result<Map<String, Value>> {
                         functions: Vec::new(),
                         function_hits: Vec::new(),
                         branches: Vec::new(),
+                        declared: Map::new(),
                     });
                 }
                 Err(error) => {
@@ -385,6 +451,20 @@ pub fn parse_lcov(text: &str, repo_root: &str) -> Result<Map<String, Value>> {
                     if hits.is_finite() {
                         record.function_hits.push((name.to_string(), hits));
                     }
+                }
+            }
+        } else if let Some((section, kind, prefix_len)) = declared_section_kind(line) {
+            // Number.isInteger(value) && value >= 0; Number('') === 0, как в JS
+            if let Some(value) = js_string_to_number(&line[prefix_len..]) {
+                if value.is_finite() && value.fract() == 0.0 && value >= 0.0 {
+                    let section_map = record
+                        .declared
+                        .entry(section.to_string())
+                        .or_insert_with(|| json!({}));
+                    section_map
+                        .as_object_mut()
+                        .expect("or_insert_with(json!({}))")
+                        .insert(kind.to_string(), num_json(value));
                 }
             }
         } else if line.starts_with("BRDA:") {
@@ -453,6 +533,26 @@ pub fn parse_lcov(text: &str, repo_root: &str) -> Result<Map<String, Value>> {
             warnings.push(format!(
                 "unresolvable LCOV function names in {path}: {}",
                 names.join(", ")
+            ));
+        }
+        // Расхождение с объявленными счётчиками: наш счёт и ответ писателя разошлись,
+        // значит модель формата неверна для этого файла — молчать об этом нельзя.
+        let mismatches = file
+            .get("declaredMismatches")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for m in &mismatches {
+            let section = m.get("section").and_then(Value::as_str).unwrap_or("");
+            let kind = m.get("kind").and_then(Value::as_str).unwrap_or("");
+            let declared = m.get("declared").and_then(Value::as_f64).unwrap_or(0.0);
+            let actual = m.get("actual").and_then(Value::as_f64).unwrap_or(0.0);
+            let path = file.get("path").and_then(Value::as_str).unwrap_or("");
+            warnings.push(format!(
+                "LCOV declared/computed mismatch in {path}: {section}.{kind} \
+                 declared={} computed={}",
+                num_json(declared),
+                num_json(actual)
             ));
         }
     }
