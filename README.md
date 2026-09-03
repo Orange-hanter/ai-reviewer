@@ -94,6 +94,43 @@ flowchart LR
 
 Подробно — [docs/architecture.md](docs/architecture.md).
 
+## За пределами PR: анализ всей кодовой базы
+
+Второй контур движка — `pr-review-structure`: вне-PR анализ, который **не трогает
+merge-гейт**, но строит доказуемую картину всего репозитория. Из независимых провайдеров —
+граф кода (Graphify), точные символы и ссылки (SCIP), покрытие (LCOV), мутационные и
+property-отчёты — собираются версионируемые артефакты:
+
+- **structure-facts** — границы, сущности, контракты, зависимости, инвентарь тестов;
+- **structure-assessment** — статусы сценариев (`covered` / `partial` / `missing` /
+  `unverifiable`) только на доказательствах: агрегатное покрытие файла не доказывает
+  error/boundary-сценарий;
+- **structure-drift** — расхождение снимков между коммитами;
+- **receipts** — неизменяемый отпечаток происхождения каждого куска evidence.
+
+Приоритет evidence детерминирован: SCIP/compiler exact → Graphify EXTRACTED →
+INFERRED → AMBIGUOUS. Провайдеры никогда не выносят вердикт — статусы считает
+детерминированный движок оценки.
+
+## Симбиоз с агентами
+
+Ревьюер и кодящие агенты питаются одним и тем же снимком структуры — через
+MCP-сервер `pr-review-structure-mcp` и его метод `structure_context`:
+
+- агент запрашивает контекст **по пину** (`headSha` или `snapshotFingerprint` снимка
+  facts) — никакого неявного «latest»: планирование и правки идут на том же состоянии
+  кода, что видело ревью;
+- ответ — ограниченный бюджетом токенов BFS-срез: релевантные контракты, зависимости,
+  сценарии, подсказки и файлы, а не простыня всего графа;
+- обратная связь замыкается: 👎 на находке становится FP-паттерном и eval-fixture,
+  а подтверждённые пробелы в evidence — задачами для агента.
+
+```json
+{ "mcpServers": { "ai-reviewer-structure": { "command": "npx", "args": ["pr-review-structure-mcp"] } } }
+```
+
+Статусы, приоритеты evidence, cod-doc-интеграция — [docs/structure.md](docs/structure.md).
+
 ## Быстрый старт
 
 ```bash
@@ -182,6 +219,7 @@ ops/ai-review/profile.json   # профиль проекта
 | [profiles.md](docs/profiles.md) | Профиль проекта: все поля и зачем каждое |
 | [configuration.md](docs/configuration.md) | CLI и все env-переменные с дефолтами |
 | [integration.md](docs/integration.md) | Подключение потребителя, пин, требования |
+| [structure.md](docs/structure.md) | Вне-PR анализ кодовой базы, MCP-контекст для агентов |
 | [false-positives.md](docs/false-positives.md) | Семейства FP, встроенные защиты, петля обучения |
 | [model-tuning.md](docs/model-tuning.md) | Роли моделей, температуры, чанки, reasoning effort |
 
