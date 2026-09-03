@@ -55,6 +55,20 @@ npx pr-review-structure \
 
 At least one of Graphify, SCIP or LCOV must be readable. Missing optional providers produce warnings and lower the evidence ceiling.
 
+## Limits and honesty of the output
+
+Entities, dependencies and contracts are capped at the `maxItems` values declared in
+`schemas/structure-facts.v1.schema.json`. `REVIEW_STRUCTURE_MAX_ENTITIES` and
+`REVIEW_STRUCTURE_MAX_EDGES` can lower those caps but not raise them: the producer must not be
+able to emit facts its own schema rejects. When a cap bites, the run reports it in `warnings`
+and sets `provenance.truncated`. Contracts are cut weakest-evidence-first, so heuristic
+`entrypoint` candidates go before proven `implements`/`inherits` contracts.
+
+Anything dropped leaves a trace. Nodes skipped for an unsafe `source_file`, unparsed
+`source_location` values and god-node labels that resolve to more than one entity are counted
+in `warnings` rather than discarded silently. The generated `code-structure.md` states how many
+hints, scenarios and hotspots it omitted — the JSON assessment always holds the full set.
+
 Exit codes:
 
 - `0`: artifacts written, including degraded partial analysis;
