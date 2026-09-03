@@ -18,6 +18,7 @@ pub mod github;
 pub mod json_repair;
 pub mod llm;
 pub mod prompt;
+pub mod report;
 pub mod router;
 pub mod specialists;
 pub mod structure_assessments;
