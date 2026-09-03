@@ -381,18 +381,33 @@ const cleanWant = cleanIdx >= 0 ? Number(args[cleanIdx + 1] || 2) : 0;
 const valueIdxs = new Set([emitIdx >= 0 ? emitIdx + 1 : -1, cleanIdx >= 0 ? cleanIdx + 1 : -1]);
 const repos = args.filter((a, i) => !a.startsWith('--') && !valueIdxs.has(i));
 
+const force = args.includes('--force');
+
 if (!repos.length) {
-  console.error('Usage: pr-review-gold-harvest <owner/repo…> [--emit <dir>] [--clean <N per repo>]');
+  console.error(`Usage:
+  pr-review-gold-harvest <owner/repo…> [--emit <dir>] [--clean <N>] [--force]
+  pr-review-gold-harvest --validate <dir>`);
   process.exit(1);
 }
 
 let emitted = 0;
+let skipped = 0;
 
 async function emit(candidate) {
   if (!emitDir) return;
   const dir = join(emitDir, candidate.id);
+  const file = join(dir, 'meta.json');
+  // Мета кейса может быть отредактирована руками (уточнённые локации, note разметки).
+  // Повторная добыча не должна её молча затирать — для этого есть --force.
+  if (!force) {
+    try {
+      await readFile(file, 'utf8');
+      skipped++;
+      return;
+    } catch { /* файла нет — пишем */ }
+  }
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, 'meta.json'), `${JSON.stringify(candidate, null, 2)}\n`, 'utf8');
+  await writeFile(file, `${JSON.stringify(candidate, null, 2)}\n`, 'utf8');
   emitted++;
 }
 
@@ -414,4 +429,7 @@ for (const repo of repos) {
     }
   }
 }
-if (emitDir) console.log(`\n[harvest] записано заготовок: ${emitted} → ${emitDir}`);
+if (emitDir) {
+  console.log(`\n[harvest] записано заготовок: ${emitted} → ${emitDir}`);
+  if (skipped) console.log(`[harvest] пропущено (мета уже есть, --force перезапишет): ${skipped}`);
+}
