@@ -9,7 +9,7 @@ import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs'
 import { createGraphifyClient } from './lib/graphify.mjs';
 import { createGithubClient } from './lib/github.mjs';
 import { createReviewEngine } from './lib/engine.mjs';
-import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings } from './lib/findings.mjs';
+import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings, attachFingerprints } from './lib/findings.mjs';
 import { BLAST_FINDING_SOURCE } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey } from './lib/actionability.mjs';
@@ -438,6 +438,9 @@ export function createReviewPipeline(cfg, deps = {}) {
           patternsFile: cfg.feedback?.patternsFile, log,
         });
         allFindings = gateResolution.findings;
+        // Отпечатки до экспорта: артефакт этой ветки (LLM-аутедж, находки только от prescan)
+        // тоже уходит потребителю и тоже должен дедуплицироваться по коду, а не по заголовку.
+        attachFingerprints(allFindings, files);
         const prescanBlockers = gateResolution.blockers;
         const fpRemoved = gateResolution.fpRemoved;
         if (fpRemoved.length) {
@@ -557,6 +560,9 @@ export function createReviewPipeline(cfg, deps = {}) {
         },
       });
       allFindings = gateResolution.findings;
+      // Один расчёт отпечатков на прогон — до того, как набор разойдётся по футеру sticky,
+      // Δ-блоку и артефакту экспорта: все трое обязаны показывать одну величину.
+      attachFingerprints(allFindings, files);
       const blockerClusters = gateResolution.clusters.filter((g) => g[0]?.consensusBlock);
       const blockers = gateResolution.blockers;
       const fpRemoved = gateResolution.fpRemoved;

@@ -7,7 +7,7 @@ import { writeFile, readFile, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const { createReviewPipeline, loadReviewConfig, runGateResolution } = await import('../index.mjs');
+const { createReviewPipeline, loadReviewConfig, runGateResolution, MARKERS } = await import('../index.mjs');
 
 const ENV = {
   OLLAMA_API_KEY: 'k',
@@ -256,6 +256,49 @@ test('pipeline: fail-closed пишет llm/gate observability и пингует 
     assert.equal(gate?.wouldBlock, true);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('export R9: fp/verifierStatus/actionabilityScore в артефакте, fp совпадает с футером sticky', async () => {
+  // Регресс, ради которого тест написан: `fp` считался только внутри buildSummary — в список
+  // для футера. В артефакт уходил тот же массив находок, но без отпечатка, и потребитель
+  // (cod-doc ingest) откатывался на дедуп по заголовку: переформулированная находка на той же
+  // строке считалась новой.
+  const findings = [
+    { file: 'foo.ts', line: 3, severity: 'critical', title: 'реальный баг', body: 'npe', confidence: 0.9 },
+    { file: 'foo.ts', line: 2, severity: 'minor', title: 'магическое число', body: '', confidence: 0.9, suggestion: 'const B = 3' },
+  ];
+  const reviews = ['m1', 'm2'].map((model) => ({
+    model, summary: 's', verdict: 'changes_requested',
+    findings: findings.map((f) => ({ ...f, model })),
+  }));
+  const verifyFindings = async (candidates) => candidates.map((_, i) => ({ candidateIndex: i, decision: 'verified' }));
+  const exportDir = await mkdtemp(join(tmpdir(), 'pr-review-export-fp-'));
+  try {
+    const { calls } = await runPipeline({
+      diff: CODE_DIFF, reviews, verifyFindings,
+      env: { REVIEW_EXPORT: '1', REVIEW_EXPORT_DIR: exportDir, REVIEW_VERIFIER: '1' },
+    });
+    const payload = JSON.parse(await readFile(join(exportDir, 'orakul-ai-review.json'), 'utf8'));
+    assert.equal(payload.version, 2, 'версия артефакта поднята вместе с полями');
+
+    const blocker = payload.findings.find((f) => f.severity === 'critical');
+    assert.ok(blocker.fp, 'отпечаток кода в артефакте');
+    assert.equal(blocker.verifierStatus, 'verified', 'вердикт verifier доезжает до артефакта');
+    assert.ok(Number.isFinite(blocker.actionabilityScore), 'скор есть и у блокера, не только у поднятой advisory');
+
+    const footerRaw = MARKERS.dataRe.exec(calls.upsertSticky[0]);
+    assert.ok(footerRaw, 'машинный футер в sticky');
+    const footerFp = new Map(
+      JSON.parse(footerRaw[1].trim()).findings.map((f) => [`${f.file}:${f.line}`, f.fp]),
+    );
+    assert.ok(footerFp.size, 'футер несёт отпечатки');
+    for (const f of payload.findings) {
+      assert.equal(f.fp, footerFp.get(`${f.file}:${f.line}`),
+        'артефакт и футер показывают ОДИН отпечаток: иначе carry-over и дедуп потребителя разъедутся');
+    }
+  } finally {
+    await rm(exportDir, { recursive: true, force: true });
   }
 });
 
