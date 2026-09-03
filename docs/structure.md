@@ -120,6 +120,28 @@ by later MCP calls.
 
 There is no implicit “latest” for planning or fixing. The response is a bounded BFS slice with fingerprints, temporal alignment, relevant contracts, dependencies, scenarios, hints and suggested files.
 
+### Confinement: what the server is allowed to read
+
+`factsPath` and `assessmentPath` arrive **from the client**, so the server treats them as
+untrusted input and never reads them as given. Both are resolved through
+`resolveContainedPath` against a single allowed root:
+
+| | |
+|---|---|
+| Root | `STRUCTURE_MCP_ROOT`, or the process working directory when it is unset |
+| Escape attempt | throws `path escapes allowed root: <path>` — the call fails, nothing is read |
+| Symlinks | resolved with `realpath` **before** the containment check, so a link pointing outside the root does not get through |
+| Missing file | containment is still checked against the nearest existing ancestor; only if that ancestor is inside the root does the original `ENOENT` propagate — an absent path outside the root reports the escape, not the absence |
+
+Two consequences worth stating plainly:
+
+- **Set `STRUCTURE_MCP_ROOT` explicitly** when the server is not launched from the
+  repository root. The fallback is the working directory, so an agent started elsewhere
+  silently gets a different — possibly wider — root than intended.
+- The root bounds **reading of the artifacts**, not the content of the answer. Facts and
+  assessment written outside the root are simply unreachable; put the export directory
+  inside the root you allow.
+
 Example MCP configuration:
 
 ```json
@@ -127,7 +149,8 @@ Example MCP configuration:
   "mcpServers": {
     "ai-reviewer-structure": {
       "command": "npx",
-      "args": ["pr-review-structure-mcp"]
+      "args": ["pr-review-structure-mcp"],
+      "env": { "STRUCTURE_MCP_ROOT": "/abs/path/to/repo" }
     }
   }
 }
