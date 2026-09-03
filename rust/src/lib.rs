@@ -8,4 +8,5 @@
 //! findings.json из fixtures/). Логика сравнения появится в Фазе 1
 //! после порта diff/findings из lib/*.mjs.
 
+pub mod diff;
 pub mod fixtures;
