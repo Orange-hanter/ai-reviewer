@@ -405,8 +405,13 @@ test('actionability: лимит инлайна берёт самые доказ�
 });
 
 test('auto-triage: поднятую в строку advisory бот не резолвит молча', () => {
-  const promoted = { file: 'server/auth.ts', line: 10, severity: 'minor', actionabilityScore: 6 };
-  const plain = { file: 'server/auth.ts', line: 30, severity: 'minor' };
+  const promoted = {
+    file: 'server/auth.ts', line: 10, severity: 'minor', actionabilityScore: 6, actionabilityPromoted: true,
+  };
+  // Скор есть и у неподнятой находки (он уходит в артефакт экспорта): триаж обязан смотреть
+  // на флаг. Проверка на `Number.isFinite(actionabilityScore)` исключила бы из авто-резолва
+  // вообще всё и тихо выключила бы фичу.
+  const plain = { file: 'server/auth.ts', line: 30, severity: 'minor', actionabilityScore: 2 };
   const ctx = buildTriageContext({
     allFindings: [promoted, plain], blockers: [], blockOn: ['critical', 'major'],
     changedPaths: [], headSha: 'abc',
