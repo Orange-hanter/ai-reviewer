@@ -3,13 +3,13 @@
 <img src=".github/hero.svg" alt="ai-reviewer — детерминированный prescan, жюри специалистов, verifier, merge-гейт" width="100%">
 
 [![CI](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml)
-![version](https://img.shields.io/badge/version-0.2.4-blue)
-![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)
-![deps](https://img.shields.io/badge/dependencies-0-success)
-![license](https://img.shields.io/badge/license-UNLICENSED-lightgrey)
+[![version](https://img.shields.io/badge/version-0.2.4-blue)](CHANGELOG.md)
+[![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
+[![deps](https://img.shields.io/badge/dependencies-0-success)](package.json)
+[![license](https://img.shields.io/badge/license-UNLICENSED-lightgrey)](#лицензия)
 
-**Дифф → blast-radius по графу кода → детерминированный prescan → жюри из трёх специалистов →
-verifier → inline-замечания и один живой sticky-отчёт в PR.**
+**AI-ревью, которое шумит, хуже отсутствия ревью.<br>
+ai-reviewer делает находку <i>доказуемой</i> — и даёт человеку и LLM-агенту один общий, аудируемый контур правды о коде.**
 
 [Архитектура](docs/architecture.md) · [Структура и сценарии](docs/structure.md) · [Профиль проекта](docs/profiles.md) · [Интеграция](docs/integration.md) · [Конфигурация](docs/configuration.md)
 
@@ -17,12 +17,30 @@ verifier → inline-замечания и один живой sticky-отчёт 
 
 ---
 
-Merge блокируется **только на подтверждённых** `critical`/`major`: находка обязана пережить
-опровержение жюри и второй проход независимой модели. Инфра-сбои merge не блокируют.
+Дифф → blast-radius по графу кода → детерминированный prescan → жюри из трёх специалистов →
+verifier → inline-замечания и один живой sticky-отчёт в PR. Merge блокируется **только на
+подтверждённых** `critical`/`major`: находка обязана пережить опровержение жюри и второй
+проход независимой модели. Инфра-сбои merge не блокируют.
 
-Движок ничего не знает о конкретном репозитории — маркеры комментариев, правила проекта для
-промпта, раскладка каталогов, scope правил и пути данных приходят из
-[профиля](docs/profiles.md), одного JSON-файла на стороне потребителя.
+## Возможности
+
+- **Двое независимых судей на каждую находку.** Жюри опровергает претензии специалистов,
+  verifier доказывает кандидата по коду. Нет вердикта — находка понижается, а не блокирует.
+- **Детерминированный prescan.** eslint и ast-grep проходят первыми: их находки идут в гейт
+  и в промпт как «уже сказано» — LLM не тратит бюджет на то, что считается точно.
+- **Blast-radius по графу кода.** Ревьюер видит, кто зависит от изменённых символов
+  **вне диффа**, а не только сами правки.
+- **Маршрут по доказуемости, а не по ярлыку.** prescan, вердикт verifier'а, повторяемость,
+  консенсус, чувствительная зона — severity от модели само по себе ничего не решает.
+- **Память между прогонами.** Sticky несёт машинный футер с отпечатками кода и историей:
+  починенное снимается, перенесённое не переоткрывается новыми словами, Δ-блок показывает
+  разницу прогонов.
+- **Петля обучения на FP.** 👎 или метка → журнал → промоут в FP-паттерн **и** eval-fixture,
+  который держит регрессию. Ошибка не повторяется из PR в PR.
+- **Ноль зависимостей.** Node ≥ 22 и всё: `npm install` не нужен, движок пинится по тегу
+  или SHA и никогда не исполняется из кода PR.
+- **Всё специфичное — в профиле.** Маркеры, правила проекта, раскладка каталогов, пути
+  данных — один JSON на стороне потребителя; без профиля движок не выдумывает архитектуру.
 
 ## Что видит разработчик
 
