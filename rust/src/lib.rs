@@ -10,3 +10,4 @@
 
 pub mod diff;
 pub mod fixtures;
+pub mod json_repair;

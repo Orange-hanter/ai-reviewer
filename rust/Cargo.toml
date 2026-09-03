@@ -12,7 +12,13 @@ publish = false
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+# preserve_order — порядок ключей как в JS (insertion order Map).
+# arbitrary_precision — числа хранятся как в исходном тексте: иначе serde_json
+#   падает на переполнении (1e999), а JS даёт Infinity; при повторном JSON.parse
+#   на стороне JS round-trip значение совпадает с прямым JSON.parse.
+# unbounded_depth — лимит вложенности 128 у serde_json, у V8 его нет; в json_repair
+#   поверх стоит собственный итеративный depth-guard (см. MAX_NESTING_DEPTH).
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision", "unbounded_depth"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 regex = "1"
