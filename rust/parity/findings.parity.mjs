@@ -20,8 +20,9 @@
  *   4. сравнение log-сообщений для дедупа, carry-over и FP-фильтра.
  *
  * Сознательно НЕ сравнивается: FP-regex-матчинг (в JS в обеих ветках — JS lookahead
- * не портирован, см. шапку lib/findings.mjs) и createFindingsFormatter/classify
- * (зависит от непортированного routeFindings).
+ * не портирован, см. шапку lib/findings.mjs). createFindingsFormatter/classify после
+ * Фазы 1, шага 5 портированы в бинарь actionability и сравниваются в
+ * rust/parity/actionability.parity.mjs.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
