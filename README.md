@@ -1,17 +1,15 @@
 <div align="center">
 
-# ai-reviewer
+<img src=".github/hero.svg" alt="ai-reviewer — детерминированный prescan, жюри специалистов, verifier, merge-гейт" width="100%">
 
-**AI код-ревью для pull request'ов, которому можно дать право блокировать merge.**
-
-Дифф → blast-radius по графу кода → детерминированный prescan → жюри из трёх специалистов →
-verifier → inline-замечания и один живой sticky-отчёт в PR.
-
-[![CI](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml)
-![version](https://img.shields.io/badge/version-0.2.3-blue)
+[![CI](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml)
+![version](https://img.shields.io/badge/version-0.2.4-blue)
 ![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)
-![deps](https://img.shields.io/badge/зависимостей-0-success)
+![deps](https://img.shields.io/badge/dependencies-0-success)
 ![license](https://img.shields.io/badge/license-UNLICENSED-lightgrey)
+
+**Дифф → blast-radius по графу кода → детерминированный prescan → жюри из трёх специалистов →
+verifier → inline-замечания и один живой sticky-отчёт в PR.**
 
 [Архитектура](docs/architecture.md) · [Структура и сценарии](docs/structure.md) · [Профиль проекта](docs/profiles.md) · [Интеграция](docs/integration.md) · [Конфигурация](docs/configuration.md)
 
