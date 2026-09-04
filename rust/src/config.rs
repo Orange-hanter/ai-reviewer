@@ -635,7 +635,9 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "jsonMode": env_flag(env, "REVIEW_JSON_MODE", true),
             "seed": seed,
             "httpRetries": num_json(http_retries),
-            "requestTimeoutMs": num_json(num_env(env, "REVIEW_LLM_TIMEOUT_MS", 240_000.0)),
+            // 240 с обрывали половину prose-вызовов (медиана kimi на замере — 331 с):
+            // вход оплачен, ответа нет. 420 с покрывают p90 замера.
+            "requestTimeoutMs": num_json(num_env(env, "REVIEW_LLM_TIMEOUT_MS", 420_000.0)),
             "effort": or_env(env, "REVIEW_REASONING_EFFORT", "low").trim(),
             "providerConcurrency": num_json(num_env(env, "REVIEW_PROVIDER_CONCURRENCY", 12.0)),
             "providerPerModel": num_json(num_env(env, "REVIEW_PROVIDER_PER_MODEL", 6.0)),
@@ -1001,7 +1003,7 @@ mod tests {
         assert_eq!(parts["github"]["api"], "https://api.github.com");
         assert_eq!(parts["llm"]["base"], "https://ollama.com/v1");
         assert_eq!(parts["ollama"]["model"], "kimi-k2.7-code");
-        assert_eq!(parts["ollama"]["requestTimeoutMs"], 240000);
+        assert_eq!(parts["ollama"]["requestTimeoutMs"], 420000);
         assert_eq!(parts["moa"]["label"], "moa-specialist(minimax-m3←security+correctness+architecture)");
         assert_eq!(parts["models"]["fallback"], json!(["deepseek-v4-flash"]));
         assert_eq!(parts["gate"]["blockOn"], json!(["critical", "major"]));

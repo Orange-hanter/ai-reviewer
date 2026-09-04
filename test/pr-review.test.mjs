@@ -512,7 +512,7 @@ test('loadReviewConfig: тайм-бюджет и LLM-таймаут из env с 
   assert.equal(cfg.ollama.requestTimeoutMs, 123_000);
   const def = loadReviewConfig({}, cli);
   assert.equal(def.limits.timeBudgetMs, 20 * 60_000, 'дефолт дедлайна LLM-фазы — 20 мин');
-  assert.equal(def.ollama.requestTimeoutMs, 240_000, 'дефолт таймаута попытки — 240с, не 900с');
+  assert.equal(def.ollama.requestTimeoutMs, 420_000, 'дефолт таймаута попытки — 420с (p90 замера), не 900с');
 });
 
 test('parseDiff: quoted-путь с пробелами', () => {

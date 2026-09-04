@@ -62,7 +62,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_SEED` | `7` | Детерминизм (где поддерживается) |
 | `REVIEW_REASONING_EFFORT` | `low` | Reasoning effort advisor-вызовов (`none` — быстрее) |
 | `REVIEW_HTTP_RETRIES` | `3` | Retry GitHub + Ollama |
-| `REVIEW_LLM_TIMEOUT_MS` | `240000` | Таймаут одной попытки LLM |
+| `REVIEW_LLM_TIMEOUT_MS` | `420000` | Таймаут одной попытки LLM. 240000 обрывали половину prose-вызовов (медиана kimi — 331 с): вход оплачен, ответа нет |
 | `REVIEW_PROVIDER_CONCURRENCY` | `12` | Глобальный cap параллельных LLM-вызовов (AIMD по 429) |
 | `REVIEW_PROVIDER_PER_MODEL` | `6` | Cap параллельных вызовов на модель |
 
