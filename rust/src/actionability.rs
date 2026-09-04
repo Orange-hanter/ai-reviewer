@@ -12,8 +12,12 @@
 //!   сохраняя семантику разделяемых ссылок в пайплайне;
 //! - чувствительные зоны: базовый регекс + `layout.sensitive` из профиля —
 //!   его исходник приходит аргументом (как MARKERS в findings), компилируется
-//!   с `(?i)` (профиль собирает `new RegExp(raw, 'i')`). JS-only синтаксис
-//!   (lookahead и т.п.) в бинаре — ошибка; обёртка деградирует на чистый JS.
+//!   с `(?i)` (профиль собирает `new RegExp(raw, 'i')`). Поле профиля пишет
+//!   потребитель в диалекте JS RegExp, поэтому оно компилируется `fancy-regex`
+//!   (RFC 04, решение 4): lookahead и прочий backtracking-синтаксис поддержаны,
+//!   «мягкой» деградации на JS больше нет. Базовый регекс движка остаётся на
+//!   крейте `regex` — он наш, линейный и в backtracking не нуждается.
+//!   Отличия семантики fancy-regex от JS RegExp разобраны в `crate::fp_patterns`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -100,7 +104,8 @@ pub struct ScoreCtx {
     pub prior_keys: HashSet<String>,
     pub prescan_keys: HashSet<String>,
     pub file_classes: HashMap<String, String>,
-    sensitive_extra: Option<regex::Regex>,
+    /// `layout.sensitive` профиля — данные потребителя, отсюда fancy-regex.
+    sensitive_extra: Option<fancy_regex::Regex>,
 }
 
 impl ScoreCtx {
@@ -112,8 +117,8 @@ impl ScoreCtx {
     ) -> Result<ScoreCtx> {
         let sensitive_extra = match sensitive_source {
             Some(src) if !src.is_empty() => Some(
-                regex::Regex::new(&format!("(?i){src}"))
-                    .context("layout.sensitive профиля не компилируется regex-крейтом")?,
+                fancy_regex::Regex::new(&format!("(?i){src}"))
+                    .context("layout.sensitive профиля не компилируется")?,
             ),
             _ => None,
         };
@@ -124,7 +129,12 @@ impl ScoreCtx {
         if base_sensitive_re().is_match(path) {
             return true;
         }
-        self.sensitive_extra.as_ref().map(|re| re.is_match(path)).unwrap_or(false)
+        // Ошибка исполнения (backtrack limit) — «не совпало»: сигнал доказуемости
+        // не должен ронять маршрутизацию находки.
+        self.sensitive_extra
+            .as_ref()
+            .map(|re| re.is_match(path).unwrap_or(false))
+            .unwrap_or(false)
     }
 }
 
@@ -670,6 +680,58 @@ mod tests {
         let extra = json!({"file": "ops/pr-review/gate.sh", "line": 1, "severity": "major", "model": "m"});
         let (score, _) = score_actionability(&extra, &ctx);
         assert_eq!(score, 1, "profile extra sensitivePath");
+    }
+
+    #[test]
+    fn sensitive_source_supports_lookahead() {
+        // RFC 04, решение 4: layout.sensitive — данные потребителя, компилируется
+        // fancy-regex, поэтому JS-синтаксис с lookahead больше не роняет бинарь
+        // (раньше это включало «мягкую» деградацию обёртки на чистый JS).
+        let ctx = ScoreCtxArg {
+            sensitive_source: Some(r"ops/(?=pr)".to_string()),
+            ..ScoreCtxArg::default()
+        }
+        .into_ctx()
+        .expect("lookahead в layout.sensitive должен компилироваться");
+        let hit = json!({"file": "ops/pr/x.sh", "line": 1, "severity": "major", "model": "m"});
+        assert_eq!(score_actionability(&hit, &ctx).0, 1);
+        let miss = json!({"file": "ops/other/x.sh", "line": 1, "severity": "major", "model": "m"});
+        assert_eq!(score_actionability(&miss, &ctx).0, 0);
+    }
+
+    #[test]
+    fn profiles_sensitive_fields_compile() {
+        // Поля layout.sensitive всех профилей пакета обязаны компилироваться:
+        // иначе прогон на этом профиле упадёт на первой же находке.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../profiles");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("каталог profiles/") {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let raw = std::fs::read_to_string(&path).unwrap();
+            let v: Value = serde_json::from_str(&raw).unwrap();
+            let src = v
+                .get("layout")
+                .and_then(|l| l.get("sensitive"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            ScoreCtxArg { sensitive_source: Some(src.to_string()), ..ScoreCtxArg::default() }
+                .into_ctx()
+                .unwrap_or_else(|e| panic!("{}: layout.sensitive не компилируется: {e:#}", path.display()));
+            checked += 1;
+        }
+        assert!(checked >= 2, "ожидались профили orakul и public-benchmark");
+    }
+
+    #[test]
+    fn sensitive_source_broken_regex_is_error() {
+        // Синтаксически битый регекс по-прежнему ошибка контракта, а не «не совпало»:
+        // тихо проигнорировать поле профиля значило бы молча ослабить сигнал.
+        let err = ScoreCtxArg { sensitive_source: Some("(".to_string()), ..ScoreCtxArg::default() }
+            .into_ctx();
+        assert!(err.is_err());
     }
 
     #[test]

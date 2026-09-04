@@ -22,21 +22,80 @@
 //!   findingFingerprint         {text?, line}             → string
 //!   attachFingerprints         {findings, files?}         → [{index, fp}]
 //!   filterStalePriorFindings   {priors, files}            → {kept, codeChanged, outOfDiff, staleLegacy, legacy}
+//!   matchesKnownFalsePositive  {text, changedPaths, patterns?|patternsFile?} → bool
+//!   filterFalsePositiveFindings {findings, changedPaths, patterns?|patternsFile?} → {kept, logs}
 //!
-//! FP-regex-матчинг здесь отсутствует намеренно (JS lookahead в паттернах) —
-//! см. шапку rust/src/findings.rs и lib/findings.mjs.
+//! Источник FP-паттернов задаётся одним из двух аргументов (как `opts` в JS):
+//!   `patterns`     — готовый список `{id, regex, requiresPath?, matchChangedBasename?}`,
+//!                    где regex/requiresPath — ИСХОДНИКИ (`RegExp#source`), а не литералы;
+//!   `patternsFile` — путь к JSONL; при пустом/битом файле берётся вшитый набор пакета.
+//! Ни один не задан → вшитый набор.
 
 use std::io::Read;
 
 use anyhow::{bail, Context, Result};
 use indexmap::IndexMap;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use ai_reviewer::findings::{
-    apply_prescan_block_policy, cluster_findings, dedupe_same_model_findings, filter_stale_prior_findings,
-    finding_fingerprint, normalize_confidence, normalize_finding, resolve_blockers,
-    same_finding_key, soft_consensus_for_blast_cluster, Gate, LineText, PriorFileRec,
+    apply_prescan_block_policy, cluster_findings, dedupe_same_model_findings, filter_false_positive_findings,
+    filter_stale_prior_findings, finding_fingerprint, matches_known_false_positive, normalize_confidence,
+    normalize_finding, resolve_blockers, same_finding_key, soft_consensus_for_blast_cluster, Gate, LineText,
+    PriorFileRec,
 };
+use ai_reviewer::fp_patterns::{default_fp_patterns, load_fp_patterns, parse_fp_patterns_text, FpPattern};
+
+/// Набор FP-паттернов: либо вшитый (разобран один раз), либо собранный под запрос.
+enum FpSource {
+    Embedded(&'static [FpPattern]),
+    Owned(Vec<FpPattern>),
+}
+
+impl FpSource {
+    fn as_slice(&self) -> &[FpPattern] {
+        match self {
+            FpSource::Embedded(p) => p,
+            FpSource::Owned(v) => v,
+        }
+    }
+}
+
+/// Источник паттернов из аргументов операции (см. шапку).
+///
+/// `patterns` приходит списком объектов с исходниками регексов: JSON не несёт
+/// RegExp, поэтому обёртка отдаёт `RegExp#source`, а компиляция (`(?i)` + source)
+/// повторяется здесь — ровно как в `parseFpPatternsText`.
+fn patterns_arg(obj: &Map<String, Value>) -> Result<FpSource> {
+    if let Some(v) = obj.get("patterns") {
+        if !v.is_null() {
+            let rows = v.as_array().context("аргумент 'patterns' должен быть массивом")?;
+            let jsonl = rows
+                .iter()
+                .map(|r| serde_json::to_string(r).unwrap_or_default())
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Ok(FpSource::Owned(parse_fp_patterns_text(&jsonl)));
+        }
+    }
+    match obj.get("patternsFile").and_then(Value::as_str) {
+        Some(path) if !path.is_empty() => {
+            Ok(FpSource::Owned(load_fp_patterns(std::path::Path::new(path))))
+        }
+        _ => Ok(FpSource::Embedded(default_fp_patterns())),
+    }
+}
+
+/// `changedPaths` — массив строк; отсутствует/null → пусто (как `changedPaths || []`).
+fn changed_paths_arg(obj: &Map<String, Value>) -> Result<Vec<String>> {
+    match obj.get("changedPaths") {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(a)) => Ok(a
+            .iter()
+            .map(|v| v.as_str().map(str::to_string).context("changedPaths должен быть массивом строк"))
+            .collect::<Result<Vec<_>>>()?),
+        Some(_) => bail!("аргумент 'changedPaths' должен быть массивом"),
+    }
+}
 
 fn main() {
     if let Err(e) = run() {
@@ -231,6 +290,28 @@ fn run() -> Result<()> {
                 "staleLegacy": outcome.stale_legacy,
                 "legacy": outcome.legacy,
             })
+        }
+        "matchesKnownFalsePositive" => {
+            let patterns = patterns_arg(obj)?;
+            // RegExp#test коэрсит аргумент: отсутствующий text в JS даёт "undefined".
+            let text = obj
+                .get("text")
+                .map(ai_reviewer::findings::js_to_string)
+                .unwrap_or_else(|| "undefined".to_string());
+            json!(matches_known_false_positive(
+                &text,
+                &changed_paths_arg(obj)?,
+                patterns.as_slice()
+            ))
+        }
+        "filterFalsePositiveFindings" => {
+            let patterns = patterns_arg(obj)?;
+            let outcome = filter_false_positive_findings(
+                &findings_arg("findings")?,
+                &changed_paths_arg(obj)?,
+                patterns.as_slice(),
+            );
+            json!({ "kept": outcome.kept, "logs": outcome.logs })
         }
         other => bail!("unknown op: '{other}'"),
     };

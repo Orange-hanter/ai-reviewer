@@ -3,9 +3,9 @@
 //! в локации), инвалидация prior findings по содержимому.
 //!
 //! FP-regex-матчинг (matchesKnownFalsePositive/filterFalsePositiveFindings)
-//! намеренно НЕ портирован: 2 из 51 курируемых паттернов в feedback/fp-patterns.jsonl
-//! используют JS lookahead (`(?=...)`), который regex-крейт Rust не поддерживает.
-//! Эта часть остаётся в JS (lib/fp-patterns.mjs) — см. шапку lib/findings.mjs.
+//! портирован в задаче T07 (RFC 04): курируемые паттерны компилируются
+//! `fancy-regex` (см. `crate::fp_patterns`), в том числе 2 паттерна с lookahead
+//! `(?=…)`, из-за которых эта часть раньше жила только в JS.
 //!
 //! Паритет с JS сохранён, включая:
 //! - канонизацию входа хеша: `trim()` + схлопывание `\s+` в пробел по JS-классу \s
@@ -27,6 +27,8 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
+
+use crate::fp_patterns::{match_fp_patterns, FpPattern};
 
 pub const BLAST_FINDING_SOURCE: &str = "blast-radius";
 
@@ -594,6 +596,69 @@ pub fn resolve_blockers(findings: &[Value], gate: &Gate, prescan_cfg: Option<&Va
 }
 
 // ---------------------------------------------------------------------------
+// FP-фильтр (matchesKnownFalsePositive / filterFalsePositiveFindings)
+// ---------------------------------------------------------------------------
+
+/// `${f.title} ${f.body}` — шаблонная строка JS: отсутствующее поле даёт
+/// `"undefined"`, `null` → `"null"`. Оба варианта реально доходят до регексов
+/// (модель нередко отдаёт находку без `body`), поэтому коэрсию воспроизводим,
+/// а не подменяем пустой строкой.
+fn finding_fp_text(f: &Value) -> String {
+    let part = |name: &str| match f.get(name) {
+        None => "undefined".to_string(),
+        Some(v) => js_to_string(v),
+    };
+    format!("{} {}", part("title"), part("body"))
+}
+
+/// `matchesKnownFalsePositive`: текст совпал с курируемым FP-паттерном.
+pub fn matches_known_false_positive(
+    text: &str,
+    changed_paths: &[String],
+    patterns: &[FpPattern],
+) -> bool {
+    match_fp_patterns(text, changed_paths, patterns).is_some()
+}
+
+/// Результат `filterFalsePositiveFindings`: индексы оставленных находок и
+/// лог-сообщения в том же порядке и формулировке, что в JS (их читает sticky —
+/// снятые FP показываются отдельным блоком, а не удаляются молча).
+#[derive(Debug, Default)]
+pub struct FpFilterOutcome {
+    pub kept: Vec<usize>,
+    pub logs: Vec<String>,
+}
+
+/// `filterFalsePositiveFindings`: снимает находки, чей `title + body` попал в
+/// известный FP-паттерн. Возвращает индексы, а не сами находки: обёртка
+/// накладывает результат на ИСХОДНЫЕ объекты (семантика разделяемых ссылок).
+pub fn filter_false_positive_findings(
+    findings: &[Value],
+    changed_paths: &[String],
+    patterns: &[FpPattern],
+) -> FpFilterOutcome {
+    let mut out = FpFilterOutcome::default();
+    for (i, f) in findings.iter().enumerate() {
+        let text = finding_fp_text(f);
+        if matches_known_false_positive(&text, changed_paths, patterns) {
+            out.logs
+                .push(format!("filtered false finding: {}", js_or_empty_raw(f.get("title"))));
+        } else {
+            out.kept.push(i);
+        }
+    }
+    out
+}
+
+/// `${f.title}` в лог-строке — та же коэрсия, что и в тексте для матчинга.
+fn js_or_empty_raw(v: Option<&Value>) -> String {
+    match v {
+        None => "undefined".to_string(),
+        Some(x) => js_to_string(x),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // findingFingerprint / attachFingerprints
 // ---------------------------------------------------------------------------
 
@@ -960,5 +1025,187 @@ mod tests {
         let priors = vec![json!({"file": "a.ts", "line": 6, "fp": fp})];
         let out = filter_stale_prior_findings(&priors, &files);
         assert_eq!(out.kept[0].1, 5.0, "равное расстояние → меньший номер");
+    }
+
+    // -----------------------------------------------------------------------
+    // FP-фильтр — кейсы перенесены из test/pr-review.test.mjs и
+    // test/pr-review.eval.test.mjs (id теста указан в комментарии)
+    // -----------------------------------------------------------------------
+
+    fn fp() -> &'static [crate::fp_patterns::FpPattern] {
+        crate::fp_patterns::default_fp_patterns()
+    }
+
+    fn paths(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn is_fp(text: &str, list: &[&str]) -> bool {
+        matches_known_false_positive(text, &paths(list), fp())
+    }
+
+    /// «filterFalsePositiveFindings: гасит ложные e2e и file-absent, оставляет реальные»
+    #[test]
+    fn fp_filter_drops_e2e_and_file_absent_keeps_real() {
+        let changed = paths(&["app/e2e/foo.spec.ts", "server/foo.ts"]);
+        let findings = vec![
+            json!({"file": "server/foo.ts", "line": 5, "severity": "minor", "title": "нет e2e тестов", "body": ""}),
+            json!({"file": "server/foo.ts", "line": 6, "severity": "minor", "title": "проблема", "body": "файл foo.ts отсутствует в диффе"}),
+            json!({"file": "server/foo.ts", "line": 7, "severity": "major", "title": "реальный баг", "body": "null pointer при пустом вводе"}),
+        ];
+        let out = filter_false_positive_findings(&findings, &changed, fp());
+        assert_eq!(out.kept, vec![2], "остаётся только реальная находка");
+        assert_eq!(
+            out.logs,
+            vec![
+                "filtered false finding: нет e2e тестов".to_string(),
+                "filtered false finding: проблема".to_string(),
+            ]
+        );
+    }
+
+    /// «fp-pattern metrics-absent-observability: срабатывает только на observability-путях»
+    #[test]
+    fn fp_requires_path_scopes_pattern() {
+        let mk = || {
+            vec![json!({
+                "file": "ops/observability/hermes/prometheus.yml", "line": 1, "severity": "major",
+                "title": "Alert использует отсутствующие метрики Docker", "body": "", "model": "m"
+            })]
+        };
+        let scoped = filter_false_positive_findings(
+            &mk(),
+            &paths(&["ops/observability/hermes/prometheus.yml"]),
+            fp(),
+        );
+        assert!(scoped.kept.is_empty(), "на observability-путях — отфильтровано");
+        let unscoped = filter_false_positive_findings(&mk(), &paths(&["app/server/api.ts"]), fp());
+        assert_eq!(unscoped.kept, vec![0], "вне observability — requiresPath не сработал");
+    }
+
+    /// «matchesKnownFalsePositive: e2e-in-diff pattern» + «fp-patterns.jsonl: e2e-in-diff matches»
+    #[test]
+    fn fp_e2e_in_diff_pattern() {
+        assert!(is_fp("нет e2e теста на удаление", &["app/e2e/foo.spec.ts"]));
+        assert!(!is_fp("file not in pr diff", &["server/auth.ts"]));
+    }
+
+    /// «fp-patterns: softblast-typedef + graphify-path-norm speculation»
+    #[test]
+    fn fp_round2_softblast_and_graphify() {
+        let typedef = "typedef Finding не описывает blast-radius маркеры, а softBlast дублирует проверку через два поля";
+        assert!(is_fp(typedef, &["lib/findings.mjs"]));
+        assert!(is_fp(
+            "Дедуп по d.file без нормализации пути — разные представления путей от graphify",
+            &["lib/graphify.mjs"]
+        ));
+        assert!(is_fp(
+            "Потенциальная command-injection при передаче REVIEW_GRAPHIFY_DEPTH в graphify CLI",
+            &["docs/configuration.md"]
+        ));
+        assert!(is_fp(
+            "Удалён costTracker из deps createReviewEngine — требуется верификация",
+            &["pipeline.mjs"]
+        ));
+        assert!(!is_fp(typedef, &["app/server/x.ts"]), "без requiresPath-пути не срабатывает");
+    }
+
+    /// «fp-patterns: round3 dash-flag + softblast boundary + redact dup»
+    #[test]
+    fn fp_round3() {
+        assert!(is_fp(
+            "символ начинается с `-` и looks like a CLI flag для graphify affected",
+            &["lib/graphify.mjs"]
+        ));
+        assert!(is_fp(
+            "Нарушение границ модулей: hardcoded blast-radius soft-tier в findings",
+            &["lib/findings.mjs"]
+        ));
+        assert!(is_fp(
+            "дублирование redactSecretsForLog между util.mjs и observability",
+            &["lib/util.mjs"]
+        ));
+    }
+
+    /// «fp-patterns: round4 cross-chunk + findings cluster + test nits»
+    #[test]
+    fn fp_round4() {
+        for (text, path) in [
+            ("Три FP-паттерна подряд глушат архитектурные претензии к findings.mjs", "feedback/fp-patterns.jsonl"),
+            ("Зависимость: filterFindingsFixedInDiff должен экспортироваться с эквивалентной семантикой", "pipeline.mjs"),
+            ("Зависимость: emitBlastRadiusFindings должен поддерживать dropAmbiguous", "pipeline.mjs"),
+            ("Прямой импорт graphify-интернов в обход barrel index.mjs", "test/pr-review.test.mjs"),
+            ("escapeMdTicks безвозвратно удаляет backticks из caller/symbol/file", "lib/blast-findings.mjs"),
+            ("Смена контракта aggregateMetrics.byModel: Map → Object", "lib/metrics.mjs"),
+        ] {
+            assert!(is_fp(text, &[path]), "паттерн не сработал: {text}");
+        }
+    }
+
+    /// «fp-patterns: structure platform, 29 находок PR #6 (dry-run 2026-09-02)»
+    #[test]
+    fn fp_structure_platform_29_findings() {
+        let cases: [(&str, &str, &str); 29] = [
+            ("plan-todo-completeness", "Несогласованность статусов todo и заявлений о завершённости", ".cursor/plans/structure-platform-integration.plan.md"),
+            ("mcp-oversized-eof-tail", "Незавершённое поглощение oversized-кадра при обрыве потока", "bin/pr-review-structure-mcp.mjs"),
+            ("structure-cli-base-source-required", "Проверка «есть хотя бы один источник» не учитывает --obligations/--mutation-report/--property-report", "bin/pr-review-structure.mjs"),
+            ("trust-tier-default-documented", "Дефолт REVIEW_STRUCTURE_TRUST_TIER=trusted_local потенциально небезопасен для CI недоверенных PR", "docs/configuration.md"),
+            ("index-reexport-primitives-ok", "Дублирование пути импорта канонических примитивов через structure-evidence.mjs", "index.mjs"),
+            ("trust-tier-validated-in-receipt", "trustTier из env не валидируется по whitelist", "lib/config.mjs"),
+            ("structure-namespace-parallel-ok", "Параллельный namespace structure.* дублирует часть graphify.*", "lib/config.mjs"),
+            ("hotspot-confidence-conservative", "Возможно инвертированная семантика confidence для hotspot", "lib/structure-assessments.mjs"),
+            ("property-evidence-vs-bound", "evidence добавляется по property.status без учёта confidence, используемого в propertyBound", "lib/structure-assessments.mjs"),
+            ("context-truncated-conservative", "Ложное срабатывание флага truncated при точном совпадении лимита", "lib/structure-context.mjs"),
+            ("drift-unique-threshold-strict-by-design", "Слишком строгий порог для resolution=unique", "lib/structure-drift.mjs"),
+            ("drift-path-overlap-heuristic", "Ложные совпадения document-path-overlap по подстроке", "lib/structure-drift.mjs"),
+            ("export-env-read-intentional", "Скрытая конфигурация через process.env внутри lib-модуля", "lib/structure-export.mjs"),
+            ("crossboundary-deepest-prefix-ok", "crossBoundary считается по самому глубокому совпавшему префиксу, включая шумные module-границы", "lib/structure-graphify.mjs"),
+            ("lcov-match-edge-case-heuristic", "Неоднозначный edge-case в matchLcovFunction: одинаковая строка, разные имена, обе не совпали", "lib/structure-lcov.mjs"),
+            ("lcov-kind-list-coupling-ok", "Неявная связь между lcov-матчингом и списком kind'ов из других экстракторов", "lib/structure-lcov.mjs"),
+            ("mcp-pin-args-both-allowed", "callStructureContext допускает одновременную передачу headSha и snapshotFingerprint без проверки согласованности", "lib/structure-mcp.mjs"),
+            ("scip-truncation-drops-edges-by-design", "Усечение entities по maxEntities молча теряет связи relationships", "lib/structure-scip.mjs"),
+            ("scip-definition-choice-deterministic", "Недетерминированный выбор definition при нескольких документах", "lib/structure-scip.mjs"),
+            ("test-body-boundary-heuristic", "Эвристическая граница тела теста может обрезаться внутри строк/комментариев", "lib/structure-tests.mjs"),
+            ("short-contract-labels-heuristic", "Короткие labels контрактов могут давать ложные совпадения в targetContractRefs", "lib/structure-tests.mjs"),
+            ("structure-primitives-single-source", "Возможное дублирование канонических примитивов normalizeRepoPath/sha256", "lib/structure.mjs"),
+            ("structure-symlink-guard-landed", "Чтение тестовых файлов без защиты от symlink-escape", "lib/structure.mjs"),
+            ("graph-sha-prefix-compare-ok", "Ложное совпадение статуса графа при коротких SHA-префиксах", "lib/structure.mjs"),
+            ("schema-path-pattern-duplication-ok", "Дублирование определения path-паттерна между схемами", "schemas/structure-facts.v1.schema.json"),
+            ("schema-no-cross-field-check-ok", "Отсутствие кросс-полевой проверки согласованности числовых метрик dataQuality", "schemas/structure-assessment.v1.schema.json"),
+            ("clamp-test-asserts-behaviour", "Тест клэмпинга dependencyDepth не проверяет фактическое значение maxDepth в ответе", "test/structure.test.mjs"),
+            ("mcp-test-watchdog-ok", "Watchdog-таймаут 10s на весь набор с искусственными паузами split-режима может давать флаки на медленном CI", "test/structure.test.mjs"),
+            ("mutation-line-zero-unreachable", "Number(...) || null теряет валидное значение 0", "lib/structure-mutation.mjs"),
+        ];
+        for (id, title, path) in cases {
+            assert!(is_fp(title, &[path]), "паттерн не сработал: {id}");
+        }
+
+        // контроль на переглушение: настоящая находка в том же файле гаситься не должна
+        for (text, path) in [
+            ("Гонка при записи snapshot: два процесса перезаписывают файл", "lib/structure.mjs"),
+            ("SQL-инъекция в построении запроса", "lib/structure-scip.mjs"),
+            ("Утечка токена в лог при ошибке конфигурации", "lib/config.mjs"),
+            ("Пропущен await у записи отчёта — файл может быть пустым", "lib/structure-export.mjs"),
+        ] {
+            assert!(!is_fp(text, &[path]), "переглушение: {text}");
+        }
+    }
+
+    /// `${f.title} ${f.body}` — JS-коэрсия отсутствующих полей в "undefined".
+    #[test]
+    fn fp_text_uses_js_template_coercion() {
+        assert_eq!(finding_fp_text(&json!({"title": "t", "body": "b"})), "t b");
+        assert_eq!(finding_fp_text(&json!({"title": "t"})), "t undefined");
+        assert_eq!(finding_fp_text(&json!({"title": null, "body": 5})), "null 5");
+        assert_eq!(finding_fp_text(&json!({})), "undefined undefined");
+    }
+
+    /// Пустой набор паттернов ничего не фильтрует (opts.patterns: [] в JS).
+    #[test]
+    fn fp_empty_pattern_set_keeps_all() {
+        let findings = vec![json!({"title": "нет e2e тестов", "body": ""})];
+        let out = filter_false_positive_findings(&findings, &paths(&["app/e2e/a.spec.ts"]), &[]);
+        assert_eq!(out.kept, vec![0]);
+        assert!(out.logs.is_empty());
     }
 }

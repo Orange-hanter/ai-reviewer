@@ -19,8 +19,8 @@
  *      inlineOn/threshold/maxAdvisoryInline/strict; лимит и стабильность тай-брейков;
  *   4. createFindingsFormatter.classify/findingBlock (обёртка lib/findings.mjs →
  *      бинарь actionability): группировка, marker профиля, SEV-эмодзи, suggestion;
- *   5. профиль с layout.sensitive (patterns/orakul.json) — обе ветки под ним,
- *      в т.ч. негатив: JS-only регекс (lookahead) деградирует обе ветки на JS.
+ *   5. профиль с layout.sensitive (profiles/orakul.json) — обе ветки под ним,
+ *      в т.ч. регекс с lookahead (в Rust его берёт fancy-regex, RFC 04).
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -316,10 +316,11 @@ try {
     { file: 'ops/pr-review/gate.sh', line: 1, severity: 'minor', title: 'gate', body: 'b', model: 'm', confidence: 0.9, consensus: true },
   ], null, {});
 
-  // JS-only регекс (lookahead): обёртка деградирует на чистый JS в ОБЕИХ ветках —
-  // сравнение по-прежнему должно сойтись.
+  // Регекс с lookahead: Rust компилирует его fancy-regex (RFC 04, решение 4),
+  // деградации на JS больше нет — обе ветки считают сигнал одинаково.
   setProfile({ name: 't', layout: { sensitive: 'ops/(?=pr)' } });
-  checkScore('lookahead sensitive degrades both', { file: 'ops/pr/x.sh', line: 1, severity: 'major', model: 'm' }, {});
+  checkScore('lookahead sensitive', { file: 'ops/pr/x.sh', line: 1, severity: 'major', model: 'm' }, {});
+  checkScore('lookahead sensitive miss', { file: 'ops/other/x.sh', line: 1, severity: 'major', model: 'm' }, {});
   checkRoute('lookahead sensitive route', [
     { file: 'ops/pr/x.sh', line: 1, severity: 'minor', title: 't', model: 'm', confidence: 0.9, consensus: true },
   ], null, {});

@@ -17,12 +17,13 @@
  *      prescan-политика, 3-строчные бакеты, перенос по fingerprint, legacy ±3;
  *   3. fingerprint/attachFingerprints/filterStalePriorFindings на text-картах
  *      из parseDiff (тот же дифф, что в тестах) + ручные карты с коллизиями;
- *   4. сравнение log-сообщений для дедупа, carry-over и FP-фильтра.
+ *   4. сравнение log-сообщений для дедупа, carry-over и FP-фильтра;
+ *   5. FP-фильтр (RFC 04, T07): matchesKnownFalsePositive/filterFalsePositiveFindings
+ *      на всех находках fixtures/ с changedPaths из diff.patch кейса + литеральные
+ *      кейсы паттернов + свой набор (opts.patterns) и пустой набор.
  *
- * Сознательно НЕ сравнивается: FP-regex-матчинг (в JS в обеих ветках — JS lookahead
- * не портирован, см. шапку lib/findings.mjs). createFindingsFormatter/classify после
- * Фазы 1, шага 5 портированы в бинарь actionability и сравниваются в
- * rust/parity/actionability.parity.mjs.
+ * createFindingsFormatter/classify после Фазы 1, шага 5 портированы в бинарь
+ * actionability и сравниваются в rust/parity/actionability.parity.mjs.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -393,10 +394,79 @@ checkStalePrior('collision tie', [
 ], collisionFiles);
 
 // ---------------------------------------------------------------------------
+// Корпус 5: FP-фильтр на всех находках fixtures/ с changedPaths из diff.patch
+// ---------------------------------------------------------------------------
+
+function checkMatchesFp(label, text, changedPaths, opts) {
+  const js = runJs(F.matchesKnownFalsePositive, text, changedPaths, opts).value;
+  const rust = F.matchesKnownFalsePositive(text, changedPaths, opts);
+  compare(`matchesKnownFalsePositive ${label}`, js, rust);
+}
+
+function checkFilterFp(label, findings, changedPaths, opts) {
+  const jsLogs = [];
+  const js = runJs(F.filterFalsePositiveFindings, j(findings), changedPaths, (m) => jsLogs.push(m), opts).value;
+  const rustLogs = [];
+  const rust = F.filterFalsePositiveFindings(j(findings), changedPaths, (m) => rustLogs.push(m), opts);
+  compare(`filterFalsePositiveFindings ${label} logs`, jsLogs, rustLogs);
+  compare(`filterFalsePositiveFindings ${label}`, j(js), j(rust));
+}
+
+let fpFindingsChecked = 0;
+for (const { dir, findings } of fixtureFindings) {
+  // changedPaths — реальные пути диффа кейса (requiresPath паттернов смотрит именно на них)
+  let diffPaths = [];
+  try {
+    const { files } = parseDiff(readFileSync(resolve(REPO, 'fixtures', dir, 'diff.patch'), 'utf8'));
+    diffPaths = [...files.keys()];
+  } catch {
+    diffPaths = [...new Set(findings.map((f) => f.file).filter(Boolean))];
+  }
+  for (const [i, f] of findings.entries()) {
+    checkMatchesFp(`${dir}#${i}`, `${f.title} ${f.body}`, diffPaths, {});
+    fpFindingsChecked += 1;
+  }
+  checkFilterFp(`${dir}`, findings, diffPaths, {});
+}
+
+// Литеральные кейсы FP-паттернов из test/pr-review.test.mjs
+for (const [text, path] of [
+  ['нет e2e теста на удаление', 'app/e2e/foo.spec.ts'],
+  ['file not in pr diff', 'server/auth.ts'],
+  ['Alert использует отсутствующие метрики Docker', 'ops/observability/hermes/prometheus.yml'],
+  ['Alert использует отсутствующие метрики Docker', 'app/server/api.ts'],
+  ['typedef Finding не описывает blast-radius маркеры, а softBlast дублирует проверку через два поля', 'lib/findings.mjs'],
+  ['Смена контракта aggregateMetrics.byModel: Map → Object', 'lib/metrics.mjs'],
+  ['Гонка при записи snapshot: два процесса перезаписывают файл', 'lib/structure.mjs'],
+  ['', 'a.ts'],
+  ['undefined undefined', 'a.ts'],
+]) {
+  checkMatchesFp(`literal "${text.slice(0, 40)}"`, text, [path], {});
+}
+
+// Свой набор паттернов (opts.patterns) — передаётся исходниками регексов
+const customPatterns = (await import('../../lib/fp-patterns.mjs')).parseFpPatternsText(
+  '{"id":"custom","regex":"известный ложняк","requiresPath":"^server/"}\n' +
+  '{"id":"basename","regex":"файл","matchChangedBasename":true}\n',
+);
+checkFilterFp('custom patterns', [
+  { file: 'server/a.ts', line: 1, severity: 'major', title: 'известный ложняк', body: '', model: 'm' },
+  { file: 'server/a.ts', line: 2, severity: 'major', title: 'файл a.ts не в диффе', body: '', model: 'm' },
+  { file: 'server/a.ts', line: 3, severity: 'major', title: 'настоящая', body: '', model: 'm' },
+], ['server/a.ts'], { patterns: customPatterns });
+checkFilterFp('empty patterns', [
+  { file: 'server/a.ts', line: 1, severity: 'major', title: 'нет e2e тестов', body: '', model: 'm' },
+], ['app/e2e/a.spec.ts'], { patterns: [] });
+checkFilterFp('patternsFile absent → пакетный набор', [
+  { file: 'server/a.ts', line: 1, severity: 'major', title: 'нет e2e тестов', body: '', model: 'm' },
+], ['app/e2e/a.spec.ts'], { patternsFile: resolve(REPO, 'no-such-file.jsonl') });
+
+// ---------------------------------------------------------------------------
 // Итог
 // ---------------------------------------------------------------------------
 
 console.log(`fixtures: ${fixtureDirs.length} dirs`);
+console.log(`FP-фильтр: находок сверено ${fpFindingsChecked}`);
 console.log(`parity cases compared: ${compared}`);
 if (failures.length) {
   console.log(`FAILURES: ${failures.length}`);
