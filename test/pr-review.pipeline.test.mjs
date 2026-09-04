@@ -515,6 +515,45 @@ test('инкрементально: выключено по умолчанию �
   }
 });
 
+// Существующие инкрементальные тесты гоняются в REVIEW_MODE=consensus / REVIEW_VERIFIER=0:
+// applyRefutation и Pass B не вызываются, и перенос «до» них не падал бы. Этот кейс —
+// ровно тот, из-за которого carry стоит после verifier: во втором прогоне жюри по bar
+// молчит, strict без вердикта опустил бы подтверждённый блокер до minor.
+test('инкрементально: перенесённый блокер переживает verifier strict второго прогона', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr-ver-'));
+  const stateFile = join(dir, 'state.json');
+  const verifyAll = async (candidates) => candidates.map((_, i) => ({ candidateIndex: i, decision: 'verified' }));
+  try {
+    const first = await runPipeline({
+      diff: TWO_FILE_DIFF,
+      reviews: [barCritical],
+      verifyFindings: verifyAll,
+      env: {
+        REVIEW_INCREMENTAL: '1',
+        REVIEW_INCREMENTAL_STATE: stateFile,
+        REVIEW_VERIFIER: '1',
+      },
+    });
+    assert.equal(first.code, 1, 'первый прогон: verifier подтвердил блокер');
+
+    const second = await runPipeline({
+      diff: TWO_FILE_DIFF_V2,
+      reviews: [{ model: 'm1', summary: 'по foo чисто', verdict: 'comment', findings: [] }],
+      verifyFindings: async () => [],
+      env: {
+        REVIEW_INCREMENTAL: '1',
+        REVIEW_INCREMENTAL_STATE: stateFile,
+        REVIEW_VERIFIER: '1',
+      },
+    });
+    assert.equal(second.code, 1,
+      'если carry был бы до Pass B, пустые вердикты + REVIEW_VERIFIER_STRICT опустили бы бар до minor');
+    assert.ok(second.calls.upsertSticky[0].includes('блокер в bar'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Порог допуска advisory к verifier'у (P1, docs/review-quality.md §2.2)
 // ---------------------------------------------------------------------------
