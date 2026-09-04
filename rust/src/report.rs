@@ -300,12 +300,17 @@ pub fn extract_reasoning_entries(
         if !refs.is_empty() {
             for refv in refs {
                 let role = str_coalesce(refv.get("role"), "advisor");
-                let model = tmpl(refv.get("model"));
+                // model: ref.model — как есть; отсутствующий ключ → undefined,
+                // в JSON выпадает (не строка "undefined" — это семантика tmpl
+                // для шаблонных строк, здесь объект идёт в JSON.stringify).
+                let model = refv.get("model").cloned();
                 let chunk_count = refv.get("chunkCount").cloned().unwrap_or(json!(1));
                 if js_truthy(refv.get("error").unwrap_or(&Value::Null)) {
                     let mut e = serde_json::Map::new();
                     e.insert("role".into(), Value::String(role));
-                    e.insert("model".into(), Value::String(model));
+                    if let Some(m) = model {
+                        e.insert("model".into(), m);
+                    }
                     e.insert("chunkCount".into(), chunk_count);
                     e.insert("error".into(), Value::String(js_slice_utf16(&js_to_string(refv.get("error").unwrap()), error_max)));
                     out.push(Value::Object(e));
@@ -313,7 +318,9 @@ pub fn extract_reasoning_entries(
                     let text = js_to_string(refv.get("text").unwrap());
                     let mut e = serde_json::Map::new();
                     e.insert("role".into(), Value::String(role));
-                    e.insert("model".into(), Value::String(model));
+                    if let Some(m) = model {
+                        e.insert("model".into(), m);
+                    }
                     e.insert("chunkCount".into(), chunk_count);
                     e.insert("excerpt".into(), Value::String(js_slice_utf16(&text, excerpt_len)));
                     e.insert("truncated".into(), Value::Bool(utf16_len(&text) > excerpt_len));
@@ -326,7 +333,9 @@ pub fn extract_reasoning_entries(
             let text = js_to_string(r.get("summary").unwrap());
             let mut e = serde_json::Map::new();
             e.insert("role".into(), Value::String("model".into()));
-            e.insert("model".into(), Value::String(tmpl(r.get("model"))));
+            if let Some(m) = r.get("model").cloned() {
+                e.insert("model".into(), m);
+            }
             e.insert("excerpt".into(), Value::String(js_slice_utf16(&text, excerpt_len)));
             e.insert("truncated".into(), Value::Bool(utf16_len(&text) > excerpt_len));
             out.push(Value::Object(e));
