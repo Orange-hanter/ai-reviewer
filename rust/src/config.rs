@@ -24,6 +24,10 @@ pub const DEFAULT_REVIEW_VERIFIER_MODEL: &str = "deepseek-v4-pro";
 pub const DEFAULT_OLLAMA_MODELS_FALLBACK: &str = "deepseek-v4-flash";
 pub const DEFAULT_STRUCTURE_TRUST_TIER: &str = "trusted_local";
 pub const SPECIALIST_ROLES: [&str; 3] = ["security", "correctness", "architecture"];
+/// Вес сигнала `verified` из ACTIONABILITY_SIGNALS (lib/actionability.mjs): на него
+/// опускается порог допуска к verifier'у. Дублируется числом с JS-стороной
+/// (VERIFIED_SIGNAL_WEIGHT в lib/config.mjs) — паритет держит config.parity.mjs.
+pub const VERIFIED_SIGNAL_WEIGHT: f64 = 3.0;
 
 // Дефолты профиля (lib/profile.mjs DEFAULT_PROFILE).
 pub const DEFAULT_MARKER_NAMESPACE: &str = "ai-review";
@@ -658,6 +662,10 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             // вход оплачен, ответа нет. 420 с покрывают p90 замера.
             "requestTimeoutMs": num_json(num_env(env, "REVIEW_LLM_TIMEOUT_MS", 420_000.0)),
             "effort": or_env(env, "REVIEW_REASONING_EFFORT", "low").trim(),
+            // Reasoning effort первой попытки JSON-вызовов (агрегатор, verifier): рассуждение
+            // считается completion-токенами (замер: 1903 на находку у minimax-m3 против 474
+            // у sonnet), эксперименту нужен переключатель, а не правка кода.
+            "aggregatorEffort": or_env(env, "REVIEW_AGGREGATOR_REASONING_EFFORT", "low").trim(),
             "providerConcurrency": num_json(num_env(env, "REVIEW_PROVIDER_CONCURRENCY", 12.0)),
             "providerPerModel": num_json(num_env(env, "REVIEW_PROVIDER_PER_MODEL", 6.0)),
         }),
@@ -698,12 +706,21 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
     );
     out.insert("cost".into(), json!({ "priceMap": price_map }));
     out.insert("inlineOn".into(), json!(inline_on));
+    let actionability_min = num_env(env, "REVIEW_ACTIONABILITY_MIN", 4.0);
     out.insert(
         "actionability".into(),
         json!({
-            "threshold": num_json(num_env(env, "REVIEW_ACTIONABILITY_MIN", 4.0)),
+            "threshold": num_json(actionability_min),
             "maxAdvisoryInline": num_json(num_env(env, "REVIEW_MAX_ADVISORY_INLINE", 5.0)),
             "verifyAdvisory": num_json(num_env(env, "REVIEW_VERIFY_ADVISORY", 5.0)),
+            // Порог ДОПУСКА к verifier'у, отдельный от порога маршрута: «порог минус вес
+            // сигнала verified» — кандидатом становится всё, что СТАНЕТ доказуемым после
+            // подтверждения (docs/review-quality.md §2.2, P1).
+            "verifyMin": num_json(num_env(
+                env,
+                "REVIEW_VERIFY_ADVISORY_MIN",
+                actionability_min - VERIFIED_SIGNAL_WEIGHT,
+            )),
         }),
     );
     out.insert(
@@ -713,6 +730,9 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "model": verifier_model,
             "maxCandidates": num_json(num_env(env, "REVIEW_VERIFIER_MAX", 12.0)),
             "temperature": num_json(verifier_temp),
+            // ±строк вокруг строки-кандидата в контексте verifier'а (lib/context-window.mjs):
+            // второй проход смотрит 1–2 строки на файл, целый файл он не окупает.
+            "contextMargin": num_json(num_env(env, "REVIEW_VERIFIER_CONTEXT_MARGIN", 80.0)),
             "strictBlocks": env_flag(env, "REVIEW_VERIFIER_STRICT", true),
         }),
     );
@@ -1085,6 +1105,38 @@ mod tests {
         let e2 = env(&[("REVIEW_BLOCK_ON", "")]);
         let p2 = load_review_config_parts(&e2, &profile_bits(&default_profile()));
         assert_eq!(p2["gate"]["blockOn"], json!([]));
+    }
+
+    #[test]
+    fn load_verify_min_derives_from_actionability_min() {
+        // Дефолт — «порог маршрута минус вес сигнала verified» (3), а не константа.
+        let parts = load_review_config_parts(&env(&[]), &profile_bits(&default_profile()));
+        assert_eq!(parts["actionability"]["threshold"], 4);
+        assert_eq!(parts["actionability"]["verifyMin"], 1);
+
+        let e = env(&[("REVIEW_ACTIONABILITY_MIN", "6")]);
+        let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(parts["actionability"]["verifyMin"], 3, "порог поехал — допуск едет за ним");
+
+        // Явное значение перебивает вывод; порог маршрута при этом не меняется.
+        let e = env(&[("REVIEW_VERIFY_ADVISORY_MIN", "99")]);
+        let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(parts["actionability"]["verifyMin"], 99);
+        assert_eq!(parts["actionability"]["threshold"], 4);
+    }
+
+    #[test]
+    fn load_new_token_knobs_defaults() {
+        let parts = load_review_config_parts(&env(&[]), &profile_bits(&default_profile()));
+        assert_eq!(parts["ollama"]["aggregatorEffort"], "low");
+        assert_eq!(parts["verifier"]["contextMargin"], 80);
+        let e = env(&[
+            ("REVIEW_AGGREGATOR_REASONING_EFFORT", " none "),
+            ("REVIEW_VERIFIER_CONTEXT_MARGIN", "20"),
+        ]);
+        let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(parts["ollama"]["aggregatorEffort"], "none", "trim как у REVIEW_REASONING_EFFORT");
+        assert_eq!(parts["verifier"]["contextMargin"], 20);
     }
 
     #[test]

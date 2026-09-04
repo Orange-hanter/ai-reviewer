@@ -514,3 +514,83 @@ test('инкрементально: выключено по умолчанию �
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Порог допуска advisory к verifier'у (P1, docs/review-quality.md §2.2)
+// ---------------------------------------------------------------------------
+
+// minor в логическом файле с confidence ≥ 0.8 и предложенным фиксом: confidence(+1) +
+// suggestion(+1) + logicFile(+1) = 3 балла при пороге маршрута 4. Ровно тот класс находок,
+// который в замере R2 не доезжал ни до verifier'а, ни до строки.
+//
+// Фабрика, а не константа: пайплайн ходит по ТЕМ ЖЕ объектам находок (маршрут и verifier
+// пишут вердикты прямо в них), поэтому общий литерал протёк бы вердиктом из теста в тест.
+const advisoryMinorReview = () => ({
+  model: 'm1', summary: 'мелочь', verdict: 'comment',
+  findings: [{
+    file: 'foo.ts', line: 2, severity: 'minor', title: 'магическое число', body: 'вынести в константу',
+    confidence: 0.9, suggestion: 'const B = 3;', model: 'm1',
+  }],
+});
+
+/** Прогон с перехватом того, что реально ушло в engine.verifyFindings. */
+async function runWithVerifierSpy(env) {
+  const seen = [];
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF,
+    reviews: [advisoryMinorReview()],
+    verifyFindings: async (candidates) => {
+      // Скор снимаем СРАЗУ: дальше по пайплайну маршрут пересчитает его в тех же объектах.
+      seen.push(...candidates.map((c) => ({ line: c.line, score: c.actionabilityScore })));
+      return candidates.map((_, i) => ({ candidateIndex: i, decision: 'verified' }));
+    },
+    env: { REVIEW_VERIFIER: '1', ...env },
+  });
+  return { code, calls, seen };
+}
+
+test('verifier: minor со скором 3 (ниже порога маршрута) допущен по пониженному порогу и после verified уходит в строку', async () => {
+  const { code, calls, seen } = await runWithVerifierSpy({});
+  assert.equal(code, 0, 'minor не блокирует merge даже подтверждённым');
+  assert.equal(seen.length, 1, 'находка дошла до verifier — курица и яйцо разорваны');
+  assert.deepEqual(seen[0], { line: 2, score: 3 }, 'до verifier у неё ровно 3 балла при пороге 4');
+  assert.deepEqual(
+    calls.postReview[0].inline.map((c) => [c.path, c.line]),
+    [['foo.ts', 2]],
+    '3 + вес(verified)=3 → 6 ≥ 4: находка занимает строку',
+  );
+});
+
+test('verifier: REVIEW_VERIFY_ADVISORY_MIN=99 — та же находка до verifier не доезжает и в строку не идёт', async () => {
+  const { code, calls, seen } = await runWithVerifierSpy({ REVIEW_VERIFY_ADVISORY_MIN: '99' });
+  assert.equal(code, 0);
+  assert.equal(seen.length, 0, 'порог допуска недостижим — кандидатов нет');
+  assert.deepEqual(calls.postReview[0].inline, [], 'без подтверждения находка в строку не идёт');
+  assert.ok(calls.upsertSticky[0].includes('магическое число'), 'но из отчёта не исчезает');
+});
+
+test('observability: событие actionability несёт гистограмму скоров и топ причин свода', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-actionability-'));
+  try {
+    await runPipeline({
+      diff: CODE_DIFF,
+      reviews: [advisoryMinorReview()],
+      observabilityDir: dir,
+    });
+    const records = (await readFile(join(dir, 'pr-review-runs.jsonl'), 'utf8'))
+      .trim().split('\n').map(JSON.parse);
+    const ev = records.find((r) => r.type === 'actionability');
+    assert.ok(ev, 'событие есть');
+    assert.equal(ev.threshold, 4);
+    assert.equal(ev.inline, 0);
+    assert.equal(ev.outside, 1);
+    assert.deepEqual(ev.histogram, { 3: 1 }, 'скор → число находок');
+    assert.deepEqual(
+      ev.topOutsideReasons.map((r) => r.key).sort(),
+      ['confidence', 'logicFile', 'suggestion'],
+      'причины отдаются КЛЮЧАМИ сигналов, а не формулировками из комментария',
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

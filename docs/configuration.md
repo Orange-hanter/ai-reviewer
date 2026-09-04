@@ -62,6 +62,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_TEMPERATURE` | `0.4` | Consensus mode |
 | `REVIEW_SEED` | `7` | Детерминизм (где поддерживается) |
 | `REVIEW_REASONING_EFFORT` | `low` | Reasoning effort advisor-вызовов (`none` — быстрее) |
+| `REVIEW_AGGREGATOR_REASONING_EFFORT` | `low` | Reasoning effort ПЕРВОЙ попытки JSON-вызовов (агрегатор жюри, verifier). Рассуждение провайдер считает completion-токенами: замер — 1903 completion-токена на находку у `minimax-m3` против 474 у `sonnet`, вся разница — reasoning. Каскад ретраев `chatJson` (пустой content / оборванный JSON) по-прежнему уходит в `none` и этой ручкой не управляется |
 | `REVIEW_PROMPT_LAYOUT` | `legacy` | `shared-prefix` — общая рамка и контекст чанка первыми, инструкция роли последней: все роли чанка делят побайтово одинаковый префикс, который провайдер может отдать из кэша. **Замер `pr-review-probe-cache` показал, что Ollama Cloud скидки за общий префикс не даёт** — включать имеет смысл только на провайдере с префиксным кэшем, проверив тем же пробником |
 | `REVIEW_HTTP_RETRIES` | `3` | Retry GitHub + Ollama |
 | `REVIEW_LLM_TIMEOUT_MS` | `420000` | Таймаут одной попытки LLM. 240000 обрывали половину prose-вызовов (медиана kimi — 331 с): вход оплачен, ответа нет |
@@ -89,6 +90,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_ACTIONABILITY_MIN` | `4` | Порог суммы весов сигналов для inline |
 | `REVIEW_MAX_ADVISORY_INLINE` | `5` | Сколько advisory максимум уходит в inline |
 | `REVIEW_VERIFY_ADVISORY` | `5` | Сколько лучших advisory отдать verifier'у |
+| `REVIEW_VERIFY_ADVISORY_MIN` | `REVIEW_ACTIONABILITY_MIN − 3` (= `1`) | Порог **допуска** advisory к verifier'у — отдельный от порога маршрута и намеренно ниже его на **вес сигнала `verified`** (3, см. `ACTIONABILITY_SIGNALS` в [`lib/actionability.mjs`](../lib/actionability.mjs)). Кандидатом становится всё, что *станет* доказуемым, если verifier подтвердит; окончательный порог inline остаётся `REVIEW_ACTIONABILITY_MIN`. Равные пороги давали курицу и яйцо: чтобы minor дошёл до verifier'а за +3, он должен был уже набрать 4 без него (docs/review-quality.md §2.2, P1) |
 | `REVIEW_MAX_INLINE` | `50` | Потолок inline-комментариев на прогон |
 
 ## Verifier (Pass B)
@@ -99,6 +101,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_VERIFIER_MODEL` | `deepseek-v4-pro` | Модель-судья (вне пула advisors) |
 | `REVIEW_VERIFIER_MAX` | `12` | Максимум кандидатов на проверку |
 | `REVIEW_VERIFIER_TEMPERATURE` | `0.2` | — |
+| `REVIEW_VERIFIER_CONTEXT_MARGIN` | `80` | ±строк вокруг каждой строки-кандидата в контексте verifier'а. Пересекающиеся окна сливаются, пропуски помечаются `… (строки N–M пропущены)` — реальные номера строк сохраняются. Файл, у которого хоть один кандидат без строки, отдаётся целиком. Второй проход смотрит одну-две строки на файл и делает это ДРУГОЙ моделью (кэш префикса advisor'ов не работает), поэтому целый файл до `REVIEW_MAX_FILE_LINES` строк он не окупает — см. [`lib/context-window.mjs`](../lib/context-window.mjs) |
 | `REVIEW_VERIFIER_STRICT` | `1` | Нет вердикта → находка понижается до minor (fail-closed) |
 
 ## Инкрементальный прогон

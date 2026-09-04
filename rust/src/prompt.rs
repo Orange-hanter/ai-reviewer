@@ -164,8 +164,10 @@ Analyze the PR diff and full file context. List ONLY real defects: bugs, securit
 layer-boundary violations, missing tests for non-trivial logic. Do NOT nitpick style (eslint/tsc).
 Write IN RUSSIAN as concise bullet points:
 - [severity] `file:line` — title: explanation (severity = critical|major|minor)
-Report AT MOST 8 items, strongest first. Do NOT report nits. Report a minor ONLY if
-you can quote the offending line verbatim AND name a concrete fix; otherwise leave it out.
+  quote: <one line copied verbatim from the diff or file context>
+Report AT MOST 8 items, strongest first. Do NOT report nits. EVERY item, whatever its
+severity, MUST carry its own `quote:` line: if you cannot quote the offending line verbatim AND name a
+concrete fix, leave the item out.
 Do NOT output JSON — a separate aggregator will synthesize structured findings from your advice.
 If nothing serious — say «серьёзных замечаний нет»."#;
 
@@ -179,28 +181,42 @@ const SPECIALIST_TAIL: &str = r#"
 
 Analyze the PR diff and full file context. List ONLY issues in YOUR specialty. Write IN RUSSIAN as bullets:
 - [severity] `file:line` — title: explanation (severity = critical|major|minor)
+  quote: <one line copied verbatim from the diff or file context>
 Report AT MOST 8 items, strongest first — a long tail costs the jury more than it finds.
-Do NOT report nits. Report a minor ONLY if you can quote the offending line verbatim AND name a concrete fix;
-otherwise leave it out. Better three proven defects than twenty observations.
+Do NOT report nits. EVERY item, whatever its severity, MUST carry its own `quote:` line: if you cannot
+quote the offending line verbatim AND name a concrete fix, leave the item out.
+Better three proven defects than twenty observations.
 Do NOT output JSON — the jury aggregator will refute/verify each claim.
 If nothing in your specialty — say «в моей области серьёзных замечаний нет»."#;
 
-const AGGREGATOR_TAIL: &str = r#"
+// Хвост системного промпта жюри разрезан на четыре части: два абзаца УСЛОВНЫ и едут только
+// вместе со своей секцией в user-части — BLAST-RADIUS RULE при непустом blast-radius,
+// CONVERGENCE при непустых находках прошлого прогона (RFC 04, экономия входа). Ведущий `\n\n`
+// принадлежит самому условному абзацу: иначе выключенный блок оставляет висячую пустую строку
+// и текст расходится с JS-копией побайтово.
+//
+// Потолок числа находок у жюри (AT MOST 12) зашит с обеих сторон: см. AGGREGATOR_MAX_ITEMS
+// в lib/prompt.mjs — расхождение даёт разные промпты с бинарём и без него.
+const AGGREGATOR_TAIL_HEAD: &str = r#"
 What to look for (in decreasing importance): real bugs and logic errors; vulnerabilities (injections,
 privilege/data leaks, RBAC bypass); layer-boundary violations and duplication of canonical primitives;
 races/edge-cases; missing tests for non-trivial logic; breaking callers per blast-radius.
-Do NOT nitpick style/formatting/naming — eslint and tsc catch those.
+Do NOT nitpick style/formatting/naming — eslint and tsc catch those."#;
+
+const AGGREGATOR_BLAST_RULE: &str = r#"
 
 BLAST-RADIUS RULE: when the "Blast-radius" section lists callers/dependents outside the diff, treat a
 signature/behavior/RBAC change to that symbol as a likely regression for those callers unless the PR
 updates them too or the change is proven compatible. Prefer a critical/major finding that names at
 least one concrete caller (symbol @ path) from that section. Trust [EXTRACTED] edges over [INFERRED];
 entries marked cross-community are stronger regression signals (structurally distant in the AST graph).
-If blast-radius is empty or says symbols were not resolved — do NOT invent imaginary callers.
+If blast-radius is empty or says symbols were not resolved — do NOT invent imaginary callers."#;
+
+const AGGREGATOR_TAIL_MID: &str = r#"
 
 Respond STRICTLY with a single JSON object inside a ```json fence, with no text around it. Schema:
 {
-  "summary": "1–3 sentences: overall verdict, WRITTEN IN RUSSIAN",
+  "summary": "one sentence: overall verdict, WRITTEN IN RUSSIAN",
   "verdict": "approve" | "comment" | "changes_requested",
   "findings": [
     {
@@ -209,7 +225,7 @@ Respond STRICTLY with a single JSON object inside a ```json fence, with no text 
       "severity": "critical" | "major" | "minor" | "nit",
       "confidence": 0.0-1.0,
       "title": "short title, WRITTEN IN RUSSIAN",
-      "body": "explanation of the problem and how to fix it, WRITTEN IN RUSSIAN",
+      "body": "2–3 sentences: what breaks, why, and the fix, WRITTEN IN RUSSIAN",
       "quote": "1–3 lines of code copied verbatim from the shown diff or full file context",
       "suggestion": "opt. fixed code as one or several lines"
     }
@@ -221,6 +237,7 @@ diff. If a finding is not about a specific line — omit line (leave 0). Each fi
 `quote`: 1–3 lines copied verbatim from the diff or attached file context that prove the issue.
 Do not invent findings without a real problem — an empty findings array is fine. Set confidence to how sure you are (0–1); only use ≥0.8
 for critical/major you want to block merge on.
+Output AT MOST 12 findings, strongest first — the specialists already capped theirs at 8 each; do not multiply them.
 
 Do NOT flag as a finding: (a) version numbers of GitHub Actions/Node/tools as "non-existent" — your
 knowledge may be stale, the versions in the repo are working; (b) deliberate project decisions — sending
@@ -238,7 +255,9 @@ CONTEXT AND "NO OPEN QUESTIONS": you have the FULL content of the changed files 
 the blast-radius of their dependencies. USE this to RESOLVE your doubts instead of leaving them open. Each
 finding must be a verified STATEMENT with a concrete fix — NOT a question ("what if…?", "please check …")
 and NOT a "maybe". If the answer is in the provided code — check it and draw a conclusion. If there is not
-enough data even with this context — do NOT invent a finding (better to skip it).
+enough data even with this context — do NOT invent a finding (better to skip it)."#;
+
+const AGGREGATOR_CONVERGENCE: &str = r#"
 
 CONVERGENCE BETWEEN RUNS: if the "Findings from the PREVIOUS run" section is given below — those are things
 already raised (possibly by another model). Do NOT re-derive the review from scratch and do NOT spawn NEW
@@ -374,11 +393,28 @@ pub fn build_changed_files_section(changed_paths: &[Value], chunk: &Value, ctx: 
             .cloned()
             .collect(),
     };
-    let lines: Vec<String> = changed_paths
+    // Пути ЭТОГО чанка — маркированными пунктами, пути чужих частей — одной строкой:
+    // их роль в промпте ровно одна (доказать, что файл в PR ЕСТЬ), а своя строка с меткой
+    // на каждый стоила ~600 символов входа в каждом вызове прогона. Метка [ANOTHER PART]
+    // стоит один раз на строку — на неё дословно ссылается SPLIT_NOTE. См. lib/prompt.mjs.
+    let mut rows: Vec<String> = changed_paths
         .iter()
+        .filter(|p| !split || chunk_paths.contains(p))
         .map(|p| format!("- `{}`{}", safe_path(p), mark(p)))
         .collect();
-    let mut s = format!("## All changed files in the PR ({})\n{}\n", changed_paths.len(), lines.join("\n"));
+    let elsewhere: Vec<&Value> = if split {
+        changed_paths.iter().filter(|p| !chunk_paths.contains(p)).collect()
+    } else {
+        Vec::new()
+    };
+    if !elsewhere.is_empty() {
+        rows.push(format!(
+            "Reviewed in other parts ({}) — [ANOTHER PART]: {}",
+            elsewhere.len(),
+            elsewhere.iter().map(|p| format!("`{}`", safe_path(p))).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    let mut s = format!("## All changed files in the PR ({})\n{}\n", changed_paths.len(), rows.join("\n"));
     if split {
         s.push_str(SPLIT_NOTE);
     }
@@ -408,12 +444,16 @@ A cross-file concern may still be raised, but only as a risk with confidence ≤
 dependency to check — never as a statement about the unseen file.
 "#;
 
-/// Хвост системного промпта verifier'а (Pass B, R3).
-const VERIFIER_SYSTEM_TAIL: &str = r#"
+/// Условный абзац системного промпта verifier'а: правила чтения blast-radius без самого
+/// blast-radius — чистый расход входа (см. AGGREGATOR_BLAST_RULE). Ведущий `\n` — часть абзаца.
+const VERIFIER_BLAST_RULE: &str = r#"
 When a candidate claims a breaking change / missed caller update and blast-radius lists that caller (or
 another concrete dependent), prefer **verified** unless the PR already updates that caller or the change
 is clearly compatible. Do NOT invent callers that are absent from blast-radius and the shown code.
+"#;
 
+/// Хвост системного промпта verifier'а (Pass B, R3).
+const VERIFIER_SYSTEM_TAIL: &str = r#"
 Do NOT invent new findings. Do NOT nitpick style. Write reasons IN RUSSIAN.
 
 Respond STRICTLY with a single JSON object inside a ```json fence:
@@ -433,6 +473,10 @@ Include one verdict per candidate index. severity field only when decision is do
 pub fn build_verifier_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
     let mut system = String::from("You are a strict code review VERIFIER (second pass). You receive candidate findings from an\ninitial review. For EACH candidate you must decide using ONLY the provided diff, full file context, and\nblast-radius (if present):\n- **verified** — the defect is real and provable from the shown code;\n- **rejected** — false positive, speculative, or already mitigated in context;\n- **downgrade** — real concern but not merge-blocking (set severity to minor or nit).\n");
     system.push_str(&prompt_extra(&ctx.verifier_extra));
+    let blast_blocks = arr_arg(args, "blastBlocks");
+    if !blast_blocks.is_empty() {
+        system.push_str(VERIFIER_BLAST_RULE);
+    }
     system.push_str(VERIFIER_SYSTEM_TAIL);
 
     let candidates = arr_arg(args, "candidates");
@@ -468,7 +512,6 @@ pub fn build_verifier_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Valu
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    let blast_blocks = arr_arg(args, "blastBlocks");
     let blast = if !blast_blocks.is_empty() {
         format!(
             "## Blast-radius (AST dependents — prefer [EXTRACTED] and cross-community as stronger evidence)\n{}\n\n",
@@ -510,12 +553,21 @@ pub fn build_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
         None => str_arg(args, "changedFilesSection"),
     };
 
+    let blast_blocks = arr_arg(args, "blastBlocks");
+    let priors = arr_arg(args, "priorFindings");
+
     let mut system = String::from("You are a senior review engineer. You perform a strict but constructive code review of a PR.\n");
     system.push_str(&rules_block(ctx));
     system.push_str(&prompt_extra(&ctx.aggregator_extra));
-    system.push_str(AGGREGATOR_TAIL);
+    system.push_str(AGGREGATOR_TAIL_HEAD);
+    if !blast_blocks.is_empty() {
+        system.push_str(AGGREGATOR_BLAST_RULE);
+    }
+    system.push_str(AGGREGATOR_TAIL_MID);
+    if !priors.is_empty() {
+        system.push_str(AGGREGATOR_CONVERGENCE);
+    }
 
-    let blast_blocks = arr_arg(args, "blastBlocks");
     let blast = if !blast_blocks.is_empty() {
         format!(
             "## Blast-radius of changed symbols (Graphify AST code graph — who depends on them outside the diff)\n{}\nFormat: `caller` @ file:line [relation][EXTRACTED|INFERRED] [cross-community?]. Use these callers as evidence: if the PR changes a symbol's contract and a listed caller is not updated, that is a merge-blocking regression candidate (cite the caller symbol and path in the finding body).\n",
@@ -532,7 +584,6 @@ pub fn build_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
         String::new()
     };
 
-    let priors = arr_arg(args, "priorFindings");
     let prior_section = if !priors.is_empty() {
         let items: Vec<String> = priors
             .iter()
@@ -703,7 +754,8 @@ mod tests {
 
         let part = build_changed_files_section(&paths, &json!({"paths": ["a.ts", "big.ts"], "partialPaths": ["big.ts"]}), &c).unwrap();
         assert!(part.contains("- `a.ts` — [THIS PART]"));
-        assert!(part.contains("- `b.ts` — [ANOTHER PART]"));
+        // чужая часть — одной строкой, а не пунктом на путь (RFC 04, экономия входа)
+        assert!(part.contains("Reviewed in other parts (1) — [ANOTHER PART]: `b.ts`"));
         assert!(part.contains("- `big.ts` — [THIS PART, SOME HUNKS ONLY]"));
         assert!(part.contains("NO ABSENCE CLAIMS"));
 
@@ -720,7 +772,7 @@ mod tests {
         )
         .unwrap();
         let evil_line = spoofed.lines().find(|l| l.contains("evil.ts")).unwrap();
-        assert_eq!(evil_line, "- `evil.ts  — [THIS PART]` — [ANOTHER PART]");
+        assert_eq!(evil_line, "Reviewed in other parts (1) — [ANOTHER PART]: `evil.ts  — [THIS PART]`");
     }
 
     #[test]
@@ -793,8 +845,62 @@ mod tests {
         let msgs = build_messages(&args, &c).unwrap();
         let user = msgs[1]["content"].as_str().unwrap();
         assert!(user.contains("- `a.ts` — [THIS PART]"));
-        assert!(user.contains("- `b.ts` — [ANOTHER PART]"));
+        assert!(user.contains("Reviewed in other parts (1) — [ANOTHER PART]: `b.ts`"));
         assert!(user.contains("HARD RULE — NO ABSENCE CLAIMS"));
+        // blast и priors пусты — условные абзацы системного промпта не едут
+        let system = msgs[0]["content"].as_str().unwrap();
+        assert!(!system.contains("BLAST-RADIUS RULE"));
+        assert!(!system.contains("CONVERGENCE BETWEEN RUNS"));
+    }
+
+    /// Условные абзацы возвращаются вместе со своей секцией и стыкуются без лишних пустых строк.
+    #[test]
+    fn aggregator_conditional_paragraphs_come_back() {
+        let c = ctx();
+        let args = json!({
+            "annotated": "d",
+            "blastBlocks": ["`foo` @ a.ts:1 [calls][EXTRACTED]"],
+            "pr": {"number": 1, "title": "t"},
+            "fileContents": "",
+            "priorFindings": [{"severity": "major", "file": "a.ts", "line": 1, "title": "t"}],
+        });
+        let msgs = build_messages(&args, &c).unwrap();
+        let system = msgs[0]["content"].as_str().unwrap();
+        assert!(system.contains("catch those.\n\nBLAST-RADIUS RULE: when"));
+        assert!(system.contains("imaginary callers.\n\nRespond STRICTLY"));
+        assert!(system.contains("(better to skip it).\n\nCONVERGENCE BETWEEN RUNS:"));
+        assert!(system.ends_with("not a rotation of wordings."));
+
+        // без обеих секций стыки тоже без висячих пустых строк
+        let bare = json!({
+            "annotated": "d", "blastBlocks": [], "priorFindings": [],
+            "pr": {"number": 1, "title": "t"}, "fileContents": "",
+        });
+        let msgs = build_messages(&bare, &c).unwrap();
+        let system = msgs[0]["content"].as_str().unwrap();
+        assert!(system.contains("catch those.\n\nRespond STRICTLY"));
+        assert!(system.ends_with("(better to skip it)."));
+        assert!(system.contains("Output AT MOST 12 findings"));
+    }
+
+    /// Абзац verifier'а про blast-radius едет только с непустым blast-radius.
+    #[test]
+    fn verifier_blast_paragraph_is_conditional() {
+        let c = ctx();
+        let mk = |blast: Value| {
+            let args = json!({
+                "candidates": [{"severity": "major", "file": "a.ts", "line": 1, "title": "t", "body": ""}],
+                "annotated": "", "fileContents": "", "blastBlocks": blast,
+                "pr": {"number": 1, "title": "t"},
+            });
+            build_verifier_messages(&args, &c).unwrap()[0]["content"].as_str().unwrap().to_string()
+        };
+        let empty = mk(json!([]));
+        assert!(!empty.contains("When a candidate claims a breaking change"));
+        assert!(empty.contains("minor or nit).\n\nDo NOT invent new findings."));
+        let full = mk(json!(["`foo` @ a.ts:1 [calls][EXTRACTED]"]));
+        assert!(full.contains("minor or nit).\n\nWhen a candidate claims a breaking change"));
+        assert!(full.contains("the shown code.\n\nDo NOT invent new findings."));
     }
 
     #[test]

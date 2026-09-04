@@ -12,7 +12,8 @@ import { createReviewEngine } from './lib/engine.mjs';
 import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings, attachFingerprints } from './lib/findings.mjs';
 import { BLAST_FINDING_SOURCE } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
-import { routeFindings, findingLocationKey } from './lib/actionability.mjs';
+import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
+import { buildVerifierFileContents } from './lib/context-window.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
 import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
 import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath } from './lib/router.mjs';
@@ -33,6 +34,46 @@ function logFindingsStage(obs, stage, findings) {
     count: findings.length,
     bySeverity: countBySeverity(findings),
     sample: slimFindings(findings),
+  });
+}
+
+// Обратная карта «человеческая формулировка сигнала → ключ»: в саму находку маршрут пишет
+// actionabilityReasons текстами (их читает рендер инлайна), а метрике нужен стабильный ключ.
+const REASON_KEY_BY_WHY = new Map(
+  Object.entries(ACTIONABILITY_SIGNALS).map(([key, sig]) => [sig.why, key]),
+);
+
+/**
+ * Распределение actionability-скоров (docs/review-quality.md §3, P3.2). `inline=N · outside=M`
+ * не отвечает на вопрос «порог мешает или сигналов нет» — гистограмма отвечает: пик у порога
+ * означает первое, пик в нуле — второе. Топ причин считается по находкам, оставшимся в своде:
+ * это список того, чего им не хватило.
+ */
+function logActionabilityDistribution(obs, { findings, inlineCount, outside, threshold }) {
+  if (!obs?.enabled) return;
+  const histogram = {};
+  for (const f of findings || []) {
+    const s = f?.actionabilityScore;
+    if (!Number.isFinite(s)) continue;
+    histogram[s] = (histogram[s] || 0) + 1;
+  }
+  const reasonCounts = new Map();
+  for (const f of outside || []) {
+    for (const why of f?.actionabilityReasons || []) {
+      const key = REASON_KEY_BY_WHY.get(why) || why;
+      reasonCounts.set(key, (reasonCounts.get(key) || 0) + 1);
+    }
+  }
+  const topOutsideReasons = [...reasonCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 5)
+    .map(([key, count]) => ({ key, count }));
+  obs.logEvent('actionability', {
+    threshold,
+    inline: inlineCount,
+    outside: (outside || []).length,
+    histogram,
+    topOutsideReasons,
   });
 }
 
@@ -99,10 +140,20 @@ async function runVerifierStage(allFindings, {
   // Advisory-кандидаты на подтверждение: доказуемые minor/nit, которые претендуют на строку
   // в PR. Verifier здесь работает не на гейт (severity их не блокирует), а на право занять
   // внимание человека — в инлайн должно уходить проверенное.
+  //
+  // Порог ДОПУСКА сюда ниже порога маршрута (cfg.actionability.verifyMin, дефолт
+  // «порог − вес(verified)» = 1): совпадение порогов было курицей и яйцом — чтобы minor
+  // дошёл до verifier'а за +3, он должен был уже набрать 4 без него, то есть уже уходить
+  // в строку, и verifier для advisory работал только на понижение (docs/review-quality.md
+  // §2.2, P1). Окончательный порог маршрута НЕ трогаем: он считается заново в classify,
+  // уже с вердиктом verifier'а на руках. Цену держит лимит REVIEW_VERIFY_ADVISORY.
+  const verifyThreshold = Number.isFinite(actionability?.verifyMin)
+    ? actionability.verifyMin
+    : actionability?.threshold;
   const advisoryPool = actionability?.verifyAdvisory
     ? routeFindings(allFindings, files, {
       inlineOn: gate.blockOn,
-      threshold: actionability.threshold,
+      threshold: verifyThreshold,
       maxAdvisoryInline: actionability.verifyAdvisory,
       strict: gate.strict,
       ctx: actionabilityCtx || {},
@@ -112,7 +163,17 @@ async function runVerifierStage(allFindings, {
     candidates: advisoryPool,
     max: actionability?.verifyAdvisory || 0,
   });
-  if (advisoryPool.length) log(`verifier: +${advisoryPool.length} advisory-кандидат(ов) по доказуемости`);
+  if (advisoryPool.length) {
+    // Насколько пониженный порог расширил допуск — измеримая величина, а не вера в P1.
+    const admitted = advisoryPool.filter((f) => (f.actionabilityScore ?? 0) < (actionability?.threshold ?? 0)).length;
+    log(`verifier: +${advisoryPool.length} advisory-кандидат(ов) по доказуемости (порог допуска ${verifyThreshold} vs маршрут ${actionability?.threshold}; из них ${admitted} прошли только по пониженному порогу)`);
+    obs.logEvent('verifier_advisory', {
+      pool: advisoryPool.length,
+      admittedByLowerBar: admitted,
+      verifyThreshold,
+      routeThreshold: actionability?.threshold ?? null,
+    });
+  }
   if (!candidates.length) {
     obs.logEvent('verifier_skip', { reason: 'no_candidates' });
     return empty;
@@ -122,15 +183,16 @@ async function runVerifierStage(allFindings, {
     // Verifier получает только файлы/секции диффа с кандидатами, а не весь PR —
     // иначе на большом PR это самый жирный промпт пайплайна.
     const candFiles = new Set(candidates.map((c) => c.file).filter(Boolean));
-    const fileContents = [...contentMap.entries()]
-      .filter(([p]) => candFiles.has(p))
-      .map(([, v]) => v)
-      .join('\n');
+    // …и не файлы целиком, а окна ±contextMargin вокруг строк кандидатов: verifier смотрит
+    // одну-две строки на файл, а платил за 1500 строк — причём другой моделью, то есть без
+    // шанса переиспользовать кэш префикса advisor'ов (lib/context-window.mjs).
+    const ctxWindow = buildVerifierFileContents(contentMap, candidates, { margin: verifier.contextMargin });
+    const fileContents = ctxWindow.text;
     const sections = [...extractFileDiffSections(annotated).entries()]
       .filter(([p]) => candFiles.has(p))
       .map(([, s]) => s);
     const annotatedScoped = sections.length ? sections.join('\n') : annotated;
-    log(`verifier ctx: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, дифф ${annotatedScoped.length}/${annotated.length} симв.`);
+    log(`verifier ctx: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, контекст ${ctxWindow.before}→${ctxWindow.after} симв. (окна ±${verifier.contextMargin}), дифф ${annotatedScoped.length}/${annotated.length} симв.`);
     const verdicts = await engine.verifyFindings(candidates, {
       annotated: annotatedScoped, fileContents, blastBlocks, pr, changedFilesSection,
     });
@@ -678,6 +740,12 @@ export function createReviewPipeline(cfg, deps = {}) {
       logFindingsStage(obs, 'after_gate', allFindings);
 
       const { inline, outside } = findingsFmt.classify(allFindings, files, actionabilityCtx);
+      logActionabilityDistribution(obs, {
+        findings: allFindings,
+        inlineCount: inline.length,
+        outside,
+        threshold: cfg.actionability?.threshold,
+      });
       const { md, counts, total, delta, verdict } = buildSummary(cfg, {
         reviews, ok, allFindings, outside, blastBlocks, blastMetrics, files, pr, headSha, note, blockerClusters,
         verifierStats, refutationStats, prescanResult, fpRemoved,
