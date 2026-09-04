@@ -1,0 +1,16 @@
+{
+  "id": "tp-structure-real-defects",
+  "type": "tp",
+  "description": "PR #6 (structure-контур) pre-fix: 4 реальных дефекта (1 major + 3 minor), подтверждённых ручным разбором, среди 29 FP того же прогона — recall-контроль по локациям",
+  "expect": {
+    "wouldBlock": true,
+    "mustFindLocations": [
+      { "file": "lib/structure-drift.mjs", "lines": [168, 189] },
+      { "file": "lib/structure-assessments.mjs", "lines": [47, 66] },
+      { "file": "lib/structure-mutation.mjs", "lines": [21, 35] },
+      { "file": "lib/structure-context.mjs", "lines": [120, 128] }
+    ],
+    "mustNotFindTitles": ["symlink", "document-path-overlap"],
+    "note": "Разбор прогона — docs/review-quality.md §1. Дефекты: (major) reconcileStructureFindings схлопывает промежуточные статусы прошлого снапшота в 'open' и двигает lastSeenSnapshot у находки, которой в текущем снапшоте нет; (minor) assessDataQuality при нуле function_execution-наблюдений считает unresolvedJoinRate=0 и разрешает missingAllowed — выдаёт незнание за наблюдение «тестов нет»; (minor) contractForMutant без location.line пропускает оба guard'а и привязывает мутанта к произвольному контракту файла с confidence 'exact'; (minor) вторичное усечение structure_context режет dependencies/entities/hints, не подчищая ссылки на выброшенные сущности. Все четыре закрыты регрессионными тестами в main. Дифф УРЕЗАН до девяти файлов lib/structure*.mjs исходного патча PR #6 (35 файлов, 258 КБ): номера строк внутри оставленных файлов совпадают с исходными, чанкование дешевле. mustNotFindTitles — две FP-семьи того же прогона (см. feedback/fp-patterns.jsonl: structure-symlink-guard-landed, drift-path-overlap-heuristic)."
+  }
+}

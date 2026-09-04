@@ -51,3 +51,52 @@
 2. `npm run eval` — гейт post-processing не должен поехать.
 3. `OLLAMA_API_KEY=… npx pr-review-gold` — shadow-прогон с LLM на размеченных TP/FP диффах.
 4. Первый боевой прогон сравнить по Δ-блоку sticky: что появилось и что ушло на том же коде.
+
+## Локальный прогон с полными сигналами
+
+Замер моделей на этом репозитории имеет смысл только тогда, когда детерминированный контур
+жив. Прогон без code graph и без `ast-grep` — это не «движок слабый», а прогон, где сигналы
+`prescan` (+3) и `blastCaller` (+2) выключены средой: разбор такого замера и его последствия —
+в [review-quality.md](review-quality.md) §2.4.
+
+**Профиль.** `.ai-reviewer.json` лежит в корне репозитория и подхватывается автопоиском —
+никакого `REVIEW_PROFILE` для локального прогона задавать не нужно. Он задаёт чувствительную
+зону (`lib/`, `bin/`, `rust/src/`, `pipeline.mjs`) и правила проекта в промпте.
+
+**Code graph** — тем же пином, что и в `examples/ci/pr-review.yml`:
+
+```bash
+python3 -m venv .graphify/venv
+.graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.52
+.graphify/venv/bin/graphify --version          # ожидаем graphify 0.9.52
+
+GRAPHIFY_OUT=.graphify/graphify-out GRAPHIFY_NO_TIPS=1 \
+  .graphify/venv/bin/graphify update . --force
+```
+
+Дальше прогон видит граф через `GRAPHIFY_BIN` и `GRAPH`:
+
+```bash
+export GRAPHIFY_BIN=.graphify/venv/bin/graphify
+export GRAPH=.graphify/graphify-out/graph.json
+```
+
+Проверка: в логе `blast-radius блоков: N` при N > 0 и ненулевой resolve символов вместо
+`graph missing`.
+
+**ast-grep** — отдельный бинарь, ставится пакетным менеджером:
+
+```bash
+brew install ast-grep     # macOS; иначе cargo install ast-grep --locked
+ast-grep --version
+```
+
+Проверка: в логе `prescan R6: N issue(s)` вместо `ENOENT`.
+
+**eslint здесь пуст — и это ожидаемо.** У пакета ноль runtime-зависимостей и нет
+flat-config `eslint.config.js`, поэтому eslint-половина prescan на этом репозитории всегда
+даёт `недоступен (нет node_modules)`. Сигнал `prescan` приходит только от ast-grep, и
+поставляемый в пакете ruleset написан под TypeScript-потребителя — на `.mjs` он не срабатывает.
+Смотреть надо на строку `blast-radius`; нулевой eslint здесь не диагноз.
+
+`.graphify/` и `.ai-review/` — gitignored артефакты локальных прогонов, коммитить их не нужно.
