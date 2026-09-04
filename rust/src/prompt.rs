@@ -173,7 +173,7 @@ If nothing serious — say «серьёзных замечаний нет»."#;
 
 const SPECIALIST_FOCUS: &[(&str, &str)] = &[
     ("security", "Focus ONLY on security: injections, auth/RBAC bypass, IDOR, data leaks, secrets in code,\nunsafe deserialization, SSRF, path traversal. Ignore style and non-security logic nitpicks."),
-    ("correctness", "Focus ONLY on correctness: logic bugs, races, null/edge cases, wrong rounding of money/quantities,\noff-by-one, broken error handling, regressions visible in the diff/context. Ignore security-only and architecture lectures."),
+    ("correctness", "Focus ONLY on correctness: logic bugs, races, null/edge cases, wrong rounding of money/quantities,\noff-by-one, broken error handling, half-done decoding of an external format (a quoted/escaped/encoded value is\nrecognized and sliced out, but the escapes inside it are never decoded back), regressions visible in the\ndiff/context. Ignore security-only and architecture lectures."),
     ("architecture", "Focus ONLY on architecture/layers: module boundaries of this project, forbidden imports,\nduplication of canonical primitives (see the project rules above), blast-radius breaking changes. Ignore pure security and micro-bugs."),
 ];
 
@@ -245,11 +245,13 @@ the diff to the configured Ollama Cloud (it is the owner's subscription) and the
 merge on critical/major; (c) a symbol/function/constant/import as "undefined"/"not imported"/"missing"
 just because you do not SEE its declaration in the shown fragment — a large file is split into chunks and
 the declaration very likely lives in another chunk; (d) claims that code is a "syntax error" or violates
-language/shell/ESM/regex semantics (word splitting, hoisting, import order, escape rules) — you cannot run
-an interpreter here, and such claims are wrong disproportionately often; if you still suspect one, verify
-it against the shown code character-by-character and set confidence below 0.8. Only report a truly LOCAL
-logic error you can prove from the shown code. Look for real defects in the PR code, don't argue with
-architectural decisions.
+language/shell/ESM/regex semantics (word splitting, hoisting, import order, how the interpreter reads an
+escape sequence) — you cannot run an interpreter here, and such claims are wrong disproportionately often;
+if you still suspect one, verify it against the shown code character-by-character and set confidence below
+0.8. That ban is about the LANGUAGE, not about DATA: code that reads a quoted/escaped input format (quoted
+paths, shell quoting, URL/HTML/JSON escaping) and never decodes it back is an ordinary logic bug — report
+it at its real severity. Only report a truly LOCAL logic error you can prove from the shown code. Look for
+real defects in the PR code, don't argue with architectural decisions.
 
 CONTEXT AND "NO OPEN QUESTIONS": you have the FULL content of the changed files (not only the diff) and
 the blast-radius of their dependencies. USE this to RESOLVE your doubts instead of leaving them open. Each

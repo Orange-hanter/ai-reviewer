@@ -39,7 +39,7 @@ Env пайплайна переопределяется как обычно (`MO
 
 | id | Тип | Что проверяет |
 |----|-----|---------------|
-| `tp-real-bugs-unescape` | tp | recall: реальные major (unescape) среди FP-шума → блок |
+| `tp-real-bugs-unescape` | tp | recall по локациям: 2 реальных major (unescape quoted-путей) среди FP-шума → блок |
 | `tp-structure-real-defects` | tp | recall по локациям: 4 реальных дефекта structure-контура среди 29 FP |
 | `fp-noise-no-real-blockers` | fp | precision: все major — подтверждённые FP → без блока |
 | `clean-code-carryover-fingerprint` | clean | precision: смерженный PR без critical/major |
