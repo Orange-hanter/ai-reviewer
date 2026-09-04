@@ -391,3 +391,126 @@ test('pipeline: sticky throw после postReview — ошибка не мол�
   assert.deepEqual(calls.order.slice(0, 2), ['post', 'delete'], 'inline успел уйти до sticky');
   assert.ok(calls.order.includes('sticky'), 'upsertSticky вызывался и упал');
 });
+
+// --- инкрементальный прогон (RFC 05) ---
+
+const TWO_FILE_DIFF = `diff --git a/foo.ts b/foo.ts
+--- a/foo.ts
++++ b/foo.ts
+@@ -1,2 +1,3 @@
+ const a = 1;
+-const b = 2;
++const b = 3;
++export function foo() { return a; }
+diff --git a/bar.ts b/bar.ts
+--- a/bar.ts
++++ b/bar.ts
+@@ -1,1 +1,2 @@
+ const c = 1;
++export function bar() { return c; }
+`;
+
+// Дифф, в котором изменился ТОЛЬКО foo.ts: вход по bar.ts побайтово тот же.
+const TWO_FILE_DIFF_V2 = TWO_FILE_DIFF.replace('const b = 3;', 'const b = 4;');
+
+const barCritical = {
+  model: 'm1', summary: 'нашёл баг в bar', verdict: 'changes_requested',
+  findings: [{
+    file: 'bar.ts', line: 2, severity: 'critical', title: 'блокер в bar', body: 'детали',
+    confidence: 0.9, model: 'm1', quote: 'export function bar() { return c; }',
+  }],
+};
+
+async function runIncremental(diff, stateFile, extraEnv = {}, reviews = [barCritical]) {
+  return runPipeline({
+    diff,
+    reviews,
+    env: { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateFile, ...extraEnv },
+  });
+}
+
+test('инкрементально: неизменившийся файл не ревьюится заново, его блокер переносится', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    const first = await runIncremental(TWO_FILE_DIFF, stateFile);
+    assert.equal(first.code, 1, 'первый прогон блокирует');
+    assert.equal(first.calls.engineRuns, 1);
+    const state = JSON.parse(await readFile(stateFile, 'utf8'));
+    assert.equal(state.findings.length, 1, 'находка сохранена для переноса');
+    assert.ok(state.hashes['bar.ts'] && state.hashes['foo.ts'], 'хэши входа по обоим файлам');
+
+    const noFindings = { model: 'm1', summary: 'по foo чисто', verdict: 'comment', findings: [] };
+    const second = await runIncremental(TWO_FILE_DIFF_V2, stateFile, {}, [noFindings]);
+    assert.equal(second.code, 1, 'блокер по неизменившемуся файлу НЕ потерян');
+    const sticky = second.calls.upsertSticky[0];
+    assert.ok(sticky.includes('блокер в bar'), 'перенесённая находка в отчёте');
+    assert.ok(sticky.includes('Инкрементальный прогон'), 'в отчёте сказано, что часть PR не ревьюилась заново');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('инкрементально: изменившийся файл теряет прошлую находку — её решает свежий прогон', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr2-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    const fooCritical = {
+      model: 'm1', summary: 'баг в foo', verdict: 'changes_requested',
+      findings: [{
+        file: 'foo.ts', line: 3, severity: 'critical', title: 'блокер в foo', body: 'детали',
+        confidence: 0.9, model: 'm1',
+      }],
+    };
+    await runIncremental(TWO_FILE_DIFF, stateFile, {}, [fooCritical]);
+    const clean = { model: 'm1', summary: 'чисто', verdict: 'approve', findings: [] };
+    const second = await runIncremental(TWO_FILE_DIFF_V2, stateFile, {}, [clean]);
+    assert.equal(second.code, 0, 'находка по изменённому файлу не переносится — блокировки нет');
+    assert.ok(!second.calls.upsertSticky[0].includes('блокер в foo'), 'старая находка не всплыла');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('инкрементально: смена конфигурации заставляет прогон быть полным', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr3-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    await runIncremental(TWO_FILE_DIFF, stateFile);
+    const noFindings = { model: 'm1', summary: 'чисто', verdict: 'comment', findings: [] };
+    const second = await runIncremental(TWO_FILE_DIFF, stateFile, { OLLAMA_MODELS: 'm3,m4' }, [noFindings]);
+    assert.equal(second.code, 0, 'перенос не выполнен: прогон полный, находок нет');
+    assert.ok(!second.calls.upsertSticky[0].includes('Инкрементальный прогон'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('инкрементально: без изменений LLM не вызывается, отчёт собран из переноса', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr4-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    await runIncremental(TWO_FILE_DIFF, stateFile);
+    const second = await runIncremental(TWO_FILE_DIFF, stateFile, {}, []);
+    assert.equal(second.calls.engineRuns, 0, 'ни одного вызова движка');
+    assert.equal(second.code, 1, 'перенесённый блокер по-прежнему блокирует');
+    assert.ok(second.calls.upsertSticky[0].includes('блокер в bar'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('инкрементально: выключено по умолчанию — состояние не пишется', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr5-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    await runPipeline({
+      diff: TWO_FILE_DIFF,
+      reviews: [barCritical],
+      env: { REVIEW_INCREMENTAL_STATE: stateFile },
+    });
+    await assert.rejects(() => readFile(stateFile, 'utf8'), 'файла состояния нет');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

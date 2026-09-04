@@ -374,6 +374,11 @@ fn default_paths() -> Map<String, Value> {
     m.insert("fpMarkdown".into(), json!("docs/ai-review-false-positives.md"));
     m.insert("observabilityDir".into(), json!(".ai-review/observability"));
     m.insert("exportDir".into(), json!(".ai-review/export"));
+    // Состояние инкрементального прогона (lib/incremental.mjs).
+    m.insert(
+        "incrementalState".into(),
+        json!(".ai-review/incremental/state.json"),
+    );
     m.insert("structureExportDir".into(), json!(".ai-review/structure"));
     m.insert("coverageLcov".into(), json!("coverage/lcov.info"));
     m.insert("astgrepConfig".into(), json!(""));
@@ -753,6 +758,16 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "enabled": observability_enabled,
             "dir": or_env(env, "REVIEW_OBSERVABILITY_DIR", &ppath(paths, "observabilityDir")),
             "file": or_env(env, "REVIEW_OBSERVABILITY_FILE", "pr-review-runs.jsonl"),
+        }),
+    );
+    // Инкрементальный прогон (RFC 05, lib/incremental.mjs): не ревьюить заново файлы,
+    // чей вход для модели не изменился.
+    out.insert(
+        "incremental".into(),
+        json!({
+            "enabled": env_flag(env, "REVIEW_INCREMENTAL", false),
+            "stateFile": or_env(env, "REVIEW_INCREMENTAL_STATE", &ppath(paths, "incrementalState")),
+            "fullEvery": num_json(num_env(env, "REVIEW_INCREMENTAL_FULL_EVERY", 10.0)),
         }),
     );
     out.insert(

@@ -21,6 +21,10 @@ import { buildSummary, buildRouterSummary, buildLlmUnavailableSummary } from './
 import { buildReviewJson, writeReviewExports } from './lib/export.mjs';
 import { parseTrustedAuthors } from './lib/feedback.mjs';
 import { buildTriageContext, runAutoTriage } from './lib/triage.mjs';
+import {
+  fileInputHashes, configFingerprint, readIncrementalState, writeIncrementalState,
+  planIncremental, markCarried, formatIncrementalNote,
+} from './lib/incremental.mjs';
 
 function logFindingsStage(obs, stage, findings) {
   if (!obs?.enabled) return;
@@ -378,10 +382,56 @@ export function createReviewPipeline(cfg, deps = {}) {
         fileClass,
       };
       const changedFilesSection = buildChangedFilesSection(changedPaths);
-      const chunks = buildChunks(annotated, contentMap, limits);
-      const note0 = chunks.length > 1
-        ? `PR большой — разбит на ${chunks.length} частей для полного охвата (каждая ревьюится отдельно).`
-        : '';
+
+      // Инкрементальный прогон (RFC 05): файлы, чей вход для модели не изменился с прошлого
+      // раза, заново не ревьюим — их находки переносим. Карта PR остаётся ПОЛНОЙ: чанки
+      // увидят остальные файлы как [ANOTHER PART], и запрет absence-claims сработает как
+      // обычно. Планируем до buildChunks, чтобы нарезать только то, что действительно идёт в LLM.
+      const diffSections = extractFileDiffSections(annotated);
+      const inputHashes = fileInputHashes(changedPaths, diffSections, contentMap);
+      const configFp = configFingerprint({ ...cfg, version: cfg.profile?.version });
+      const priorIncremental = cfg.incremental?.enabled
+        ? await readIncrementalState(cfg.incremental.stateFile)
+        : null;
+      const incrementalPlan = cfg.incremental?.enabled
+        ? planIncremental({
+          state: priorIncremental,
+          hashes: inputHashes,
+          changedPaths,
+          configFp,
+          fullEvery: cfg.incremental.fullEvery,
+        })
+        : { mode: 'full', reviewPaths: new Set(changedPaths), carried: [], unchanged: [], reason: 'выключено' };
+      if (cfg.incremental?.enabled) {
+        log(`инкрементальность: ${incrementalPlan.mode} — ${incrementalPlan.reason}`);
+        obs.logEvent('incremental', {
+          mode: incrementalPlan.mode,
+          reason: incrementalPlan.reason,
+          reviewed: incrementalPlan.reviewPaths.size,
+          unchanged: incrementalPlan.unchanged.length,
+          carried: incrementalPlan.carried.length,
+        });
+      }
+      // Дифф для LLM сужаем до ревьюируемых файлов; `files`/`changedPaths` остаются полными —
+      // на них держатся карта PR, отпечатки, гейт и Δ-блок.
+      const annotatedForLlm = incrementalPlan.mode === 'incremental'
+        ? [...diffSections.entries()].filter(([p]) => incrementalPlan.reviewPaths.has(p)).map(([, s]) => s).join('\n')
+        : annotated;
+      const contextForLlm = incrementalPlan.mode === 'incremental'
+        ? new Map([...contentMap.entries()].filter(([p]) => incrementalPlan.reviewPaths.has(p)))
+        : contentMap;
+      const carriedFindings = incrementalPlan.mode === 'incremental'
+        ? markCarried(incrementalPlan.carried, priorIncremental?.headSha || '')
+        : [];
+      if (carriedFindings.length) log(`перенесено находок по неизменившимся файлам: ${carriedFindings.length}`);
+
+      const chunks = buildChunks(annotatedForLlm, contextForLlm, limits);
+      const note0 = [
+        chunks.length > 1
+          ? `PR большой — разбит на ${chunks.length} частей для полного охвата (каждая ревьюится отдельно).`
+          : '',
+        formatIncrementalNote(incrementalPlan),
+      ].filter(Boolean).join(' ');
       // Дедлайн LLM-фазы: после него новые чанки пропускаем и постим частичный отчёт —
       // процесс завершается штатно (sticky/export/observability) до убийства job раннером.
       const deadline = limits.timeBudgetMs > 0 ? Date.now() + limits.timeBudgetMs : 0;
@@ -430,7 +480,12 @@ export function createReviewPipeline(cfg, deps = {}) {
       log(`режим: ${reviewMode}${reviewMode === 'moa'
         ? ` · ${specialists.enabled ? `specialists: ${specialists.assignments.map((a) => `${a.role}=${a.model}`).join(', ')}` : `advisors: ${moa.references.join(', ')}`} · aggregator: ${moa.aggregator}` : ''} · модели: ${models.list.join(', ')} · порог: ${gate.consensusMin}`);
 
-      const reviews = await engine.reviewAllModels(chunks, {
+      // Инкрементальный прогон, в котором не изменился ни один файл: ревьюить нечего, весь
+      // отчёт собирается из перенесённых находок. Это не аутедж LLM — ветку fail-closed
+      // ниже он не поднимает, иначе «ничего не поменялось» блокировало бы merge.
+      const nothingToReview = incrementalPlan.mode === 'incremental' && incrementalPlan.reviewPaths.size === 0;
+      if (nothingToReview) log('инкрементальность: изменившихся файлов нет — LLM не вызывается');
+      const reviews = nothingToReview ? [] : await engine.reviewAllModels(chunks, {
         // changedPaths, а не готовая секция: карту PR («что в этом чанке, что ревьюится
         // отдельно») движок рисует под каждый чанк сам. changedFilesSection остаётся для
         // verifier-стадии — у неё контекст всего PR.
@@ -458,7 +513,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       ];
       logFindingsStage(obs, 'after_llm_merge', allFindings);
 
-      if (!ok.length && (gate.llmRequired || !allFindings.length)) {
+      if (!ok.length && !nothingToReview && (gate.llmRequired || !allFindings.length)) {
         const why = reviews.map((r) => `${r.model}: ${r.error}`).join('; ');
         const whyPublic = reviews.map((r) => `${r.model}: ${publicErrorLabel(r.error)}`).join('; ');
         log('все модели недоступны:', why, gate.llmRequired ? '— fail-closed (REVIEW_LLM_REQUIRED)' : '— fail-open');
@@ -588,6 +643,16 @@ export function createReviewPipeline(cfg, deps = {}) {
           currentFindings = verifierStage.findings;
           const verifierStats = verifierStage.stats;
 
+          // Перенесённые находки подмешиваем ПОСЛЕ refutation и verifier — намеренно.
+          // Обе стадии они уже прошли в том прогоне, где были найдены, и принесли свои
+          // вердикты с собой. Пропусти их здесь ещё раз — и strict-refutation понизила бы
+          // подтверждённый блокер до minor только потому, что в ЭТОМ прогоне жюри не
+          // высказывалось: файл-то не менялся и никому не показывался.
+          if (carriedFindings.length) {
+            currentFindings = [...currentFindings, ...carriedFindings];
+            logFindingsStage(obs, 'after_carry_over', currentFindings);
+          }
+
           return { findings: currentFindings, refutationStats, verifierStats };
         },
       });
@@ -637,6 +702,23 @@ export function createReviewPipeline(cfg, deps = {}) {
         verifierStats, refutationStats, prescanResult,
         blastMetrics, changedPaths,
       }), log, obs);
+
+      // Состояние для следующего прогона. Пишем итоговый набор — тот, что виден человеку
+      // (после FP-фильтра, refutation, verifier и гейта), потому что именно его придётся
+      // переносить. Prescan и blast-radius в перенос не идут: они детерминированы, дёшевы
+      // и пересчитываются на каждом прогоне заново.
+      if (cfg.incremental?.enabled) {
+        const carryable = allFindings.filter((f) => !f.prescan && f.source !== BLAST_FINDING_SOURCE);
+        await writeIncrementalState(cfg.incremental.stateFile, {
+          pr: pr.number,
+          headSha,
+          configFp,
+          // Счётчик прогонов подряд без полного: страховка от накопления дрейфа.
+          sinceFull: incrementalPlan.mode === 'incremental' ? Number(priorIncremental?.sinceFull || 0) + 1 : 0,
+          hashes: inputHashes,
+          findings: carryable,
+        }, log);
+      }
 
       if (dryRun) {
         log('=== DRY-RUN: вывод не постится ===');
