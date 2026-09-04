@@ -59,6 +59,12 @@
   прогонах были локальной конфигурацией, не движком (после: symbols 25/25, graph fresh)
 - **Gold-кейс `tp-structure-real-defects`**: четыре реальных дефекта PR #6 по локациям
 - Событие `actionability` в observability: гистограмма скоров и топ причин свода
+- **Замер прохода** (gold, 3 кейса с LLM, до/после — [RFC 04](proposals/04-token-economy.md)):
+  inline 5 → 12, токенов на инлайн 138 444 → 58 408, completion-токенов жюри на находку
+  5 912 → 3 982, суммарно токенов 692 221 → 700 890 (+1,3 %); recall не ниже базы —
+  `tp-structure-real-defects` нашёл 2 размеченные локации из 4 против 1, ни один ✅ не стал ❌.
+  Эксперимент `REVIEW_AGGREGATOR_REASONING_EFFORT=none` отклонён: completion жюри +5,4 %,
+  `fp-noise-no-real-blockers` ✅ → ❌ — дефолт остаётся `low`
 
 ### Добавлено — два режима под флагом
 
