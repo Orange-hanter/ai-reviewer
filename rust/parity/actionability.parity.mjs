@@ -180,6 +180,12 @@ const edgeFindings = [
   { file: 'server/auth.ts', line: 10, severity: 'minor', advisorClaims: [] },
   { file: 'server/auth.ts', line: 10, severity: 'minor', advisorClaims: 'not-array' },
   { file: 'server/auth.ts', line: 10, severity: 'minor', verifierStatus: 'rejected', advisorClaims: [{ status: 'verified' }] },
+  // RFC 06: refutationStatus гасит jury-штраф только при точном 'downgraded'
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: 'downgraded', advisorClaims: [{ status: 'downgraded' }, { status: 'verified' }] },
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: 'kept', advisorClaims: [{ status: 'downgraded' }, { status: 'verified' }] },
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: 'downgraded_no_claims', advisorClaims: [{ status: 'rejected' }, { status: 'verified' }] },
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: 'downgraded', verifierStatus: 'downgraded', advisorClaims: [{ status: 'downgraded' }] },
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: null, advisorClaims: [{ status: 'rejected' }, { status: 'verified' }] },
   { file: 'server/auth.ts', line: 10, severity: 'minor', consensus: true },
   { file: 'server/auth.ts', line: 10, severity: 'minor', consensus: false },
   { file: 'server/auth.ts', line: 10, severity: 'minor', confidence: 0.8 },

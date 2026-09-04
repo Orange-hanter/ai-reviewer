@@ -192,12 +192,19 @@ pub fn score_actionability(finding: &Value, ctx: &ScoreCtx) -> (i32, Vec<SignalH
             .all(|c| c.get("status").and_then(Value::as_str) == Some("verified"))
     {
         add("jury");
-    } else if claims.iter().any(|c| {
-        matches!(
-            c.get("status").and_then(Value::as_str),
-            Some("rejected") | Some("downgraded")
-        )
-    }) {
+    } else if finding.get("refutationStatus").and_then(Value::as_str) != Some("downgraded")
+        && claims.iter().any(|c| {
+            matches!(
+                c.get("status").and_then(Value::as_str),
+                Some("rejected") | Some("downgraded")
+            )
+        })
+    {
+        // RFC 06: один вердикт жюри — один штраф. Если refutation уже понизила severity
+        // (`refutationStatus === 'downgraded'`), второй раз за тот же факт не вычитаем: иначе одна
+        // понижённая претензия из пяти держит потолок в 1 балл при пороге маршрута 4. Сигнал
+        // остаётся для случая, когда severity не менялась: часть claims отклонена, но есть
+        // verified — decideRefutation дал `keep`.
         add("juryDowngraded");
     }
     if js_truthy(finding.get("consensus").unwrap_or(&Value::Null)) {
@@ -654,6 +661,41 @@ mod tests {
         let keys: Vec<&str> = reasons.iter().map(|r| r.key).collect();
         assert_eq!(keys, vec!["juryDowngraded", "jury"]);
         assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn refutation_downgraded_suppresses_jury_penalty() {
+        // RFC 06: refutation уже понизила severity — второй штраф за тот же вердикт не берём.
+        let base = json!({
+            "file": "a.ts", "line": 1, "severity": "minor", "model": "m", "confidence": 0.9,
+            "advisorClaims": [
+                {"status": "downgraded"}, {"status": "verified"}, {"status": "verified"},
+                {"status": "verified"}, {"status": "verified"},
+            ],
+        });
+        let mut suppressed = base.clone();
+        suppressed["refutationStatus"] = json!("downgraded");
+        let (score, reasons) = score_actionability(&suppressed, &ctx());
+        let keys: Vec<&str> = reasons.iter().map(|r| r.key).collect();
+        assert_eq!(keys, vec!["confidence"]);
+        assert_eq!(score, 1);
+
+        // severity не менялась (`kept`) — штраф на месте.
+        let mut kept = base.clone();
+        kept["refutationStatus"] = json!("kept");
+        let (kept_score, kept_reasons) = score_actionability(&kept, &ctx());
+        let kept_keys: Vec<&str> = kept_reasons.iter().map(|r| r.key).collect();
+        assert_eq!(kept_keys, vec!["juryDowngraded", "confidence"]);
+        assert_eq!(kept_score, -1);
+
+        // verifier-штраф RFC 06 не трогает.
+        let mut verifier = base.clone();
+        verifier["refutationStatus"] = json!("downgraded");
+        verifier["verifierStatus"] = json!("downgraded");
+        let (v_score, v_reasons) = score_actionability(&verifier, &ctx());
+        let v_keys: Vec<&str> = v_reasons.iter().map(|r| r.key).collect();
+        assert_eq!(v_keys, vec!["juryDowngraded", "confidence"]);
+        assert_eq!(v_score, -1);
     }
 
     #[test]
