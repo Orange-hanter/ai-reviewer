@@ -1,0 +1,73 @@
+{
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {},
+      "symbols_resolved": 0,
+      "symbols_total": 0
+    }
+  },
+  "githubResults": {
+    "deleteStaleInline": 0,
+    "postReviewId": 555,
+    "upsertSticky": "created"
+  },
+  "loadDiff": {
+    "draft": false,
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "html_url": "https://github.com/o/r/pull/1",
+      "number": 1,
+      "title": "golden PR"
+    }
+  },
+  "prescan": {
+    "byTool": {
+      "eslint": 1
+    },
+    "error": null,
+    "findings": [
+      {
+        "body": "запрещённый глобал",
+        "confidence": 0.95,
+        "file": "app/server/api.ts",
+        "line": 3,
+        "model": "eslint",
+        "prescan": true,
+        "prescanBlock": true,
+        "severity": "critical",
+        "title": "no-restricted-globals"
+      }
+    ],
+    "lintableTotal": 1,
+    "promptSection": "",
+    "scanned": 1,
+    "skipped": 0,
+    "truncated": false
+  },
+  "priorSticky": {
+    "findings": [],
+    "runs": [],
+    "sha": ""
+  },
+  "reviews": [
+    {
+      "error": "Ollama 500: boom internal detail",
+      "model": "m1"
+    },
+    {
+      "error": "Ollama 429: limit",
+      "model": "m2"
+    }
+  ],
+  "telegram": {
+    "enabled": false
+  },
+  "verifier": {
+    "mode": "none"
+  }
+}

@@ -1,0 +1,7 @@
+diff --git a/server/handler.ts b/server/handler.ts
+--- a/server/handler.ts
++++ b/server/handler.ts
+@@ -1,2 +1,3 @@
+ export function handle() {
++  void 0;
+ }

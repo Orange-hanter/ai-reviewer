@@ -1,0 +1,98 @@
+{
+  "version": 2,
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "pr": {
+    "number": 1,
+    "title": "golden PR",
+    "url": "https://github.com/o/r/pull/1"
+  },
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "reviewMode": "consensus",
+  "router": {
+    "route": "full",
+    "reason": "server/shared/client или иной код"
+  },
+  "wouldBlock": false,
+  "verdict": {
+    "sha": "0123456",
+    "blocked": false,
+    "reproducibility": null
+  },
+  "counts": {
+    "critical": 0,
+    "major": 1,
+    "minor": 0,
+    "nit": 0
+  },
+  "total": 1,
+  "findings": [
+    {
+      "file": "app/client/src/page.tsx",
+      "line": 42,
+      "severity": "major",
+      "title": "Breaking change: caller вне диффа не обновлён (blast-radius)",
+      "body": "Graphify blast-radius: зависимый файл `app/client/src/page.tsx` (`renderUser`) не входит в изменённые файлы PR (другая community в AST-графе; другой слой/сервис относительно изменений) [EXTRACTED]. Проверьте совместимость контракта символа `getUser` с этим caller.",
+      "bodyTruncated": false,
+      "model": "blast-radius",
+      "confidence": 0.9,
+      "consensusBlock": false,
+      "actionabilityScore": 4
+    }
+  ],
+  "blockers": [],
+  "reasoning": [],
+  "blast": {
+    "symbols_total": 2,
+    "symbols_resolved": 1,
+    "affected_nonempty": 1,
+    "graph_status": "fresh",
+    "affected_files": [
+      "app/client/src/page.tsx"
+    ],
+    "cross_community": 0
+  },
+  "swarm": {
+    "version": 1,
+    "role": "external-verdict",
+    "generatedAt": "2026-01-01T00:00:00.000Z",
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "number": 1,
+      "title": "golden PR",
+      "url": "https://github.com/o/r/pull/1"
+    },
+    "wouldBlock": false,
+    "strong": false,
+    "blockers": [],
+    "strongBlockers": 0,
+    "blastScope": {
+      "affected_files": [
+        "app/client/src/page.tsx"
+      ],
+      "symbols_total": 2,
+      "symbols_resolved": 1,
+      "affected_nonempty": 1,
+      "graph_status": "fresh",
+      "cross_community": 0
+    },
+    "suggestedScopeFiles": [
+      "app/client/src/page.tsx"
+    ],
+    "verdict": {
+      "sha": "0123456",
+      "blocked": false,
+      "reproducibility": null
+    },
+    "notes": [
+      "no merge block",
+      "blast scope: 1 file(s) outside PR diff"
+    ]
+  },
+  "prescan": {
+    "findings": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "byTool": null,
+    "error": null
+  }
+}

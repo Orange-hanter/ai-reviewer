@@ -1,0 +1,9 @@
+diff --git a/shared/round.ts b/shared/round.ts
+--- a/shared/round.ts
++++ b/shared/round.ts
+@@ -8,3 +8,5 @@
+ export function round2(n: number) {
+-  return n;
++  return Math.round(n);
++  // extra
+ }

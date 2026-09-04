@@ -1,0 +1,70 @@
+{
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {},
+      "symbols_resolved": 0,
+      "symbols_total": 0
+    }
+  },
+  "githubResults": {
+    "deleteStaleInline": 0,
+    "postReviewId": 555,
+    "upsertSticky": "created"
+  },
+  "loadDiff": {
+    "draft": false,
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "html_url": "https://github.com/o/r/pull/1",
+      "number": 1,
+      "title": "golden PR"
+    }
+  },
+  "prescan": {
+    "byTool": null,
+    "error": null,
+    "findings": [
+      {
+        "body": "Use clientIp(req) from server/net.ts — raw X-Forwarded-For is spoofable and bypasses anti-brute.",
+        "confidence": 1,
+        "file": "server/auth.ts",
+        "line": 42,
+        "model": "astgrep-prescan",
+        "prescan": true,
+        "prescanBlock": true,
+        "ruleId": "raw-x-forwarded-for",
+        "severity": "critical",
+        "title": "ast-grep: raw-x-forwarded-for"
+      }
+    ],
+    "lintableTotal": 0,
+    "promptSection": "",
+    "scanned": 0,
+    "skipped": 0,
+    "truncated": false
+  },
+  "priorSticky": {
+    "findings": [],
+    "runs": [],
+    "sha": ""
+  },
+  "reviews": [
+    {
+      "findings": [],
+      "model": "m1",
+      "summary": "ревью m1",
+      "verdict": "changes_requested"
+    }
+  ],
+  "telegram": {
+    "enabled": false
+  },
+  "verifier": {
+    "mode": "none"
+  }
+}

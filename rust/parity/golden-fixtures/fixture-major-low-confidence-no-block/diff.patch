@@ -1,0 +1,5 @@
+diff --git a/client/foo.ts b/client/foo.ts
+--- a/client/foo.ts
++++ b/client/foo.ts
+@@ -1,1 +1,2 @@
++export const x = 1;

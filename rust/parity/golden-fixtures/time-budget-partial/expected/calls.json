@@ -1,0 +1,30 @@
+{
+  "blastRuns": 1,
+  "deleteStaleInline": [
+    {
+      "exceptReviewId": 555
+    }
+  ],
+  "engineRuns": 1,
+  "loadDiff": 1,
+  "order": [
+    "post",
+    "delete",
+    "sticky"
+  ],
+  "postReview": [
+    {
+      "headSha": "0123456789abcdef0123456789abcdef01234567",
+      "inline": []
+    }
+  ],
+  "prescanRuns": 1,
+  "readPriorStickyData": 1,
+  "telegram": [],
+  "upsertSticky": [
+    {
+      "bytes": 1250
+    }
+  ],
+  "verifierRuns": 0
+}

@@ -1,0 +1,8 @@
+diff --git a/docs/architecture.md b/docs/architecture.md
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -1,2 +1,3 @@
+ # Архитектура
+-Старый абзац.
++Новый абзац.
++Ещё строка.

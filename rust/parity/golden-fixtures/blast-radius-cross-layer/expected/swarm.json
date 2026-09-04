@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "role": "external-verdict",
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "pr": {
+    "number": 1,
+    "title": "golden PR",
+    "url": "https://github.com/o/r/pull/1"
+  },
+  "wouldBlock": false,
+  "strong": false,
+  "blockers": [],
+  "strongBlockers": 0,
+  "blastScope": {
+    "affected_files": [
+      "app/client/src/page.tsx"
+    ],
+    "symbols_total": 2,
+    "symbols_resolved": 1,
+    "affected_nonempty": 1,
+    "graph_status": "fresh",
+    "cross_community": 0
+  },
+  "suggestedScopeFiles": [
+    "app/client/src/page.tsx"
+  ],
+  "verdict": {
+    "sha": "0123456",
+    "blocked": false,
+    "reproducibility": null
+  },
+  "notes": [
+    "no merge block",
+    "blast scope: 1 file(s) outside PR diff"
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {},
+      "symbols_resolved": 0,
+      "symbols_total": 0
+    }
+  },
+  "githubResults": {
+    "deleteStaleInline": 0,
+    "postReviewId": 555,
+    "upsertSticky": "created"
+  },
+  "loadDiff": {
+    "draft": false,
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "html_url": "https://github.com/o/r/pull/1",
+      "number": 1,
+      "title": "golden PR"
+    }
+  },
+  "prescan": {
+    "byTool": null,
+    "error": null,
+    "findings": [],
+    "lintableTotal": 0,
+    "promptSection": "",
+    "scanned": 0,
+    "skipped": 0,
+    "truncated": false
+  },
+  "priorSticky": {
+    "findings": [],
+    "runs": [],
+    "sha": ""
+  },
+  "reviews": [
+    {
+      "findings": [
+        {
+          "advisorClaims": [
+            {
+              "reason": "auth middleware выше",
+              "role": "security",
+              "status": "rejected"
+            },
+            {
+              "reason": "не баг логики",
+              "role": "correctness",
+              "status": "rejected"
+            },
+            {
+              "reason": "слой ok",
+              "role": "architecture",
+              "status": "rejected"
+            }
+          ],
+          "body": "нет проверки userId",
+          "confidence": 0.95,
+          "file": "server/api.ts",
+          "line": 11,
+          "model": "moa-specialist",
+          "severity": "critical",
+          "title": "IDOR на подписке"
+        }
+      ],
+      "model": "moa-specialist",
+      "summary": "ревью moa-specialist",
+      "verdict": "changes_requested"
+    }
+  ],
+  "telegram": {
+    "enabled": false
+  },
+  "verifier": {
+    "mode": "none"
+  }
+}

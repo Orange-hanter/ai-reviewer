@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "role": "external-verdict",
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "pr": {
+    "number": 1,
+    "title": "golden PR",
+    "url": "https://github.com/o/r/pull/1"
+  },
+  "wouldBlock": true,
+  "strong": true,
+  "blockers": [
+    {
+      "file": "app/server/api.ts",
+      "line": 3,
+      "severity": "critical",
+      "title": "no-restricted-globals",
+      "prescan": true,
+      "confidence": 0.95
+    }
+  ],
+  "strongBlockers": 1,
+  "blastScope": {
+    "affected_files": [],
+    "symbols_total": 0,
+    "symbols_resolved": 0,
+    "affected_nonempty": 0,
+    "graph_status": "fresh",
+    "cross_community": 0
+  },
+  "suggestedScopeFiles": [],
+  "verdict": {
+    "sha": "0123456",
+    "blocked": true,
+    "reproducibility": null
+  },
+  "notes": [
+    "strong: all blockers independently confirmed (prescan or verifier)",
+    "blast scope empty"
+  ]
+}

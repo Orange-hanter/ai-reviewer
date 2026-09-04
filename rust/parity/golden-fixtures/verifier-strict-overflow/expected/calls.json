@@ -1,0 +1,55 @@
+{
+  "blastRuns": 1,
+  "deleteStaleInline": [
+    {
+      "exceptReviewId": 555
+    }
+  ],
+  "engineRuns": 1,
+  "loadDiff": 1,
+  "order": [
+    "post",
+    "delete",
+    "sticky"
+  ],
+  "postReview": [
+    {
+      "headSha": "0123456789abcdef0123456789abcdef01234567",
+      "inline": [
+        {
+          "line": 1,
+          "path": "app/server/api.ts"
+        },
+        {
+          "line": 2,
+          "path": "app/server/api.ts"
+        },
+        {
+          "line": 3,
+          "path": "app/server/api.ts"
+        },
+        {
+          "line": 4,
+          "path": "app/server/api.ts"
+        },
+        {
+          "line": 5,
+          "path": "app/server/api.ts"
+        },
+        {
+          "line": 6,
+          "path": "app/server/api.ts"
+        }
+      ]
+    }
+  ],
+  "prescanRuns": 1,
+  "readPriorStickyData": 1,
+  "telegram": [],
+  "upsertSticky": [
+    {
+      "bytes": 3748
+    }
+  ],
+  "verifierRuns": 1
+}

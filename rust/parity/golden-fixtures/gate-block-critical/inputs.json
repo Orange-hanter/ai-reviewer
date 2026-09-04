@@ -1,0 +1,67 @@
+{
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {},
+      "symbols_resolved": 0,
+      "symbols_total": 0
+    }
+  },
+  "githubResults": {
+    "deleteStaleInline": 0,
+    "postReviewId": 555,
+    "upsertSticky": "created"
+  },
+  "loadDiff": {
+    "draft": false,
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "html_url": "https://github.com/o/r/pull/1",
+      "number": 1,
+      "title": "golden PR"
+    }
+  },
+  "prescan": {
+    "byTool": null,
+    "error": null,
+    "findings": [],
+    "lintableTotal": 0,
+    "promptSection": "",
+    "scanned": 0,
+    "skipped": 0,
+    "truncated": false
+  },
+  "priorSticky": {
+    "findings": [],
+    "runs": [],
+    "sha": ""
+  },
+  "reviews": [
+    {
+      "findings": [
+        {
+          "body": "подробности находки",
+          "confidence": 0.9,
+          "file": "app/server/api.ts",
+          "line": 4,
+          "model": "m1",
+          "severity": "critical",
+          "title": "IDOR в dropUser"
+        }
+      ],
+      "model": "m1",
+      "summary": "нашёл баг",
+      "verdict": "changes_requested"
+    }
+  ],
+  "telegram": {
+    "enabled": false
+  },
+  "verifier": {
+    "mode": "none"
+  }
+}

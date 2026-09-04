@@ -1,0 +1,10 @@
+diff --git a/app/server/api.ts b/app/server/api.ts
+--- a/app/server/api.ts
++++ b/app/server/api.ts
+@@ -1,4 +1,6 @@
+ import { db } from './db';
+-const LIMIT = 10;
++const LIMIT = 25;
++export function getUser(id: string) { return db.user.findFirst({ where: { id } }); }
++export function dropUser(id: string) { return db.user.delete({ where: { id } }); }
+ export const ready = true;

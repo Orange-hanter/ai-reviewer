@@ -1,0 +1,7 @@
+diff --git a/server/api.ts b/server/api.ts
+--- a/server/api.ts
++++ b/server/api.ts
+@@ -10,3 +10,4 @@
+ export function getUser(id: string) {
++  return db.get(id);
+ }

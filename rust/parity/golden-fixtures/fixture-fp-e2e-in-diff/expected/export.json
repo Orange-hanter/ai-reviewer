@@ -1,0 +1,86 @@
+{
+  "version": 2,
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "pr": {
+    "number": 1,
+    "title": "golden PR",
+    "url": "https://github.com/o/r/pull/1"
+  },
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "reviewMode": "consensus",
+  "router": {
+    "route": "full",
+    "reason": "server/shared/client или иной код"
+  },
+  "wouldBlock": false,
+  "verdict": {
+    "sha": "0123456",
+    "blocked": false,
+    "reproducibility": null
+  },
+  "counts": {
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nit": 0
+  },
+  "total": 0,
+  "findings": [],
+  "blockers": [],
+  "reasoning": [
+    {
+      "role": "model",
+      "model": "m1",
+      "excerpt": "ревью m1",
+      "truncated": false
+    }
+  ],
+  "blast": {
+    "symbols_total": 0,
+    "symbols_resolved": 0,
+    "affected_nonempty": 0,
+    "graph_status": "fresh",
+    "affected_files": [],
+    "cross_community": 0
+  },
+  "swarm": {
+    "version": 1,
+    "role": "external-verdict",
+    "generatedAt": "2026-01-01T00:00:00.000Z",
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "number": 1,
+      "title": "golden PR",
+      "url": "https://github.com/o/r/pull/1"
+    },
+    "wouldBlock": false,
+    "strong": false,
+    "blockers": [],
+    "strongBlockers": 0,
+    "blastScope": {
+      "affected_files": [],
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_status": "fresh",
+      "cross_community": 0
+    },
+    "suggestedScopeFiles": [],
+    "verdict": {
+      "sha": "0123456",
+      "blocked": false,
+      "reproducibility": null
+    },
+    "notes": [
+      "no merge block",
+      "blast scope empty"
+    ]
+  },
+  "prescan": {
+    "findings": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "byTool": null,
+    "error": null
+  }
+}

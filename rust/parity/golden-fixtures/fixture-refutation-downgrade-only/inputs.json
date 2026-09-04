@@ -1,0 +1,79 @@
+{
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {},
+      "symbols_resolved": 0,
+      "symbols_total": 0
+    }
+  },
+  "githubResults": {
+    "deleteStaleInline": 0,
+    "postReviewId": 555,
+    "upsertSticky": "created"
+  },
+  "loadDiff": {
+    "draft": false,
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "html_url": "https://github.com/o/r/pull/1",
+      "number": 1,
+      "title": "golden PR"
+    }
+  },
+  "prescan": {
+    "byTool": null,
+    "error": null,
+    "findings": [],
+    "lintableTotal": 0,
+    "promptSection": "",
+    "scanned": 0,
+    "skipped": 0,
+    "truncated": false
+  },
+  "priorSticky": {
+    "findings": [],
+    "runs": [],
+    "sha": ""
+  },
+  "reviews": [
+    {
+      "findings": [
+        {
+          "advisorClaims": [
+            {
+              "reason": "auth на route-level",
+              "role": "security",
+              "status": "downgraded"
+            },
+            {
+              "reason": "не arch issue",
+              "role": "architecture",
+              "status": "rejected"
+            }
+          ],
+          "body": "стоит проверить auth",
+          "confidence": 0.9,
+          "file": "server/api.ts",
+          "line": 11,
+          "model": "moa-specialist",
+          "severity": "critical",
+          "title": "возможный IDOR"
+        }
+      ],
+      "model": "moa-specialist",
+      "summary": "ревью moa-specialist",
+      "verdict": "changes_requested"
+    }
+  ],
+  "telegram": {
+    "enabled": false
+  },
+  "verifier": {
+    "mode": "none"
+  }
+}

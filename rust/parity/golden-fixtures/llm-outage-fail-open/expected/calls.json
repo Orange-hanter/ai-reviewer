@@ -1,0 +1,22 @@
+{
+  "blastRuns": 1,
+  "deleteStaleInline": [
+    {}
+  ],
+  "engineRuns": 1,
+  "loadDiff": 1,
+  "order": [
+    "delete",
+    "sticky"
+  ],
+  "postReview": [],
+  "prescanRuns": 1,
+  "readPriorStickyData": 1,
+  "telegram": [],
+  "upsertSticky": [
+    {
+      "bytes": 274
+    }
+  ],
+  "verifierRuns": 0
+}

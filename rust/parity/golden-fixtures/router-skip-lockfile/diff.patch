@@ -1,0 +1,6 @@
+diff --git a/package-lock.json b/package-lock.json
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,1 +1,1 @@
+-  "version": "1.0.0"
++  "version": "1.0.1"

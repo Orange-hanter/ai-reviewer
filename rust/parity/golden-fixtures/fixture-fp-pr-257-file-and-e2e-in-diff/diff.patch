@@ -1,0 +1,12 @@
+diff --git a/app/client/public/push-sw.js b/app/client/public/push-sw.js
+--- a/app/client/public/push-sw.js
++++ b/app/client/public/push-sw.js
+@@ -1,3 +1,4 @@
+ self.addEventListener('push', (e) => {});
++self.addEventListener('notificationclick', (e) => {});
+ diff --git a/app/e2e/web-push.spec.ts b/app/e2e/web-push.spec.ts
+--- a/app/e2e/web-push.spec.ts
++++ b/app/e2e/web-push.spec.ts
+@@ -1,2 +1,3 @@
+ test('web push subscribe', async () => {});
++test('dispatch notification', async () => {});

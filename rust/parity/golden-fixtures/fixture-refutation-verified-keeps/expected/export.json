@@ -1,0 +1,148 @@
+{
+  "version": 2,
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "pr": {
+    "number": 1,
+    "title": "golden PR",
+    "url": "https://github.com/o/r/pull/1"
+  },
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "reviewMode": "moa",
+  "router": {
+    "route": "full",
+    "reason": "server/shared/client или иной код"
+  },
+  "wouldBlock": true,
+  "verdict": {
+    "sha": "0123456",
+    "blocked": true,
+    "reproducibility": null
+  },
+  "counts": {
+    "critical": 1,
+    "major": 0,
+    "minor": 0,
+    "nit": 0
+  },
+  "total": 1,
+  "findings": [
+    {
+      "file": "server/api.ts",
+      "line": 11,
+      "severity": "critical",
+      "title": "IDOR на подписке",
+      "body": "прямой db.get без auth",
+      "bodyTruncated": false,
+      "model": "moa-specialist",
+      "confidence": 0.92,
+      "consensusBlock": true,
+      "advisorClaims": [
+        {
+          "role": "security",
+          "status": "verified",
+          "reason": "IDOR подтверждён"
+        },
+        {
+          "role": "correctness",
+          "status": "rejected",
+          "reason": "не про логику"
+        }
+      ],
+      "refutationStatus": "verified",
+      "fp": "34e3e29bd0ec",
+      "actionabilityScore": 0
+    }
+  ],
+  "blockers": [
+    {
+      "file": "server/api.ts",
+      "line": 11,
+      "severity": "critical",
+      "title": "IDOR на подписке",
+      "body": "прямой db.get без auth",
+      "bodyTruncated": false,
+      "model": "moa-specialist",
+      "confidence": 0.92,
+      "consensusBlock": true,
+      "advisorClaims": [
+        {
+          "role": "security",
+          "status": "verified",
+          "reason": "IDOR подтверждён"
+        },
+        {
+          "role": "correctness",
+          "status": "rejected",
+          "reason": "не про логику"
+        }
+      ],
+      "refutationStatus": "verified",
+      "fp": "34e3e29bd0ec",
+      "actionabilityScore": 0
+    }
+  ],
+  "reasoning": [],
+  "refutation": {
+    "kept": 1,
+    "dropped": 0,
+    "downgraded": 0,
+    "noClaims": 0,
+    "downgradedNoClaims": 0
+  },
+  "blast": {
+    "symbols_total": 0,
+    "symbols_resolved": 0,
+    "affected_nonempty": 0,
+    "graph_status": "fresh",
+    "affected_files": [],
+    "cross_community": 0
+  },
+  "swarm": {
+    "version": 1,
+    "role": "external-verdict",
+    "generatedAt": "2026-01-01T00:00:00.000Z",
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "number": 1,
+      "title": "golden PR",
+      "url": "https://github.com/o/r/pull/1"
+    },
+    "wouldBlock": true,
+    "strong": false,
+    "blockers": [
+      {
+        "file": "server/api.ts",
+        "line": 11,
+        "severity": "critical",
+        "title": "IDOR на подписке",
+        "confidence": 0.92
+      }
+    ],
+    "strongBlockers": 0,
+    "blastScope": {
+      "affected_files": [],
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_status": "fresh",
+      "cross_community": 0
+    },
+    "suggestedScopeFiles": [],
+    "verdict": {
+      "sha": "0123456",
+      "blocked": true,
+      "reproducibility": null
+    },
+    "notes": [
+      "wouldBlock without full strong confirmation — treat as advisory for swarm",
+      "blast scope empty"
+    ]
+  },
+  "prescan": {
+    "findings": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "byTool": null,
+    "error": null
+  }
+}

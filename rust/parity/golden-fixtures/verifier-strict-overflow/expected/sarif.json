@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "orakul-ai-review",
+          "version": "1.0",
+          "informationUri": "https://github.com/Orange-hanter/Orakul",
+          "rules": [
+            {
+              "id": "orakul/critical",
+              "name": "critical",
+              "shortDescription": {
+                "text": "AI review — critical"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "orakul/major",
+              "name": "major",
+              "shortDescription": {
+                "text": "AI review — major"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "orakul/minor",
+              "name": "minor",
+              "shortDescription": {
+                "text": "AI review — minor"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "orakul/nit",
+              "name": "nit",
+              "shortDescription": {
+                "text": "AI review — nit"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "orakul/critical",
+          "level": "error",
+          "message": {
+            "text": "баг 1"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/server/api.ts"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "model": "m1",
+            "confidence": 0.9,
+            "consensusBlock": true
+          }
+        },
+        {
+          "ruleId": "orakul/critical",
+          "level": "error",
+          "message": {
+            "text": "баг 4"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/server/api.ts"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ],
+          "properties": {
+            "model": "m1",
+            "confidence": 0.9,
+            "consensusBlock": true
+          }
+        },
+        {
+          "ruleId": "orakul/critical",
+          "level": "error",
+          "message": {
+            "text": "баг 7"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/server/api.ts"
+                },
+                "region": {
+                  "startLine": 7
+                }
+              }
+            }
+          ],
+          "properties": {
+            "model": "m1",
+            "confidence": 0.9,
+            "consensusBlock": true
+          }
+        },
+        {
+          "ruleId": "orakul/critical",
+          "level": "error",
+          "message": {
+            "text": "баг 10"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/server/api.ts"
+                },
+                "region": {
+                  "startLine": 10
+                }
+              }
+            }
+          ],
+          "properties": {
+            "model": "m1",
+            "confidence": 0.9,
+            "consensusBlock": true
+          }
+        }
+      ],
+      "automationDetails": {
+        "description": {
+          "text": "AI code review PR #1"
+        },
+        "guid": "ce0dc941-9eef-46f4-9668-a743d1f84a00"
+      }
+    }
+  ]
+}

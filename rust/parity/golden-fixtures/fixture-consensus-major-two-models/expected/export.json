@@ -1,0 +1,141 @@
+{
+  "version": 2,
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "pr": {
+    "number": 1,
+    "title": "golden PR",
+    "url": "https://github.com/o/r/pull/1"
+  },
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "reviewMode": "consensus",
+  "router": {
+    "route": "full",
+    "reason": "server/shared/client или иной код"
+  },
+  "wouldBlock": true,
+  "verdict": {
+    "sha": "0123456",
+    "blocked": true,
+    "reproducibility": null
+  },
+  "counts": {
+    "critical": 0,
+    "major": 2,
+    "minor": 0,
+    "nit": 0
+  },
+  "total": 2,
+  "findings": [
+    {
+      "file": "shared/round.ts",
+      "line": 10,
+      "severity": "major",
+      "title": "не round2",
+      "body": "Math.round вместо канона",
+      "bodyTruncated": false,
+      "model": "m1",
+      "confidence": 0.85,
+      "consensusBlock": true,
+      "fp": "e94358eae70e",
+      "actionabilityScore": 4
+    },
+    {
+      "file": "shared/round.ts",
+      "line": 11,
+      "severity": "major",
+      "title": "не round2",
+      "body": "дублирует canonical",
+      "bodyTruncated": false,
+      "model": "m2",
+      "confidence": 0.9,
+      "consensusBlock": true,
+      "fp": "d10b36aa74a5",
+      "actionabilityScore": 4
+    }
+  ],
+  "blockers": [
+    {
+      "file": "shared/round.ts",
+      "line": 10,
+      "severity": "major",
+      "title": "не round2",
+      "body": "Math.round вместо канона",
+      "bodyTruncated": false,
+      "model": "m1",
+      "confidence": 0.85,
+      "consensusBlock": true,
+      "fp": "e94358eae70e",
+      "actionabilityScore": 4
+    }
+  ],
+  "reasoning": [
+    {
+      "role": "model",
+      "model": "m1",
+      "excerpt": "ревью m1",
+      "truncated": false
+    },
+    {
+      "role": "model",
+      "model": "m2",
+      "excerpt": "ревью m2",
+      "truncated": false
+    }
+  ],
+  "blast": {
+    "symbols_total": 0,
+    "symbols_resolved": 0,
+    "affected_nonempty": 0,
+    "graph_status": "fresh",
+    "affected_files": [],
+    "cross_community": 0
+  },
+  "swarm": {
+    "version": 1,
+    "role": "external-verdict",
+    "generatedAt": "2026-01-01T00:00:00.000Z",
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "number": 1,
+      "title": "golden PR",
+      "url": "https://github.com/o/r/pull/1"
+    },
+    "wouldBlock": true,
+    "strong": false,
+    "blockers": [
+      {
+        "file": "shared/round.ts",
+        "line": 10,
+        "severity": "major",
+        "title": "не round2",
+        "confidence": 0.85
+      }
+    ],
+    "strongBlockers": 0,
+    "blastScope": {
+      "affected_files": [],
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_status": "fresh",
+      "cross_community": 0
+    },
+    "suggestedScopeFiles": [],
+    "verdict": {
+      "sha": "0123456",
+      "blocked": true,
+      "reproducibility": null
+    },
+    "notes": [
+      "wouldBlock without full strong confirmation — treat as advisory for swarm",
+      "blast scope empty"
+    ]
+  },
+  "prescan": {
+    "findings": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "byTool": null,
+    "error": null
+  }
+}
