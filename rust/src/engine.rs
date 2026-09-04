@@ -1,6 +1,6 @@
 //! Порт чистых частей lib/engine.mjs (Фаза 3, шаг 2): скоуп prior findings
 //! по чанку, демоут находок про невидимые чанку файлы, агрегация ответов
-//! модели по чанкам (verdict-ранк + дедуп внутри модели).
+//! модели по чанкам (дедуп внутри модели).
 //!
 //! Оркестрация (параллелизм моделей×чанков, дедлайн-бюджет, fallback, MoA)
 //! намеренно остаётся в JS-обёртке lib/engine.mjs:
@@ -16,23 +16,16 @@
 //! - демоут: только findings с truthy file вне скоупа и severity !== 'nit';
 //!   confidence = min(confidence ?? 0.5, 0.5); chunkIndex/demotedOutOfChunk
 //!   дописываются ТОЛЬКО когда демоутилось > 0;
-//! - aggregateModel: verdict — максимум VERDICT_RANK (ties → первый, как
-//!   стабильный Array.sort в V8); summary — первое truthy; все части с
-//!   ошибкой → error parts[0] || 'нет ответа', skipped только если ВСЕ части
-//!   skipped; дедуп — findings::dedupe_same_model_findings (копии, как {...f}).
+//! - aggregateModel: summary — первое truthy; все части с ошибкой →
+//!   error parts[0] || 'нет ответа', skipped только если ВСЕ части skipped;
+//!   дедуп — findings::dedupe_same_model_findings (копии, как {...f}).
+//!   Окончательный выбор summary (из чанка с кодом) делает JS-обёртка
+//!   pickAggregateSummary поверх обеих веток: ей нужна маршрутизация чанков,
+//!   которая живёт только в lib/chunk-routing.mjs.
 
 use serde_json::{json, Map, Value};
 
 use crate::findings::{dedupe_same_model_findings, js_to_number, js_truthy};
-
-/// lib/constants.mjs VERDICT_RANK.
-fn verdict_rank(v: Option<&Value>) -> f64 {
-    match v.and_then(Value::as_str) {
-        Some("changes_requested") => 2.0,
-        Some("comment") => 1.0,
-        _ => 0.0, // approve и всё прочее (VERDICT_RANK[b] ?? 0)
-    }
-}
 
 /// Состав чанка известен, только если paths непуст и нет unknownPaths
 /// (chunk?.paths?.length && !chunk.unknownPaths — JS truthiness).
@@ -156,19 +149,6 @@ pub fn aggregate_model(model: &str, done: &[Value]) -> (Value, usize) {
         return (Value::Object(out), 0);
     }
 
-    // Вердикт — максимум ранга; равенство → первый (стабильный V8 sort).
-    // Отсутствующий ключ у части (undefined) и explicit null различаем:
-    // undefined-вердикт в JS-агрегате выпадает при JSON.stringify, null — нет.
-    let mut verdict: Option<&Value> = None;
-    let mut seen = false;
-    for p in &ok_parts {
-        let v = p.get("verdict");
-        if !seen || verdict_rank(v) > verdict_rank(verdict) {
-            verdict = v;
-            seen = true;
-        }
-    }
-
     let summary = ok_parts
         .iter()
         .map(|p| p.get("summary").unwrap_or(&Value::Null))
@@ -190,9 +170,6 @@ pub fn aggregate_model(model: &str, done: &[Value]) -> (Value, usize) {
     let mut out = Map::new();
     out.insert("model".into(), Value::String(model.to_string()));
     out.insert("summary".into(), summary);
-    if let Some(v) = verdict {
-        out.insert("verdict".into(), v.clone());
-    }
     out.insert("findings".into(), Value::Array(kept));
     (Value::Object(out), dropped)
 }
@@ -277,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_merges_chunks_dedupes_and_ranks_verdict() {
+    fn aggregate_merges_chunks_and_dedupes() {
         let done = vec![
             done_item("m1", json!({
                 "model": "m1", "summary": "s1", "verdict": "comment",
@@ -291,7 +268,7 @@ mod tests {
         ];
         let (agg, dropped) = aggregate_model("m1", &done);
         assert_eq!(dropped, 1);
-        assert_eq!(agg["verdict"], "changes_requested", "максимум ранга");
+        assert!(agg.get("verdict").is_none(), "поле verdict удалено из контракта агрегата");
         assert_eq!(agg["summary"], "s1", "первое непустое summary");
         assert_eq!(agg["findings"].as_array().unwrap().len(), 1);
         assert_eq!(agg["findings"][0]["dupCount"], 2.0);

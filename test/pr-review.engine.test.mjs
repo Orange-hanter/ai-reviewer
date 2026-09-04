@@ -488,6 +488,90 @@ const sectioned = (bodies) => [
   `### ROLE: architecture\n${bodies[2]}`,
 ].join('\n\n');
 
+// --- summary агрегата: обзор PR берётся из чанка с кодом ---
+
+// Промпт, доносящий до фейковой модели, какой это чанк: MOA_PROMPT отдаёт всем 'base'.
+const SUMMARY_PROMPT = { ...MOA_PROMPT, buildMessages: ({ annotated }) => [{ role: 'user', content: annotated }] };
+// Модель отвечает summary'ем своего чанка — так видно, чей обзор доехал до агрегата.
+// Чанк опознаём по ПЕРВОМУ сообщению: у чанка с кодом жюри дописывает в хвост секцию
+// мнений советников (buildSpecialistAggregatorMessages), у чанка без кода агрегатор
+// получает базовый промпт как есть — msgs.at(-1) в этих двух случаях разное.
+const SUMMARY_OLLAMA = {
+  chatText: async (_m, model) => `prose from ${model}`,
+  chatJson: async (msgs) => ({ summary: `обзор: ${msgs[0].content}`, findings: [] }),
+};
+const summaryChunk = (annotated, paths) => ({ annotated, fileContents: '', paths, partialPaths: [] });
+
+test('summary агрегата: docs-чанк идёт первым, но обзор берётся у чанка с кодом', async () => {
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: SUMMARY_OLLAMA, prompt: SUMMARY_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels([
+    summaryChunk('docs', ['proposals/04-token-economy.md']),
+    summaryChunk('code', ['lib/engine.mjs']),
+  ], routingCtx);
+  assert.equal(res.summary, 'обзор: code',
+    'Walkthrough не должен открываться обзором plan-документа, когда в PR есть код');
+});
+
+test('summary агрегата: без единого кодового чанка — прежнее поведение (первое непустое)', async () => {
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: SUMMARY_OLLAMA, prompt: SUMMARY_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels([
+    summaryChunk('docs', ['docs/a.md']),
+    summaryChunk('fixtures', ['fixtures/a.json']),
+  ], routingCtx);
+  assert.equal(res.summary, 'обзор: docs');
+});
+
+test('summary агрегата: маршрутизация выключена — выбор не меняется', async () => {
+  const cfg = { ...MOA_CFG, limits: { ...MOA_CFG.limits, chunkRouting: false } };
+  const engine = createReviewEngine(cfg, {
+    ollama: SUMMARY_OLLAMA, prompt: SUMMARY_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels([
+    summaryChunk('docs', ['docs/a.md']),
+    summaryChunk('code', ['lib/engine.mjs']),
+  ], routingCtx);
+  assert.equal(res.summary, 'обзор: docs', 'без маршрутизации все чанки равны — первое непустое');
+});
+
+test('summary агрегата: пустой обзор кодового чанка не съедает содержательный', async () => {
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: {
+      ...SUMMARY_OLLAMA,
+      chatJson: async (msgs) => ({
+        summary: msgs[0].content === 'code' ? '' : `обзор: ${msgs[0].content}`,
+        findings: [],
+      }),
+    },
+    prompt: SUMMARY_PROMPT,
+    log: () => {},
+    observability: null,
+  });
+  const [res] = await engine.reviewAllModels([
+    summaryChunk('docs', ['docs/a.md']),
+    summaryChunk('code', ['lib/engine.mjs']),
+  ], routingCtx);
+  assert.equal(res.summary, 'обзор: docs');
+});
+
+test('агрегат не носит verdict модели: поле удалено из контракта', async () => {
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: {
+      ...SUMMARY_OLLAMA,
+      // модель всё равно может прислать лишнее поле — агрегат обязан его игнорировать
+      chatJson: async () => ({ summary: 's', verdict: 'changes_requested', findings: [] }),
+    },
+    prompt: SUMMARY_PROMPT,
+    log: () => {},
+    observability: null,
+  });
+  const [res] = await engine.reviewAllModels([summaryChunk('code', ['lib/engine.mjs'])], routingCtx);
+  assert.equal(res.verdict, undefined, 'verdict модели никто не читал — он не должен появляться в агрегате');
+});
+
 test('specialist merge: одна модель на все роли → один вызов, ответ разложен по ролям', async () => {
   const textCalls = [];
   const ollama = {

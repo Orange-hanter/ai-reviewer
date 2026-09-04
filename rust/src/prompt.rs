@@ -217,7 +217,6 @@ const AGGREGATOR_TAIL_MID: &str = r#"
 Respond STRICTLY with a single JSON object inside a ```json fence, with no text around it. Schema:
 {
   "summary": "one sentence: overall verdict, WRITTEN IN RUSSIAN",
-  "verdict": "approve" | "comment" | "changes_requested",
   "findings": [
     {
       "file": "path as in the diff",
