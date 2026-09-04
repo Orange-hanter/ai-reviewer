@@ -551,6 +551,88 @@ test('specialist merge: never опрашивает роли по отдельн�
   assert.equal(calls.length, 3);
 });
 
+// --- раскладка под префиксный кэш (RFC 04, решение 5) ---
+
+// Мок, повторяющий РЕАЛЬНУЮ форму lib/prompt.mjs: [system, user], а жюри дописывает свою
+// секцию СПЕРЕДИ к последнему user. Именно на эту форму опирается разбор в prompt-layout.
+const REAL_SHAPE_PROMPT = {
+  buildMessages: () => [
+    { role: 'system', content: 'AGGREGATOR RULES + JSON SCHEMA' },
+    { role: 'user', content: 'КОНТЕКСТ ЧАНКА: дифф и файлы' },
+  ],
+  buildSpecialistMessages: (role, base) => [
+    { role: 'system', content: `specialist rules: ${role}` },
+    { role: 'user', content: base.at(-1).content },
+  ],
+  buildSpecialistAggregatorMessages: (base, refs) => base.map((m, i) => (
+    i === base.length - 1
+      ? { role: 'user', content: `jury refs=${refs.map((r) => r.role).join(',')}\n${m.content}` }
+      : m
+  )),
+  buildReferenceMessages: (base) => base,
+  buildAggregatorMessages: (base) => base,
+  buildVerifierMessages: ({ candidates }) => [{ role: 'user', content: `verify ${candidates.length}` }],
+};
+
+test('prompt layout: shared-prefix даёт всем ролям чанка побайтово общий префикс', async () => {
+  const seen = [];
+  const ollama = {
+    chatText: async (msgs) => { seen.push(msgs); return 'prose'; },
+    chatJson: async (msgs) => { seen.push(msgs); return { summary: 's', verdict: 'comment', findings: [] }; },
+  };
+  const engine = createReviewEngine({ ...MOA_CFG, promptLayout: 'shared-prefix' }, {
+    ollama, prompt: REAL_SHAPE_PROMPT, log: () => {}, observability: null,
+  });
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+
+  assert.equal(seen.length, 4, 'три роли и агрегатор');
+  for (const msgs of seen) {
+    assert.equal(msgs.length, 3, 'system + контекст + роль');
+    assert.equal(msgs[0].role, 'system');
+    assert.equal(msgs[2].role, 'user');
+  }
+  const prefix = (m) => `${m[0].content} ${m[1].content}`;
+  const prefixes = new Set(seen.map(prefix));
+  assert.equal(prefixes.size, 1, 'префикс совпадает у всех четырёх вызовов — иначе кэшировать нечего');
+  const roleTails = seen.map((m) => m[2].content);
+  assert.equal(new Set(roleTails).size, 4, 'инструкции ролей при этом различны');
+  assert.match(roleTails[3], /jury refs=/, 'мнения советников уехали в хвост агрегатора');
+  assert.match(roleTails[3], /AGGREGATOR RULES/, 'правила и схема ответа поехали туда же');
+  assert.match(seen[0][1].content, /КОНТЕКСТ ЧАНКА/, 'в общем префиксе — именно контекст');
+});
+
+test('prompt layout: legacy по умолчанию — прежняя форма сообщений', async () => {
+  const seen = [];
+  const ollama = {
+    chatText: async (msgs) => { seen.push(msgs); return 'prose'; },
+    chatJson: async (msgs) => { seen.push(msgs); return { summary: 's', verdict: 'comment', findings: [] }; },
+  };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  assert.ok(seen.every((m) => m.length <= 2), 'без флага сообщения не перестраиваются');
+});
+
+test('prompt layout: неразбираемая форма промпта откатывается на legacy', async () => {
+  const seen = [];
+  const ollama = {
+    chatText: async (msgs) => { seen.push(msgs); return 'prose'; },
+    chatJson: async (msgs) => { seen.push(msgs); return { summary: 's', verdict: 'comment', findings: [] }; },
+  };
+  // Агрегатор дописывает мнения не спереди, а сзади — срез контекста стал бы неверным.
+  const oddPrompt = {
+    ...MOA_PROMPT,
+    buildSpecialistAggregatorMessages: (base) => [...base, { role: 'user', content: 'хвостом' }],
+  };
+  const engine = createReviewEngine({ ...MOA_CFG, promptLayout: 'shared-prefix' }, {
+    ollama, prompt: oddPrompt, log: () => {}, observability: null,
+  });
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  const agg = seen.at(-1);
+  assert.equal(agg.at(-1).content, 'хвостом', 'сообщения агрегатора остались как построены');
+});
+
 // --- verifier runner (createVerifierRunner через engine) ---
 
 test('engine verifier: chatJson verdicts — order/decision доезжают (happy path)', async () => {

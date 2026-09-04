@@ -613,6 +613,20 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
 
     let mut out = Map::new();
     out.insert("reviewMode".into(), json!(review_mode));
+    // Раскладка сообщений под префиксный кэш (RFC 04, решение 5; lib/prompt-layout.mjs).
+    out.insert(
+        "promptLayout".into(),
+        json!(
+            match or_env(env, "REVIEW_PROMPT_LAYOUT", "legacy")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "shared-prefix" => "shared-prefix",
+                _ => "legacy",
+            }
+        ),
+    );
     out.insert("httpRetries".into(), num_json(http_retries));
     out.insert(
         "github".into(),
