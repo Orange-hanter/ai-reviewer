@@ -768,6 +768,9 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             // Добавленный файл целиком лежит в диффе — второй экземпляр в контексте
             // оплачивается каждой ролью на каждом чанке (см. lib/diff.mjs addedFileMarker).
             "skipAddedFileContext": env_flag(env, "REVIEW_SKIP_ADDED_FILE_CONTEXT", true),
+            // Чанк без исполняемого кода обслуживает один агрегатор вместо жюри
+            // (RFC 04, lib/chunk-routing.mjs).
+            "chunkRouting": env_flag(env, "REVIEW_CHUNK_ROUTING", true),
             "maxContextBytes": num_json(num_env(env, "REVIEW_MAX_CONTEXT_BYTES", 180_000.0)),
             "chunkBytes": num_json(num_env(env, "REVIEW_CHUNK_BYTES", 56_000.0)),
             "maxChunks": num_json(num_env(env, "REVIEW_MAX_CHUNKS", 40.0)),

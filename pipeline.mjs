@@ -436,6 +436,9 @@ export function createReviewPipeline(cfg, deps = {}) {
         // verifier-стадии — у неё контекст всего PR.
         blastBlocks, pr, priorFindings, changedPaths, prescanSection: prescanResult.promptSection,
         deadline,
+        // Кому из чанков нужен полный состав специалистов (RFC 04): класс пути и
+        // чувствительные пути знает эта сторона — профиль и мемоизация живут здесь.
+        chunkRouting: { fileClass, sensitive: cfg.profile?.layout?.sensitive || null },
       });
       // max, а не сумма: в consensus-режиме один пропущенный чанк считается у каждой модели.
       const skippedChunks = reviews.reduce((n, r) => Math.max(n, r.skippedChunks || 0), 0);

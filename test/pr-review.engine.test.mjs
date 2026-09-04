@@ -406,6 +406,68 @@ test('engine MoA: все specialists недоступны → error, aggregator 
   assert.match(res.error, /security\/sec-m/);
 });
 
+// --- маршрутизация ролей по содержимому чанка (RFC 04, решение 2) ---
+
+const routingCtx = {
+  pr: {},
+  chunkRouting: { fileClass: (p) => (/\.(?:ts|mjs|js)$/.test(p) ? 'logic' : 'other'), sensitive: null },
+};
+const mkRoutingOllama = (calls) => ({
+  chatText: async (_m, model) => { calls.text.push(model); return `prose from ${model}`; },
+  chatJson: async (msgs, model) => {
+    calls.json.push({ model, tip: msgs.at(-1)?.content });
+    return { summary: 's', verdict: 'comment', findings: [] };
+  },
+});
+
+test('chunk-routing: чанк из документации и данных обслуживает один агрегатор', async () => {
+  const calls = { text: [], json: [] };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: mkRoutingOllama(calls), prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const chunks = [{ annotated: 'd', fileContents: '', paths: ['docs/architecture.md', 'fixtures/a.json'], partialPaths: [] }];
+  await engine.reviewAllModels(chunks, routingCtx);
+  assert.deepEqual(calls.text, [], 'специалисты не вызываются: исполняемого кода в чанке нет');
+  assert.equal(calls.json.length, 1, 'ровно один вызов агрегатора');
+  assert.equal(calls.json[0].tip, 'base', 'без референсов агрегатор получает базовый промпт, без секции жюри');
+});
+
+test('chunk-routing: код, CI-workflow и чувствительный путь жюри не теряют', async () => {
+  const cases = [
+    { name: 'код', paths: ['lib/engine.mjs'], ctx: routingCtx },
+    { name: 'CI-workflow', paths: ['.github/workflows/ci.yml'], ctx: routingCtx },
+    { name: 'shell', paths: ['scripts/deploy.sh'], ctx: routingCtx },
+    {
+      name: 'чувствительный путь профиля',
+      paths: ['config/billing.json'],
+      ctx: { pr: {}, chunkRouting: { fileClass: () => 'other', sensitive: /billing/i } },
+    },
+    { name: 'состав чанка неизвестен', paths: [], ctx: routingCtx },
+  ];
+  for (const c of cases) {
+    const calls = { text: [], json: [] };
+    const engine = createReviewEngine(MOA_CFG, {
+      ollama: mkRoutingOllama(calls), prompt: MOA_PROMPT, log: () => {}, observability: null,
+    });
+    await engine.reviewAllModels([{ annotated: 'd', fileContents: '', paths: c.paths, partialPaths: [] }], c.ctx);
+    assert.equal(calls.text.length, 3, `${c.name}: все три специалиста опрошены`);
+  }
+});
+
+test('chunk-routing: выключенный флаг и отсутствие контекста возвращают полный MoA', async () => {
+  for (const [name, cfg, ctx] of [
+    ['REVIEW_CHUNK_ROUTING=0', { ...MOA_CFG, limits: { ...MOA_CFG.limits, chunkRouting: false } }, routingCtx],
+    ['контекст не передан (DI-прогон)', MOA_CFG, { pr: {} }],
+  ]) {
+    const calls = { text: [], json: [] };
+    const engine = createReviewEngine(cfg, {
+      ollama: mkRoutingOllama(calls), prompt: MOA_PROMPT, log: () => {}, observability: null,
+    });
+    await engine.reviewAllModels([{ annotated: 'd', fileContents: '', paths: ['docs/a.md'], partialPaths: [] }], ctx);
+    assert.equal(calls.text.length, 3, `${name}: состав ролей не урезается`);
+  }
+});
+
 // --- verifier runner (createVerifierRunner через engine) ---
 
 test('engine verifier: chatJson verdicts — order/decision доезжают (happy path)', async () => {
