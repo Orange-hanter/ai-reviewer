@@ -647,7 +647,8 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "references": moa_references,
             "aggregator": moa_aggregator,
             "label": moa_label,
-            "refMaxTokens": num_json(num_env(env, "MOA_REFERENCE_MAX_TOKENS", 12_000.0)),
+            // Страховка под лимит «не более 8 пунктов» из промпта (RFC 04, решение 3).
+            "refMaxTokens": num_json(num_env(env, "MOA_REFERENCE_MAX_TOKENS", 6_000.0)),
             "refTemp": num_json(moa_ref_temp),
             "aggTemp": num_json(moa_agg_temp),
         }),

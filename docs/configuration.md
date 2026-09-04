@@ -53,7 +53,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `MOA_AGGREGATOR` | `minimax-m3` | Жюри-агрегатор (JSON) |
 | `MOA_REFERENCE_TEMPERATURE` | `0.3` | Advisors |
 | `MOA_AGGREGATOR_TEMPERATURE` | `0.4` | Aggregator |
-| `MOA_REFERENCE_MAX_TOKENS` | `12000` | Потолок ответа advisor'а |
+| `MOA_REFERENCE_MAX_TOKENS` | `6000` | Потолок ответа advisor'а. Страховка под лимит «не более 8 пунктов» из промпта роли (RFC 04) |
 | `OLLAMA_MODEL` | `kimi-k2.7-code` | Одиночная модель (consensus) |
 | `OLLAMA_MODELS` | — | Consensus mode: список моделей |
 | `OLLAMA_MODELS_FALLBACK` | `deepseek-v4-flash` | Аварийная замена упавшей модели |
@@ -183,6 +183,8 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_CONCURRENCY` | `10` | Параллельных chunk-pipeline |
 | `REVIEW_MAX_FILE_LINES` | `1500` | Полный текст файла в контекст |
 | `REVIEW_MAX_CONTEXT_BYTES` | `180000` | Потолок контекста |
+| `REVIEW_SKIP_ADDED_FILE_CONTEXT` | `1` | Не прикладывать полный текст **добавленных** файлов: их дифф и есть содержимое целиком. `0` — прежнее поведение |
+| `REVIEW_CHUNK_ROUTING` | `1` | Чанк без исполняемого файла (нет кода, CI-конфигурации и чувствительных путей) обслуживает один агрегатор вместо жюри. `0` — всегда полный MoA |
 | `REVIEW_MAX_SYMBOLS` | `25` | Символов в blast-radius |
 | `REVIEW_MAX_DEPS_PER_SYMBOL` | `20` | Зависимостей на символ |
 | `REVIEW_GOD_NODE_THRESHOLD` | `20` | Порог «god node» в графе |

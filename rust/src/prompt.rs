@@ -156,11 +156,16 @@ fn arr_arg(args: &Value, key: &str) -> Vec<Value> {
 // Статические хвосты системных промптов (перенесены посимвольно из lib/prompt.mjs)
 // ---------------------------------------------------------------------------
 
+// Потолок числа пунктов у одной роли (RFC 04, решение 3). Величина зашита с обеих сторон:
+// см. SPECIALIST_MAX_ITEMS в lib/prompt.mjs — расхождение здесь означает разные промпты
+// на машине с бинарём и без него.
 const REFERENCE_TAIL: &str = r#"
 Analyze the PR diff and full file context. List ONLY real defects: bugs, security/RBAC issues,
 layer-boundary violations, missing tests for non-trivial logic. Do NOT nitpick style (eslint/tsc).
 Write IN RUSSIAN as concise bullet points:
-- [severity] `file:line` — title: explanation (severity = critical|major|minor|nit)
+- [severity] `file:line` — title: explanation (severity = critical|major|minor)
+Report AT MOST 8 items, strongest first. Do NOT report nits. Report a minor ONLY if
+you can quote the offending line verbatim AND name a concrete fix; otherwise leave it out.
 Do NOT output JSON — a separate aggregator will synthesize structured findings from your advice.
 If nothing serious — say «серьёзных замечаний нет»."#;
 
@@ -173,7 +178,10 @@ const SPECIALIST_FOCUS: &[(&str, &str)] = &[
 const SPECIALIST_TAIL: &str = r#"
 
 Analyze the PR diff and full file context. List ONLY issues in YOUR specialty. Write IN RUSSIAN as bullets:
-- [severity] `file:line` — title: explanation (severity = critical|major|minor|nit)
+- [severity] `file:line` — title: explanation (severity = critical|major|minor)
+Report AT MOST 8 items, strongest first — a long tail costs the jury more than it finds.
+Do NOT report nits. Report a minor ONLY if you can quote the offending line verbatim AND name a concrete fix;
+otherwise leave it out. Better three proven defects than twenty observations.
 Do NOT output JSON — the jury aggregator will refute/verify each claim.
 If nothing in your specialty — say «в моей области серьёзных замечаний нет»."#;
 
