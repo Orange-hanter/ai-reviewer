@@ -48,7 +48,8 @@
     "test": "node --test test/*.test.mjs",
     "eval": "node bin/pr-review-eval.mjs",
     "check": "npm test && npm run eval && npm run check:rust",
-    "check:rust": "cargo build --manifest-path rust/Cargo.toml && cargo test --manifest-path rust/Cargo.toml",
+    "check:rust": "cargo build --manifest-path rust/Cargo.toml && cargo test --manifest-path rust/Cargo.toml && npm run check:parity",
+    "check:parity": "for f in rust/parity/*.parity.mjs; do echo \"— $f\"; node \"$f\" || exit 1; done",
     "benchmark:public": "REVIEW_PROFILE=profiles/public-benchmark.json REVIEW_GOLD_DIR=gold-public node bin/pr-review-gold.mjs --jsonl .ai-review/benchmark-public.jsonl && node bin/pr-review-benchmark.mjs .ai-review/benchmark-public.jsonl"
   }
 }
