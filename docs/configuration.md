@@ -16,6 +16,7 @@ pr-review-eval [--fixtures dir] [--json]
 pr-review-gold [--case id]                  # shadow-прогон с LLM на gold-диффах
 pr-review-metrics [path.jsonl]              # сводка по observability-логу
 pr-review-probe-models                      # доступность и латентность моделей
+pr-review-probe-cache [model] [--size N]    # даёт ли провайдер скидку за общий префикс
 pr-review-feedback [--dry-run] [--pr N] [--repo owner/repo]
 pr-review-feedback-batch [--dry-run] [--pr N]
 ```
@@ -61,7 +62,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_TEMPERATURE` | `0.4` | Consensus mode |
 | `REVIEW_SEED` | `7` | Детерминизм (где поддерживается) |
 | `REVIEW_REASONING_EFFORT` | `low` | Reasoning effort advisor-вызовов (`none` — быстрее) |
-| `REVIEW_PROMPT_LAYOUT` | `legacy` | `shared-prefix` — общая рамка и контекст чанка первыми, инструкция роли последней: все роли чанка делят побайтово одинаковый префикс, который провайдер может отдать из кэша. Дефолт консервативный: выигрыш зависит от провайдера (OpenAI-совместимые кэшируют сами, Anthropic требует `cache_control`), а порядок сообщений влияет на находки — включать после gold |
+| `REVIEW_PROMPT_LAYOUT` | `legacy` | `shared-prefix` — общая рамка и контекст чанка первыми, инструкция роли последней: все роли чанка делят побайтово одинаковый префикс, который провайдер может отдать из кэша. **Замер `pr-review-probe-cache` показал, что Ollama Cloud скидки за общий префикс не даёт** — включать имеет смысл только на провайдере с префиксным кэшем, проверив тем же пробником |
 | `REVIEW_HTTP_RETRIES` | `3` | Retry GitHub + Ollama |
 | `REVIEW_LLM_TIMEOUT_MS` | `420000` | Таймаут одной попытки LLM. 240000 обрывали половину prose-вызовов (медиана kimi — 331 с): вход оплачен, ответа нет |
 | `REVIEW_PROVIDER_CONCURRENCY` | `12` | Глобальный cap параллельных LLM-вызовов (AIMD по 429) |

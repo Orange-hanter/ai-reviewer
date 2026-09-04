@@ -14,6 +14,7 @@
     "pr-review-gold": "./bin/pr-review-gold.mjs",
     "pr-review-metrics": "./bin/pr-review-metrics.mjs",
     "pr-review-probe-models": "./bin/pr-review-probe-models.mjs",
+    "pr-review-probe-cache": "./bin/pr-review-probe-cache.mjs",
     "pr-review-feedback": "./bin/pr-review-feedback.mjs",
     "pr-review-feedback-batch": "./bin/pr-review-feedback-batch.mjs",
     "pr-review-benchmark": "./bin/pr-review-benchmark.mjs",
