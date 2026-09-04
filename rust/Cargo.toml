@@ -6,9 +6,20 @@ resolver = "2"
 name = "ai-reviewer"
 version = "0.1.0"
 edition = "2021"
-description = "Rust modules for ai-reviewer (JSON через stdin/stdout, вызываются из JS через execFile)"
+description = "AI-ревью для PR: бинарь pr-review с подкомандами (RFC 04) плюс временный мост из JSON-stdin бинарей, которые зовёт JS через execFile"
 license = "UNLICENSED"
 publish = false
+# Явная секция [[bin]] ниже не отключает автообнаружение целей в edition 2021
+# (autobins выключался только в edition 2015), поэтому 25 JSON-stdin бинарей-мостов
+# из src/bin/ продолжают собираться до cutover. Пишем флаг явно, чтобы будущая
+# смена edition не выключила их молча.
+autobins = true
+
+# Единый бинарь потребителя (RFC 04, решение 1): pr-review <подкоманда>.
+# src/main.rs — только диспетчер clap, вся логика в ai_reviewer::cli::*.
+[[bin]]
+name = "pr-review"
+path = "src/main.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -28,4 +39,32 @@ indexmap = { version = "2", features = ["serde"] }
 sha2 = "0.10"
 # base64: бинарный SCIP-индекс приходит в JSON-контракт как {dataBase64}.
 base64 = "0.22"
-reqwest = { version = "0.13.4", features = ["blocking"] }
+# fancy-regex: backtracking-движок с lookaround и backreferences — только для
+# regex, которые пишет потребитель и диалект которых мы не контролируем
+# (fp-patterns regex/requiresPath, поля профиля lintable/e2eSpec/logic/sensitive,
+# astgrep.scopes). Код движка остаётся на crate regex ради линейного времени.
+fancy-regex = "0.14"
+# include_dir: ruleset ast-grep (sgconfig.yml + правила) вшивается в бинарь —
+# рядом с одиночным исполняемым файлом дерева пакета нет (RFC 04, решение 5).
+include_dir = "0.7"
+# tempfile: вшитый ruleset распаковывается во временный каталог, потому что
+# читает его внешний процесс ast-grep, а не мы.
+tempfile = "3"
+# rustls вместо native-tls (в reqwest 0.13 фича называется именно так, не
+# "rustls-tls"): кросс-сборка релизной матрицы с OpenSSL не воспроизводима
+# (RFC 04, решение 9). default-features = false отключает только неявный подбор;
+# charset/http2/system-proxy перечислены явно, чтобы поведение HTTP-клиента
+# осталось тем же, что было на дефолтах.
+reqwest = { version = "0.13.4", default-features = false, features = [
+    "blocking",
+    "rustls",
+    "charset",
+    "http2",
+    "system-proxy",
+] }
+
+[dev-dependencies]
+# assert_cmd + predicates: чёрноящичные тесты бинаря pr-review в rust/tests/
+# (проверяют коды возврата и вывод так же, как их увидит CI потребителя).
+assert_cmd = "2"
+predicates = "3"

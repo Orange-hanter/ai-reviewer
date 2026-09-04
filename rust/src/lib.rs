@@ -34,3 +34,30 @@ pub mod structure_scip;
 pub mod structure_tests;
 pub mod triage;
 pub mod verifier;
+
+// RFC 04: модули единого бинаря.
+// Список пре-сеян в задаче T03 и заморожен: каждая последующая задача наполняет
+// свои файлы, но не правит этот блок (см. proposals/04-standalone-rust-binary.md).
+pub mod astgrep;
+pub mod blast_findings;
+pub mod cli;
+pub mod concurrency;
+pub mod constants;
+pub mod cost;
+pub mod eval;
+pub mod feedback;
+pub mod fp_patterns;
+pub mod graphify_client;
+pub mod observability;
+pub mod pipeline;
+pub mod prescan;
+pub mod profile;
+pub mod structure;
+pub mod structure_context;
+pub mod structure_drift;
+pub mod structure_export;
+pub mod structure_identity;
+pub mod swarm;
+pub mod testutil;
+pub mod traits;
+pub mod util;
