@@ -701,6 +701,17 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
         json!({
             "enabled": specialists_enabled,
             "assignments": specialist_assignments,
+            // auto — слить роли в один вызов, когда модель у всех одна (RFC 04, решение 4);
+            // always — сливать и при разных моделях; never — опрашивать по отдельности.
+            "merge": match or_env(env, "REVIEW_SPECIALISTS_MERGE", "auto")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "always" => "always",
+                "never" => "never",
+                _ => "auto",
+            },
         }),
     );
     out.insert(

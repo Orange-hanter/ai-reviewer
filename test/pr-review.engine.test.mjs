@@ -468,6 +468,89 @@ test('chunk-routing: выключенный флаг и отсутствие к�
   }
 });
 
+// --- слияние ролей на одной модели (RFC 04, решение 4) ---
+
+const ONE_MODEL_CFG = {
+  ...MOA_CFG,
+  specialists: {
+    enabled: true,
+    merge: 'auto',
+    assignments: [
+      { role: 'security', model: 'solo' },
+      { role: 'correctness', model: 'solo' },
+      { role: 'architecture', model: 'solo' },
+    ],
+  },
+};
+const sectioned = (bodies) => [
+  `### ROLE: security\n${bodies[0]}`,
+  `### ROLE: correctness\n${bodies[1]}`,
+  `### ROLE: architecture\n${bodies[2]}`,
+].join('\n\n');
+
+test('specialist merge: одна модель на все роли → один вызов, ответ разложен по ролям', async () => {
+  const textCalls = [];
+  const ollama = {
+    chatText: async (msgs, model) => {
+      textCalls.push({ model, system: msgs[0]?.content || '' });
+      return sectioned(['- [major] `a.ts:1` — sec', '- [minor] `a.ts:2` — corr', 'в моей области серьёзных замечаний нет']);
+    },
+    chatJson: async () => ({ summary: 's', verdict: 'comment', findings: [] }),
+  };
+  const engine = createReviewEngine(ONE_MODEL_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+
+  assert.equal(textCalls.length, 1, 'один prose-вызов вместо трёх');
+  assert.match(textCalls[0].system, /PANEL of 3/, 'модель предупреждена, что ролей три');
+  const byRole = Object.fromEntries(res.references.map((r) => [r.role, r.text]));
+  assert.match(byRole.security, /sec/);
+  assert.match(byRole.correctness, /corr/);
+  assert.match(byRole.architecture, /серьёзных замечаний нет/);
+  assert.ok(!byRole.security.includes('corr'), 'секции не перетекают друг в друга');
+});
+
+test('specialist merge: сорванный формат не подделывает консенсус', async () => {
+  const ollama = {
+    chatText: async () => 'сплошной текст без заголовков секций',
+    chatJson: async () => ({ summary: 's', verdict: 'comment', findings: [] }),
+  };
+  const engine = createReviewEngine(ONE_MODEL_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  assert.equal(res.references.length, 1, 'один советник, а не три копии одного текста');
+  assert.equal(res.references[0].mergedFallback, true);
+});
+
+test('specialist merge: разные модели по ролям не сливаются', async () => {
+  const models = [];
+  const ollama = {
+    chatText: async (_m, model) => { models.push(model); return 'prose'; },
+    chatJson: async () => ({ summary: 's', verdict: 'comment', findings: [] }),
+  };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  assert.deepEqual(models, ['sec-m', 'corr-m', 'arch-m'], 'три модели — три независимых мнения, сливать нечего');
+});
+
+test('specialist merge: never опрашивает роли по отдельности даже на одной модели', async () => {
+  const calls = [];
+  const ollama = {
+    chatText: async (_m, model) => { calls.push(model); return 'prose'; },
+    chatJson: async () => ({ summary: 's', verdict: 'comment', findings: [] }),
+  };
+  const engine = createReviewEngine(
+    { ...ONE_MODEL_CFG, specialists: { ...ONE_MODEL_CFG.specialists, merge: 'never' } },
+    { ollama, prompt: MOA_PROMPT, log: () => {}, observability: null },
+  );
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  assert.equal(calls.length, 3);
+});
+
 // --- verifier runner (createVerifierRunner через engine) ---
 
 test('engine verifier: chatJson verdicts — order/decision доезжают (happy path)', async () => {

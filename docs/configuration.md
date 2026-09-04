@@ -112,6 +112,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `REVIEW_SPECIALISTS` | `1` (в moa) | Роли security/correctness/architecture вместо анонимных advisors |
+| `REVIEW_SPECIALISTS_MERGE` | `auto` | `auto` — один вызов на все роли, когда модель у них одна (три мнения одной модели независимы только на бумаге); `always` — сливать и при разных моделях; `never` — всегда по отдельности |
 
 ## Prescan (eslint + ast-grep)
 
