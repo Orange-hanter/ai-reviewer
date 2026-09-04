@@ -765,6 +765,9 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "maxDepsPerSymbol": num_json(num_env(env, "REVIEW_MAX_DEPS_PER_SYMBOL", 20.0)),
             "godNodeThreshold": num_json(num_env(env, "REVIEW_GOD_NODE_THRESHOLD", 20.0)),
             "maxFileLines": num_json(num_env(env, "REVIEW_MAX_FILE_LINES", 1500.0)),
+            // Добавленный файл целиком лежит в диффе — второй экземпляр в контексте
+            // оплачивается каждой ролью на каждом чанке (см. lib/diff.mjs addedFileMarker).
+            "skipAddedFileContext": env_flag(env, "REVIEW_SKIP_ADDED_FILE_CONTEXT", true),
             "maxContextBytes": num_json(num_env(env, "REVIEW_MAX_CONTEXT_BYTES", 180_000.0)),
             "chunkBytes": num_json(num_env(env, "REVIEW_CHUNK_BYTES", 56_000.0)),
             "maxChunks": num_json(num_env(env, "REVIEW_MAX_CHUNKS", 40.0)),

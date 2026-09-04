@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
-import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks } from './lib/diff.mjs';
+import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths } from './lib/diff.mjs';
 import { createLlmClient } from './lib/llm.mjs';
-import { createCostTracker } from './lib/cost.mjs';
+import { createCostTracker, efficiencyMetrics } from './lib/cost.mjs';
 import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
 import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs';
 import { createGraphifyClient } from './lib/graphify.mjs';
@@ -238,7 +238,11 @@ export function createReviewPipeline(cfg, deps = {}) {
 
   async function finishObs(obs, data) {
     if (!obs?.enabled) return;
-    await obs.flush(data);
+    // Эффективность считаем здесь, а не в пяти местах присваивания finalObs: единственная
+    // точка выхода прогона, и costTracker к этому моменту видел все вызовы — включая те,
+    // что случились на ветках fail-open.
+    const efficiency = efficiencyMetrics(costTracker.snapshot(), data);
+    await obs.flush(efficiency ? { ...data, ...efficiency } : data);
   }
 
   /** @returns {Promise<number>} exit code */
@@ -315,10 +319,16 @@ export function createReviewPipeline(cfg, deps = {}) {
       }
 
       const prepT0 = Date.now();
+      // Добавленные файлы контекстом не прикладываем: их дифф И ЕСТЬ полный текст, второй
+      // экземпляр оплачивается в каждом вызове каждой роли. На PR из преимущественно новых
+      // файлов это половина всего входа. Символы для blast-radius не теряются:
+      // collectBlastSymbols разбирает changedText, куда строки нового файла уже попали.
+      const addedPaths = limits.skipAddedFileContext ? collectAddedPaths(diff) : new Set();
+      if (addedPaths.size) log(`контекст: ${addedPaths.size} добавленных файл(ов) — дифф уже содержит их целиком, полный текст не прикладываем`);
       // Сначала читаем файлы: collectBlastSymbols добирает exports из полного текста,
       // а не только из hunk-строк (иначе правка тела функции → 0 symbols → пустой blast).
       const [contentMap, rawPriorFindings, prescanResult] = await Promise.all([
-        readChangedFiles(files, limits, log),
+        readChangedFiles(files, limits, log, { addedPaths }),
         (github.readPriorStickyData
           ? github.readPriorStickyData()
           : github.readPriorFindings().then((findings) => ({ findings, runs: [], sha: '' }))
@@ -353,10 +363,19 @@ export function createReviewPipeline(cfg, deps = {}) {
       // Контекст доказуемости для маршрутизации advisory: что уже было в прошлом прогоне,
       // что подтвердил prescan, какого класса файл. Строится ОДИН раз — его читают и
       // verifier-стадия (кого дополнительно проверить), и classify (кого поднять в строку).
+      // Класс пути считает Rust-бинарь через отдельный процесс на вызов, а спрашивают его
+      // трое (actionability по каждой находке, план чанков, маршрутизация ролей) — мемоизация
+      // превращает десятки запусков процесса в один на файл.
+      const fileClassCache = new Map();
+      const fileClass = (path) => {
+        if (!fileClassCache.has(path)) fileClassCache.set(path, classifyFilePath(path));
+        return fileClassCache.get(path);
+      };
+      const chunkClasses = (chunk) => [...new Set((chunk?.paths || []).map(fileClass))].sort();
       const actionabilityCtx = {
         priorKeys: new Set(priorFindings.map(findingLocationKey)),
         prescanKeys: new Set(prescanResult.findings.map(findingLocationKey)),
-        fileClass: classifyFilePath,
+        fileClass,
       };
       const changedFilesSection = buildChangedFilesSection(changedPaths);
       const chunks = buildChunks(annotated, contentMap, limits);
@@ -381,6 +400,16 @@ export function createReviewPipeline(cfg, deps = {}) {
         llmConcurrency: limits.concurrency,
         chunkBytes: limits.chunkBytes,
         blast_radius: blastMetrics,
+        // Состав каждого чанка: без него «прогон стоил N токенов» не разбирается на
+        // слагаемые — не видно, что вход раздул контекст файлов, а не дифф, и что
+        // часть чанков вообще не содержит кода.
+        chunkPlan: chunks.map((c, i) => ({
+          i,
+          diff_chars: c.annotated?.length ?? 0,
+          context_chars: c.fileContents?.length ?? 0,
+          paths: c.paths?.length ?? 0,
+          classes: chunkClasses(c),
+        })),
       });
 
       if (priorFindings.length) log(`прошлых находок подгружено: ${priorFindings.length} (сходимость)`);
@@ -616,7 +645,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         for (const c of inline) console.log(`${c.path}:${c.line}\n  ${c.body.split('\n').slice(0, 2).join(' / ')}`);
         console.log('\n--- SUMMARY MARKDOWN ---\n' + md);
         const exitCode = blockers.length ? 1 : 0;
-        finalObs = { exitCode, dryRun: true, wouldBlock: blockers.length > 0, blockers: blockers.length, total, counts };
+        finalObs = { exitCode, dryRun: true, wouldBlock: blockers.length > 0, blockers: blockers.length, total, counts, inline: inline.length };
         return exitCode;
       }
 
@@ -647,11 +676,11 @@ export function createReviewPipeline(cfg, deps = {}) {
 
       if (blockers.length) {
         log(`⛔ merge ЗАБЛОКИРОВАН: ${blockers.length} кластер(ов) уровня ${gate.blockOn.join('/')}`);
-        finalObs = { exitCode: 1, wouldBlock: true, blockers: blockers.length, total, counts };
+        finalObs = { exitCode: 1, wouldBlock: true, blockers: blockers.length, total, counts, inline: inline.length };
         return 1;
       }
       log(`готово — блокеров нет (${reviewMode}).`);
-      finalObs = { exitCode: 0, wouldBlock: false, blockers: 0, total, counts };
+      finalObs = { exitCode: 0, wouldBlock: false, blockers: 0, total, counts, inline: inline.length };
       return 0;
     } catch (e) {
       finalObs = {

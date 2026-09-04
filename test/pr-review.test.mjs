@@ -12,7 +12,7 @@ import { writeFile, rm, readFile } from 'node:fs/promises';
 import { MARKERS, extractStickyFooterRaw } from '../lib/constants.mjs';
 
 const {
-  parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks,
+  parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, collectAddedPaths,
   extractJsonObject, filterFalsePositiveFindings, clusterFindings,
   hasMarker, publicErrorLabel, loadReviewConfig, readChangedFiles, normalizeConfidence,
   extractFileDiffSections, selectVerifierCandidates, applyVerifierVerdicts,
@@ -553,6 +553,52 @@ test('readChangedFiles: бинарный файл (NUL byte) пропускае�
     const files = new Map([[tmp, { validLines: new Set([1]), changed: [] }]]);
     const map = await readChangedFiles(files, { maxFileLines: 100 });
     assert.equal(map.size, 0, 'бинарь не попадает в контекст модели');
+  } finally {
+    await rm(tmp, { force: true });
+  }
+});
+
+test('collectAddedPaths: новые файлы отделены от изменённых', () => {
+  const diff = [
+    'diff --git a/src/new.ts b/src/new.ts',
+    'new file mode 100644',
+    'index 0000000..1111111',
+    '--- /dev/null',
+    '+++ b/src/new.ts',
+    '@@ -0,0 +1,2 @@',
+    '+export const a = 1;',
+    '+export const b = 2;',
+    'diff --git a/src/old.ts b/src/old.ts',
+    'index 2222222..3333333 100644',
+    '--- a/src/old.ts',
+    '+++ b/src/old.ts',
+    '@@ -1,1 +1,1 @@',
+    '-const x = 1;',
+    '+const x = 2;',
+  ].join('\n');
+  const added = collectAddedPaths(diff);
+  assert.deepEqual([...added], ['src/new.ts'], 'только файл с new file mode');
+  assert.ok(!added.has('src/old.ts'), 'изменённый файл контекст получает как раньше');
+});
+
+test('readChangedFiles: добавленный файл не дублируется контекстом', async () => {
+  const tmp = `.tmp-pr-review-added-${process.pid}.ts`;
+  // Файл заметного размера: экономия измерима только против настоящего тела, а не
+  // против двух строк, которые сами короче любого указателя.
+  await writeFile(tmp, `export const a = 1;\nexport const b = 2;\n${'// заполнение\n'.repeat(200)}`);
+  try {
+    const files = new Map([[tmp, { validLines: new Set([1]), changed: [] }]]);
+    const full = await readChangedFiles(files, { maxFileLines: 100 });
+    assert.match(full.get(tmp), /export const a = 1;/, 'обычный файл прикладывается целиком');
+
+    const skipped = await readChangedFiles(files, { maxFileLines: 100 }, () => {}, {
+      addedPaths: new Set([tmp]),
+    });
+    const marker = skipped.get(tmp);
+    assert.ok(marker, 'путь остаётся в карте контекста — модель должна знать, что файл виден');
+    assert.doesNotMatch(marker, /export const a = 1;/, 'содержимое не дублирует дифф');
+    assert.match(marker, /новый файл/, 'вместо содержимого — указатель на дифф');
+    assert.ok(marker.length < full.get(tmp).length, 'указатель дешевле полного текста');
   } finally {
     await rm(tmp, { force: true });
   }
