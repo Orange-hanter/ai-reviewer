@@ -2,14 +2,27 @@
 //! `/chat/completions` — HTTP, ручной SSE-стриминг, ретраи с backoff,
 //! бюджет таймаута, fail-open по `stream_options/include_usage` на 400.
 //!
-//! Что намеренно НЕ перенесено сюда (и почему):
-//! - Адаптивные семафоры (AIMD-троттлинг на 429): бинарь — одноразовый процесс
-//!   на запрос, вызываемый из JS-обёртки через execFile; внутрипроцессные семафоры
-//!   не имели бы сквозного состояния между запросами. Семафоры живут в JS-обёртке,
-//!   бинарь сообщает о 429 флагом `throttled`;
-//! - JSON-mode graceful fallback (effort=none, больше токенов, снятие
-//!   response_format): живёт в JS-обёртке поверх `extractJsonObject`
-//!   (Rust-модуль json_repair через lib/json.mjs, переиспользуется как есть).
+//! Второй слой (задача T10 RFC 04) — [`RealLlmClient`], порт `createLlmClient`
+//! (`lib/llm.mjs:107-241`): два уровня адаптивных семафоров, AIMD-троттлинг обоих
+//! на 429, каскад ретраев `chatJson`, `chatText` с повтором на `effort=none`
+//! и учёт usage через колбэк `on_usage` (в JS — `costTracker.record`).
+//!
+//! Транспорт ([`chat`]) остаётся общим для двух вызывающих:
+//! - `bin/llm.rs` — JSON-мост до cutover: один процесс на запрос, семафоры и каскад
+//!   держит JS-обёртка `lib/llm.mjs`, а сюда приходит уже развёрнутый `ChatRequest`;
+//! - [`RealLlmClient`] — единый бинарь после cutover: семафоры, каскад и usage
+//!   живут в этом же процессе, JS не участвует.
+//!
+//! Поэтому одна и та же логика ретраев не продублирована: [`chat_with`] — точка,
+//! общая для обоих путей.
+//!
+//! **Дедлайн прогона клиенту не передаётся** — и это не упущение порта. В JS
+//! `ctx.deadline` читает только движок (`deadlineHit`, `lib/engine.mjs:66`,
+//! точки проверки — `lib/engine.mjs:269,318,341,370`): он решает, запускать ли
+//! ЕЩЁ один вызов модели. У клиента бюджет свой и другой — `o.requestTimeoutMs`
+//! на один `chat_request` целиком, вместе с ретраями. Если бы клиент рвал
+//! запрос по дедлайну прогона, движок терял бы уже оплаченный ответ модели
+//! вместо того, чтобы честно пометить чанк `skipped`.
 //!
 //! Паритет с JS (сверен с эталонной копией в lib/llm.mjs):
 //! - SSE: строки режутся по '\n' в любом месте (chunked-границы посреди
@@ -29,13 +42,21 @@
 //! отсутствие AbortController компенсируется per-op таймаутом reqwest +
 //! ручной проверкой бюджета вокруг чтения SSE.
 
+use std::collections::HashMap;
+use std::fmt;
 use std::io::{BufRead, Read};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use regex::Regex;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+
+use crate::concurrency::{AdaptiveSemaphore, SemaphoreStats};
+use crate::json_repair::{extract_json_object, JsonRepairError, RepairedKind};
+use crate::util::redact_secrets_for_log;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChatRequest {
@@ -335,17 +356,37 @@ fn retry_after_of(res: &Response) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// `chatRequest` из lib/llm.mjs целиком (HTTP + SSE + ретраи + бюджет).
-pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
-    let timeout = Duration::from_millis(req.timeout_ms.max(1));
-    let t0 = Instant::now();
-    let budget_left = |t0: Instant| t0.elapsed() < timeout;
-    let client = Client::builder()
+/// HTTP-клиент под бюджет `timeout_ms`: connect- и per-op таймаут (у JS — AbortController).
+///
+/// Отдельная функция, потому что бюджет одинаков для всех вызовов одного прогона
+/// (`o.requestTimeoutMs`), и [`RealLlmClient`] держит один клиент на весь прогон —
+/// пул соединений переиспользуется, как у одного `fetch`-агента в Node.
+pub fn build_http_client(timeout_ms: u64) -> Result<Client, LlmError> {
+    let timeout = Duration::from_millis(timeout_ms.max(1));
+    Client::builder()
         .connect_timeout(timeout)
         // Per-op backstop для зависших connect/read (у JS — AbortController).
         .timeout(timeout)
         .build()
-        .map_err(|e| LlmError::networky(e.to_string(), false))?;
+        .map_err(|e| LlmError::networky(e.to_string(), false))
+}
+
+/// `chatRequest` из lib/llm.mjs целиком (HTTP + SSE + ретраи + бюджет).
+///
+/// Создаёт одноразовый HTTP-клиент — форма для бинаря-моста `bin/llm.rs`, где процесс
+/// живёт один запрос. Внутри прогона зовите [`chat_with`] с общим клиентом.
+pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
+    let client = build_http_client(req.timeout_ms)?;
+    chat_with(&client, req)
+}
+
+/// [`chat`] на готовом HTTP-клиенте. Клиент обязан быть собран
+/// [`build_http_client`] с тем же `timeout_ms`: бюджет ретраев считается здесь,
+/// а per-op таймаут — на клиенте.
+pub fn chat_with(client: &Client, req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
+    let timeout = Duration::from_millis(req.timeout_ms.max(1));
+    let t0 = Instant::now();
+    let budget_left = |t0: Instant| t0.elapsed() < timeout;
 
     let mut attempt: u32 = 0;
     let mut include_usage = req.include_usage;
@@ -425,6 +466,607 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
                     throttled,
                 });
             }
+        }
+    }
+}
+
+// ===========================================================================
+// Клиент LLM — порт createLlmClient (lib/llm.mjs:107-241)
+// ===========================================================================
+
+/// Конфигурация клиента: ровно те поля замороженного конфига, которые читает
+/// `createLlmClient` (`lib/llm.mjs:108`: `const { ollama: o, moa, httpRetries } = cfg`).
+///
+/// Собирается из результата [`crate::config::load_review_config_parts`] через
+/// [`LlmConfig::from_cfg`]; отдельная структура, а не `&Value`, потому что клиент
+/// живёт весь прогон и разбирать JSON на каждый запрос незачем.
+#[derive(Debug, Clone)]
+pub struct LlmConfig {
+    /// `o.base` — без хвостового слэша; URL запроса = `{base}/chat/completions`.
+    pub base: String,
+    /// `o.key` — Bearer-токен провайдера.
+    pub api_key: String,
+    /// `o.seed`: число или отсутствует (`lib/config.mjs:242`; не-integer → дефолт).
+    pub seed: Option<Value>,
+    /// `o.jsonMode` (`REVIEW_JSON_MODE`, дефолт on): `response_format: json_object`
+    /// в первом запросе `chat_json` и условие ветки 4 каскада.
+    pub json_mode: bool,
+    /// `o.temperature` (`REVIEW_TEMPERATURE`, дефолт 0.4) — дефолт `chat_json`.
+    /// `None` — поле `temperature` в payload отсутствует (JS: `undefined` не сериализуется).
+    pub temperature: Option<f64>,
+    /// `o.requestTimeoutMs || 240_000` — бюджет одного `chat_request` целиком
+    /// (все ретраи внутри) и per-op таймаут HTTP-клиента.
+    pub request_timeout_ms: u64,
+    /// `o.effort || 'low'` — `reasoning_effort` для `chat_text`.
+    /// `chat_json` эффорт НЕ берёт отсюда: там он жёстко зашит в каскад (low → none).
+    pub effort: String,
+    /// `o.providerConcurrency || 12` — жёсткий максимум глобального семафора.
+    pub provider_concurrency: usize,
+    /// `o.providerPerModel || 6` — жёсткий максимум семафора одной модели.
+    pub provider_per_model: usize,
+    /// `cfg.httpRetries` (`REVIEW_HTTP_RETRIES`, дефолт 3) — потолок ретраев транспорта.
+    pub http_retries: u32,
+    /// `moa.refMaxTokens` — дефолтный `max_tokens` для `chat_text`.
+    pub ref_max_tokens: Option<Value>,
+    /// `moa.refTemp` — дефолтная температура `chat_text`.
+    pub ref_temp: Option<f64>,
+}
+
+impl Default for LlmConfig {
+    /// Дефолты движка (`lib/config.mjs:236-252`), а не «пустой» объект: клиент,
+    /// собранный вручную в тесте, обязан вести себя как боевой.
+    fn default() -> Self {
+        LlmConfig {
+            base: "https://ollama.com/v1".to_string(),
+            api_key: String::new(),
+            seed: None,
+            json_mode: true,
+            temperature: Some(0.4),
+            request_timeout_ms: 240_000,
+            effort: "low".to_string(),
+            provider_concurrency: 12,
+            provider_per_model: 6,
+            http_retries: 3,
+            ref_max_tokens: Some(json!(12_000)),
+            ref_temp: Some(0.3),
+        }
+    }
+}
+
+/// JS `value || def` для числовых полей конфига: falsy (0/NaN/null/undefined) → `def`.
+fn num_or(v: Option<&Value>, def: f64) -> f64 {
+    match v.and_then(Value::as_f64) {
+        Some(n) if n.is_finite() && n != 0.0 => n,
+        _ => def,
+    }
+}
+
+/// `Math.max(1, n)` из `createAdaptiveSemaphore` (`lib/util.mjs:135`), применённый
+/// заранее: отрицательный лимит в usize не выражается, а семантика та же.
+fn limit_of(n: f64) -> usize {
+    if n >= 1.0 {
+        n as usize
+    } else {
+        1
+    }
+}
+
+impl LlmConfig {
+    /// Читает поля из замороженного конфига (`cfg.ollama`, `cfg.moa`, `cfg.httpRetries`).
+    ///
+    /// Отсутствующие поля дают дефолты движка, а не панику: конфиг собирается
+    /// `load_review_config_parts`, но клиент должен переживать урезанный объект
+    /// (так же, как JS переживает `undefined` через `||`).
+    pub fn from_cfg(cfg: &Value) -> Self {
+        let def = LlmConfig::default();
+        let o = cfg.get("ollama");
+        let moa = cfg.get("moa");
+        fn get<'a>(root: Option<&'a Value>, key: &str) -> Option<&'a Value> {
+            root.and_then(|v| v.get(key))
+        }
+        LlmConfig {
+            base: get(o, "base")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or(def.base),
+            api_key: get(o, "key")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or(def.api_key),
+            // JS кладёт сюда число или null; null в payload не попадает.
+            seed: get(o, "seed").filter(|v| !v.is_null()).cloned(),
+            json_mode: get(o, "jsonMode").map(is_truthy).unwrap_or(def.json_mode),
+            temperature: get(o, "temperature").and_then(Value::as_f64),
+            request_timeout_ms: num_or(get(o, "requestTimeoutMs"), def.request_timeout_ms as f64)
+                .max(1.0) as u64,
+            effort: get(o, "effort")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or(def.effort),
+            provider_concurrency: limit_of(num_or(
+                get(o, "providerConcurrency"),
+                def.provider_concurrency as f64,
+            )),
+            provider_per_model: limit_of(num_or(
+                get(o, "providerPerModel"),
+                def.provider_per_model as f64,
+            )),
+            // JS: `attempt < httpRetries` — отсутствие поля дало бы 0 ретраев,
+            // но конфиг движка его всегда ставит (REVIEW_HTTP_RETRIES, дефолт 3).
+            http_retries: cfg
+                .get("httpRetries")
+                .and_then(Value::as_f64)
+                .filter(|n| n.is_finite() && *n >= 0.0)
+                .map(|n| n as u32)
+                .unwrap_or(def.http_retries),
+            ref_max_tokens: get(moa, "refMaxTokens").filter(|v| !v.is_null()).cloned(),
+            ref_temp: get(moa, "refTemp").and_then(Value::as_f64),
+        }
+    }
+}
+
+/// Ошибка вызова клиента — аналог JS-Error с флагами, по которым ветвится каскад
+/// `chatJson` (`lib/llm.mjs:205-220`).
+///
+/// Склеивает два источника: транспорт ([`LlmError`] → `status`/`empty`/`networky`)
+/// и разбор JSON ([`JsonRepairError`] → `truncated`/`bad_escape`). В JS это один
+/// и тот же `Error` с набором ad-hoc свойств.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatError {
+    pub message: String,
+    /// HTTP-статус ответа провайдера (ветка 4 каскада смотрит на 400).
+    pub status: Option<u16>,
+    /// SSE отдал пустой `content` (ветка 1 каскада, повтор `chat_text`).
+    pub empty: bool,
+    /// JSON ответа оборван и не чинится (ветка 2 каскада).
+    pub truncated: bool,
+    /// Невалидные escape-последовательности в JSON (ветка 3 каскада).
+    pub bad_escape: bool,
+    /// Сетевой класс сбоя; каскад его не читает — только диагностика и логи.
+    pub networky: bool,
+}
+
+impl fmt::Display for ChatError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ChatError {}
+
+impl From<LlmError> for ChatError {
+    fn from(e: LlmError) -> Self {
+        ChatError {
+            // JS-обёртка маскирует секреты в тексте ошибки бинаря (lib/llm.mjs:163);
+            // тело ответа провайдера сюда попадает уже усечённым до 400 символов.
+            message: redact_secrets_for_log(&e.error, 400),
+            status: e.status,
+            empty: e.empty,
+            truncated: false,
+            bad_escape: false,
+            networky: e.networky,
+        }
+    }
+}
+
+impl From<JsonRepairError> for ChatError {
+    fn from(e: JsonRepairError) -> Self {
+        ChatError {
+            message: e.message,
+            status: None,
+            empty: false,
+            truncated: e.truncated,
+            bad_escape: e.bad_escape,
+            networky: false,
+        }
+    }
+}
+
+/// Результат `chatJson`: в JS это сам распарсенный объект с двумя
+/// non-enumerable полями (`lib/llm.mjs:191-196`).
+///
+/// Здесь они вынесены в структуру, а не подмешаны в `Value`: в JS они намеренно
+/// не сериализуются (`Object.defineProperty` без `enumerable`), и подмешивание
+/// их в объект протекло бы в `JSON.stringify` находок.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatJsonResult {
+    /// Распарсенный ответ модели (`{summary, verdict, findings, ...}`).
+    pub value: Value,
+    /// `__repaired`: 'escapes' | 'truncated' — читает `lib/engine.mjs:245-246`
+    /// и пишет событие `json_repair` в observability.
+    pub repaired: Option<RepairedKind>,
+    /// `__usage` — читает `lib/engine.mjs:252` и кладёт на результат чанка.
+    pub usage: Option<Value>,
+}
+
+/// Опции `chatJson` (`lib/llm.mjs:200`). `None` в поле = аргумент опущен в JS.
+#[derive(Debug, Clone, Default)]
+pub struct ChatJsonOpts {
+    /// Дефолт — `o.temperature`.
+    pub temperature: Option<f64>,
+    /// Дефолт — `"review_json"`; ключ разбивки стоимости по вызовам.
+    pub call_type: Option<String>,
+}
+
+/// Опции `chatText` (`lib/llm.mjs:225`). `None` в поле = аргумент опущен в JS.
+#[derive(Debug, Clone, Default)]
+pub struct ChatTextOpts {
+    /// Дефолт — `moa.refMaxTokens`.
+    pub max_tokens: Option<Value>,
+    /// Дефолт — `moa.refTemp`.
+    pub temperature: Option<f64>,
+    /// Дефолт — `"advisor"`.
+    pub call_type: Option<String>,
+}
+
+/// Клиент LLM глазами движка — то, что `pipeline.mjs:231` кладёт в `deps.ollama`.
+///
+/// Отдельный трейт (а не только [`RealLlmClient`]), потому что весь набор тестов
+/// движка в JS подменяет именно этот объект: `{ chatJson, chatText }`
+/// (`test/pr-review.engine.test.mjs:29,42,56,109,347,413`). Порт engine (T12)
+/// принимает `&dyn LlmApi` и получает те же точки подмены без сети.
+///
+/// Порядок аргументов — как в JS (`messages` первым, `model` вторым): сигнатуры
+/// движка и verifier читаются один в один с `lib/engine.mjs`/`lib/verifier.mjs`.
+pub trait LlmApi: Send + Sync {
+    /// `chatJson` (`lib/llm.mjs:200-223`) — ответ модели, разобранный в JSON,
+    /// с каскадом повторов на пустом/оборванном/битом ответе.
+    fn chat_json(
+        &self,
+        messages: &Value,
+        model: &str,
+        opts: &ChatJsonOpts,
+    ) -> Result<ChatJsonResult, ChatError>;
+
+    /// `chatText` (`lib/llm.mjs:225-241`) — прозаический ответ advisor'а
+    /// с одним повтором на `effort=none`, если content пуст.
+    fn chat_text(
+        &self,
+        messages: &Value,
+        model: &str,
+        opts: &ChatTextOpts,
+    ) -> Result<String, ChatError>;
+}
+
+/// Колбэк учёта стоимости — порт `costTracker.record(usage, model, callType)`
+/// (`lib/cost.mjs:46`). В JS он опционален (`createLlmClient(cfg, log, { costTracker })`).
+pub type UsageSink = Box<dyn Fn(&str, &str, &Value) + Send + Sync>;
+
+/// Логгер прогона — тот же контракт, что `deps.log` (`traits.rs`, `pipeline.mjs:227`).
+pub type LogSink = Box<dyn Fn(&str) + Send + Sync>;
+
+/// Боевой клиент LLM: транспорт [`chat_with`] под двумя адаптивными семафорами.
+///
+/// Устройство один в один с `createLlmClient`:
+/// - глобальный семафор на `providerConcurrency` (`lib/llm.mjs:110`);
+/// - ленивая карта семафоров по модели на `providerPerModel` (`lib/llm.mjs:112-115`);
+/// - 429 режет **оба** (`throttleFor`, `lib/llm.mjs:122-128`) — иначе одна
+///   залимиченная модель продолжала бы выедать глобальный пул.
+///
+/// Отличие от JS одно и техническое: слоты возвращает `Drop` у `Permit`, а не
+/// `finally { m.release(); g.release() }`. Порядок освобождения (сначала модельный,
+/// потом глобальный) сохранён порядком объявления переменных.
+pub struct RealLlmClient {
+    cfg: LlmConfig,
+    global_sem: AdaptiveSemaphore,
+    model_sems: Mutex<HashMap<String, Arc<AdaptiveSemaphore>>>,
+    http: Client,
+    on_usage: Option<UsageSink>,
+    log: Option<LogSink>,
+}
+
+impl fmt::Debug for RealLlmClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RealLlmClient")
+            .field("cfg", &self.cfg)
+            .field("global", &self.global_sem.stats())
+            .finish_non_exhaustive()
+    }
+}
+
+/// `/Bad escaped|Unexpected (?:token|end).*JSON/i` — ветка 3 каскада
+/// (`lib/llm.mjs:213`). Это подстраховка под тексты V8: Rust-порт `json_repair`
+/// отдаёт фиксированные русские сообщения и попадает в ветку по флагу `bad_escape`.
+fn re_bad_escape_message() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)Bad escaped|Unexpected (?:token|end).*JSON").unwrap())
+}
+
+/// `/response_format/i` — ветка 4 каскада (`lib/llm.mjs:217`).
+fn re_response_format() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)response_format").unwrap())
+}
+
+impl RealLlmClient {
+    /// Собирает клиента и HTTP-пул под бюджет `cfg.request_timeout_ms`.
+    pub fn new(cfg: LlmConfig) -> Result<Self, LlmError> {
+        let http = build_http_client(cfg.request_timeout_ms)?;
+        Ok(RealLlmClient {
+            global_sem: AdaptiveSemaphore::new(cfg.provider_concurrency),
+            model_sems: Mutex::new(HashMap::new()),
+            cfg,
+            http,
+            on_usage: None,
+            log: None,
+        })
+    }
+
+    /// Учёт usage — аналог `{ costTracker }` третьим аргументом `createLlmClient`.
+    /// Вызывается только на успешном ответе и только при непустом usage
+    /// (`recordUsage`, `lib/llm.mjs:117-120`).
+    pub fn with_usage_sink(mut self, sink: UsageSink) -> Self {
+        self.on_usage = Some(sink);
+        self
+    }
+
+    /// Логгер — второй аргумент `createLlmClient`.
+    pub fn with_log(mut self, log: LogSink) -> Self {
+        self.log = Some(log);
+        self
+    }
+
+    /// Снимок глобального семафора — то же, что уходит в лог при 429.
+    pub fn global_stats(&self) -> SemaphoreStats {
+        self.global_sem.stats()
+    }
+
+    /// Снимок семафора модели; `None` — к модели ещё не обращались
+    /// (в JS карта тоже наполняется лениво).
+    pub fn model_stats(&self, model: &str) -> Option<SemaphoreStats> {
+        lock_sems(&self.model_sems).get(model).map(|s| s.stats())
+    }
+
+    fn log(&self, message: &str) {
+        if let Some(log) = &self.log {
+            log(message);
+        }
+    }
+
+    /// `semFor` (`lib/llm.mjs:112-115`): семафор модели, создаётся при первом обращении.
+    fn sem_for(&self, model: &str) -> Arc<AdaptiveSemaphore> {
+        let mut map = lock_sems(&self.model_sems);
+        if let Some(sem) = map.get(model) {
+            return Arc::clone(sem);
+        }
+        let sem = Arc::new(AdaptiveSemaphore::new(self.cfg.provider_per_model));
+        map.insert(model.to_string(), Arc::clone(&sem));
+        sem
+    }
+
+    /// `throttleFor` (`lib/llm.mjs:122-128`): 429 режет оба семафора и пишет лог.
+    fn throttle_for(&self, model: &str) {
+        let m = self.sem_for(model);
+        self.global_sem.on_429();
+        m.on_429();
+        self.log(&format!(
+            "[{model}] 429 → снижение параллелизма (global: {}, model: {})",
+            stats_json(&self.global_sem.stats()),
+            stats_json(&m.stats()),
+        ));
+    }
+
+    /// `chatRequest` (`lib/llm.mjs:130-176`): захват обоих семафоров, транспорт,
+    /// троттлинг на 429, учёт usage. Слоты держатся на всё время запроса.
+    #[allow(clippy::too_many_arguments)]
+    fn chat_request(
+        &self,
+        messages: &Value,
+        model: &str,
+        max_tokens: Option<Value>,
+        temperature: Option<f64>,
+        effort: Option<&str>,
+        json_mode: bool,
+        call_type: &str,
+    ) -> Result<ChatOutcome, ChatError> {
+        let req = ChatRequest {
+            url: format!("{}/chat/completions", self.cfg.base),
+            key: self.cfg.api_key.clone(),
+            model: model.to_string(),
+            messages: messages.clone(),
+            max_tokens,
+            temperature,
+            effort: effort.map(str::to_string),
+            json_mode,
+            seed: self.cfg.seed.clone(),
+            http_retries: self.cfg.http_retries,
+            timeout_ms: self.cfg.request_timeout_ms,
+            // JS всегда просит usage и снимает stream_options только на 400.
+            include_usage: true,
+        };
+
+        // Порядок как в JS: сперва глобальный слот, затем модельный; освобождение
+        // (Drop в обратном порядке объявления) — сперва модельный, затем глобальный.
+        let model_sem = self.sem_for(model);
+        let _global_permit = self.global_sem.acquire();
+        let _model_permit = model_sem.acquire();
+
+        match chat_with(&self.http, &req) {
+            Ok(out) => {
+                if out.throttled {
+                    self.throttle_for(model);
+                }
+                if let Some(usage) = &out.usage {
+                    if let Some(sink) = &self.on_usage {
+                        sink(model, call_type, usage);
+                    }
+                }
+                Ok(out)
+            }
+            Err(e) => {
+                if e.throttled {
+                    self.throttle_for(model);
+                }
+                Err(ChatError::from(e))
+            }
+        }
+    }
+
+    /// `chatJsonOnce` (`lib/llm.mjs:178-198`): один запрос + толерантный разбор JSON.
+    #[allow(clippy::too_many_arguments)]
+    fn chat_json_once(
+        &self,
+        messages: &Value,
+        model: &str,
+        max_tokens: u32,
+        effort: &str,
+        json_mode: bool,
+        temperature: Option<f64>,
+        call_type: &str,
+    ) -> Result<ChatJsonResult, ChatError> {
+        let out = self.chat_request(
+            messages,
+            model,
+            Some(json!(max_tokens)),
+            temperature,
+            Some(effort),
+            json_mode,
+            call_type,
+        )?;
+        let parsed = extract_json_object(&out.content)?;
+        if let Some(kind) = parsed.repaired {
+            self.log(match kind {
+                RepairedKind::Escapes => {
+                    "JSON: исправлены невалидные escape-последовательности в ответе модели"
+                }
+                RepairedKind::Truncated => {
+                    "JSON восстановлен из оборванного ответа модели (усечение)"
+                }
+            });
+        }
+        Ok(ChatJsonResult {
+            value: parsed.value,
+            repaired: parsed.repaired,
+            usage: out.usage,
+        })
+    }
+}
+
+/// `JSON.stringify(sem.stats())` из строки лога `throttleFor` (`lib/llm.mjs:127`).
+fn stats_json(stats: &SemaphoreStats) -> String {
+    serde_json::to_string(stats).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Блокировка карты семафоров, игнорирующая poisoning (как в `concurrency.rs`):
+/// паника одного запроса не должна ронять весь клиент.
+fn lock_sems(
+    m: &Mutex<HashMap<String, Arc<AdaptiveSemaphore>>>,
+) -> std::sync::MutexGuard<'_, HashMap<String, Arc<AdaptiveSemaphore>>> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl LlmApi for RealLlmClient {
+    /// Каскад `chatJson` (`lib/llm.mjs:200-223`) — порядок веток значим, он же
+    /// приоритет диагнозов: пустой ответ → усечение → битые escape → JSON-mode.
+    ///
+    /// Первый запрос: `max_tokens=24000`, `effort=low`, `json_mode=o.jsonMode`.
+    /// Повтор ровно один — вложенных каскадов в JS нет (`chatJsonOnce` зовётся
+    /// напрямую, вне `try`).
+    fn chat_json(
+        &self,
+        messages: &Value,
+        model: &str,
+        opts: &ChatJsonOpts,
+    ) -> Result<ChatJsonResult, ChatError> {
+        let jm = self.cfg.json_mode;
+        let temperature = opts.temperature.or(self.cfg.temperature);
+        let call_type = opts.call_type.as_deref().unwrap_or("review_json");
+
+        let e = match self.chat_json_once(messages, model, 24_000, "low", jm, temperature, call_type)
+        {
+            Ok(ok) => return Ok(ok),
+            Err(e) => e,
+        };
+
+        // Ветка 1 (lib/llm.mjs:205-208): пустой content — модель ушла в reasoning.
+        if e.empty {
+            self.log(&format!(
+                "[{model}] content пуст на effort=low → повтор effort=none: {}",
+                e.message
+            ));
+            return self
+                .chat_json_once(messages, model, 24_000, "none", jm, temperature, call_type);
+        }
+        // Ветка 2 (lib/llm.mjs:209-212): JSON оборван — больше токенов.
+        if e.truncated {
+            self.log(&format!(
+                "[{model}] JSON оборван → повтор effort=none + больше токенов: {}",
+                e.message
+            ));
+            return self
+                .chat_json_once(messages, model, 32_000, "none", jm, temperature, call_type);
+        }
+        // Ветка 3 (lib/llm.mjs:213-216): битые escape — снимаем ещё и JSON-mode.
+        if e.bad_escape || re_bad_escape_message().is_match(&e.message) {
+            self.log(&format!(
+                "[{model}] битые escape → повтор effort=none + больше токенов (без JSON-mode): {}",
+                e.message
+            ));
+            return self
+                .chat_json_once(messages, model, 32_000, "none", false, temperature, call_type);
+        }
+        // Ветка 4 (lib/llm.mjs:217-220): провайдер не понял response_format.
+        // Условие `jm &&` обязательно: без JSON-mode повторять нечего, и 400 по
+        // любой другой причине превратился бы в лишний запрос.
+        if jm && (e.status == Some(400) || re_response_format().is_match(&e.message)) {
+            self.log(&format!(
+                "[{model}] ошибка, возможно из-за JSON-mode → повтор без него: {}",
+                e.message
+            ));
+            return self
+                .chat_json_once(messages, model, 24_000, "low", false, temperature, call_type);
+        }
+        Err(e)
+    }
+
+    /// `chatText` (`lib/llm.mjs:225-241`): один повтор на `effort=none`, только
+    /// если content пуст. Любая другая ошибка уходит наверх без повтора.
+    fn chat_text(
+        &self,
+        messages: &Value,
+        model: &str,
+        opts: &ChatTextOpts,
+    ) -> Result<String, ChatError> {
+        let max_tokens = opts
+            .max_tokens
+            .clone()
+            .or_else(|| self.cfg.ref_max_tokens.clone());
+        let temperature = opts.temperature.or(self.cfg.ref_temp);
+        let call_type = opts.call_type.as_deref().unwrap_or("advisor");
+        // JS: `effort: o.effort || 'low'`.
+        let effort = if self.cfg.effort.is_empty() {
+            "low"
+        } else {
+            self.cfg.effort.as_str()
+        };
+
+        match self.chat_request(
+            messages,
+            model,
+            max_tokens.clone(),
+            temperature,
+            Some(effort),
+            false,
+            call_type,
+        ) {
+            Ok(out) => Ok(out.content),
+            Err(e) if e.empty => {
+                self.log(&format!(
+                    "[{model}] advisor content пуст на effort=low → effort=none"
+                ));
+                self.chat_request(
+                    messages,
+                    model,
+                    max_tokens,
+                    temperature,
+                    Some("none"),
+                    false,
+                    call_type,
+                )
+                .map(|out| out.content)
+            }
+            Err(e) => Err(e),
         }
     }
 }
