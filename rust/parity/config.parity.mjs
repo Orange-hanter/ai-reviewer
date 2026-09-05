@@ -182,6 +182,12 @@ const envCases = [
     REVIEW_PROVIDER_PER_MODEL: '1', REVIEW_TIME_BUDGET_MIN: '7', REVIEW_CONCURRENCY: '4',
     REVIEW_MAX_DIFF_BYTES: '100', REVIEW_CHUNK_BYTES: '500', REVIEW_MAX_CHUNKS: '2',
   }, CLI_A],
+  // Окна контекста (RFC 07): 0 — ЗНАЧАЩЕЕ значение (окна выключены), а не повод взять дефолт.
+  ['context window custom', { REVIEW_CONTEXT_MARGIN: '20', REVIEW_CONTEXT_WINDOW_MIN_CHARS: '3000' }, CLI_A],
+  ['context window off (0)', { REVIEW_CONTEXT_MARGIN: '0', REVIEW_CONTEXT_WINDOW_MIN_CHARS: '0' }, CLI_A],
+  ['context window empty → defaults', { REVIEW_CONTEXT_MARGIN: '', REVIEW_CONTEXT_WINDOW_MIN_CHARS: ' ' }, CLI_A],
+  ['context window junk/negative → defaults', { REVIEW_CONTEXT_MARGIN: 'abc', REVIEW_CONTEXT_WINDOW_MIN_CHARS: '-5' }, CLI_A],
+  ['context window non-string scalars', { REVIEW_CONTEXT_MARGIN: 0, REVIEW_CONTEXT_WINDOW_MIN_CHARS: 12.5 }, CLI_A],
   ['numbers zero/abc → defaults', {
     REVIEW_HTTP_RETRIES: '0', REVIEW_LLM_TIMEOUT_MS: 'abc', REVIEW_PROVIDER_CONCURRENCY: '-1',
   }, CLI_A],

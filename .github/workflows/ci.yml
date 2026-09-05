@@ -35,3 +35,10 @@ jobs:
       - name: Rust tests
         working-directory: rust
         run: cargo test
+
+      # Паритет JS ↔ Rust: обязателен ПОСЛЕ cargo build — скрипты сравнивают собранный
+      # бинарь с JS-копией, а без бинаря обе стороны сходятся тривиально и ничего не ловят.
+      # До этого шага расхождение сторон не падало ни в одном гейте (docs/backlog.md,
+      # «Долг слияния», пункт 2).
+      - name: Parity JS ↔ Rust
+        run: npm run check:parity

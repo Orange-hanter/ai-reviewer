@@ -16,6 +16,7 @@ pr-review-eval [--fixtures dir] [--json]
 pr-review-gold [--case id]                  # shadow-прогон с LLM на gold-диффах
 pr-review-metrics [path.jsonl]              # сводка по observability-логу
 pr-review-probe-models                      # доступность и латентность моделей
+pr-review-probe-cache [model] [--size N]    # даёт ли провайдер скидку за общий префикс
 pr-review-feedback [--dry-run] [--pr N] [--repo owner/repo]
 pr-review-feedback-batch [--dry-run] [--pr N]
 ```
@@ -53,7 +54,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `MOA_AGGREGATOR` | `minimax-m3` | Жюри-агрегатор (JSON) |
 | `MOA_REFERENCE_TEMPERATURE` | `0.3` | Advisors |
 | `MOA_AGGREGATOR_TEMPERATURE` | `0.4` | Aggregator |
-| `MOA_REFERENCE_MAX_TOKENS` | `12000` | Потолок ответа advisor'а |
+| `MOA_REFERENCE_MAX_TOKENS` | `6000` | Потолок ответа advisor'а. Страховка под лимит «не более 8 пунктов» из промпта роли (RFC 04) |
 | `OLLAMA_MODEL` | `kimi-k2.7-code` | Одиночная модель (consensus) |
 | `OLLAMA_MODELS` | — | Consensus mode: список моделей |
 | `OLLAMA_MODELS_FALLBACK` | `deepseek-v4-flash` | Аварийная замена упавшей модели |
@@ -61,8 +62,10 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_TEMPERATURE` | `0.4` | Consensus mode |
 | `REVIEW_SEED` | `7` | Детерминизм (где поддерживается) |
 | `REVIEW_REASONING_EFFORT` | `low` | Reasoning effort advisor-вызовов (`none` — быстрее) |
+| `REVIEW_AGGREGATOR_REASONING_EFFORT` | `low` | Reasoning effort ПЕРВОЙ попытки JSON-вызовов (агрегатор жюри, verifier). Рассуждение провайдер считает completion-токенами: замер — 1903 completion-токена на находку у `minimax-m3` против 474 у `sonnet`, вся разница — reasoning. Каскад ретраев `chatJson` (пустой content / оборванный JSON) по-прежнему уходит в `none` и этой ручкой не управляется |
+| `REVIEW_PROMPT_LAYOUT` | `legacy` | `shared-prefix` — общая рамка и контекст чанка первыми, инструкция роли последней: все роли чанка делят побайтово одинаковый префикс, который провайдер может отдать из кэша. **Замер `pr-review-probe-cache` показал, что Ollama Cloud скидки за общий префикс не даёт** — включать имеет смысл только на провайдере с префиксным кэшем, проверив тем же пробником |
 | `REVIEW_HTTP_RETRIES` | `3` | Retry GitHub + Ollama |
-| `REVIEW_LLM_TIMEOUT_MS` | `240000` | Таймаут одной попытки LLM |
+| `REVIEW_LLM_TIMEOUT_MS` | `420000` | Таймаут одной попытки LLM. 240000 обрывали половину prose-вызовов (медиана kimi — 331 с): вход оплачен, ответа нет |
 | `REVIEW_PROVIDER_CONCURRENCY` | `12` | Глобальный cap параллельных LLM-вызовов (AIMD по 429) |
 | `REVIEW_PROVIDER_PER_MODEL` | `6` | Cap параллельных вызовов на модель |
 
@@ -87,6 +90,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_ACTIONABILITY_MIN` | `4` | Порог суммы весов сигналов для inline |
 | `REVIEW_MAX_ADVISORY_INLINE` | `5` | Сколько advisory максимум уходит в inline |
 | `REVIEW_VERIFY_ADVISORY` | `5` | Сколько лучших advisory отдать verifier'у |
+| `REVIEW_VERIFY_ADVISORY_MIN` | `REVIEW_ACTIONABILITY_MIN − 3` (= `1`) | Порог **допуска** advisory к verifier'у — отдельный от порога маршрута и намеренно ниже его на **вес сигнала `verified`** (3, см. `ACTIONABILITY_SIGNALS` в [`lib/actionability.mjs`](../lib/actionability.mjs)). Кандидатом становится всё, что *станет* доказуемым, если verifier подтвердит; окончательный порог inline остаётся `REVIEW_ACTIONABILITY_MIN`. Равные пороги давали курицу и яйцо: чтобы minor дошёл до verifier'а за +3, он должен был уже набрать 4 без него (docs/review-quality.md §2.2, P1) |
 | `REVIEW_MAX_INLINE` | `50` | Потолок inline-комментариев на прогон |
 
 ## Verifier (Pass B)
@@ -97,7 +101,26 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_VERIFIER_MODEL` | `deepseek-v4-pro` | Модель-судья (вне пула advisors) |
 | `REVIEW_VERIFIER_MAX` | `12` | Максимум кандидатов на проверку |
 | `REVIEW_VERIFIER_TEMPERATURE` | `0.2` | — |
+| `REVIEW_VERIFIER_CONTEXT_MARGIN` | `80` | ±строк вокруг каждой строки-кандидата в контексте verifier'а. Пересекающиеся окна сливаются, пропуски помечаются `… (строки N–M пропущены)` — реальные номера строк сохраняются. Файл, у которого хоть один кандидат без строки, отдаётся целиком. Второй проход смотрит одну-две строки на файл и делает это ДРУГОЙ моделью (кэш префикса advisor'ов не работает), поэтому целый файл до `REVIEW_MAX_FILE_LINES` строк он не окупает — см. [`lib/context-window.mjs`](../lib/context-window.mjs) |
 | `REVIEW_VERIFIER_STRICT` | `1` | Нет вердикта → находка понижается до minor (fail-closed) |
+
+## Инкрементальный прогон
+
+Не ревьюить заново файлы, чей **вход для модели** (секция диффа + приложенный контекст) не
+изменился с прошлого прогона; их находки переносятся вместе с вердиктами жюри и verifier —
+см. [RFC 05](../proposals/05-incremental-review.md).
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_INCREMENTAL` | `0` | Включает инкрементальный прогон |
+| `REVIEW_INCREMENTAL_STATE` | `paths.incrementalState` профиля (`.ai-review/incremental/state.json`) | Файл состояния: хэши входа по файлам и находки прошлого прогона. Версия состояния 2: хэш входа — JSON `{diff, context}` (без NUL в исходнике), отпечаток конфигурации включает порог маршрута/допуска verifier и таймаут LLM |
+| `REVIEW_INCREMENTAL_FULL_EVERY` | `10` | Каждый N-й прогон полный — страховка от накопления дрейфа |
+
+В CI состояние нужно сохранять между прогонами (`actions/cache` на `.ai-review/incremental/`).
+Нет кэша — каждый прогон полный, то есть прежнее поведение. Прогон становится полным также при
+смене конфигурации (модели, роли, раскладка промпта, нарезка чанков, параметры гейта,
+порог маршрута/допуска verifier, таймаут LLM): находки прошлого прогона получены другим
+движком и сопоставлять их с новыми нельзя.
 
 ## Router
 
@@ -112,6 +135,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `REVIEW_SPECIALISTS` | `1` (в moa) | Роли security/correctness/architecture вместо анонимных advisors |
+| `REVIEW_SPECIALISTS_MERGE` | `auto` | `auto` — один вызов на все роли, когда модель у них одна (три мнения одной модели независимы только на бумаге); `always` — сливать и при разных моделях; `never` — всегда по отдельности |
 
 ## Prescan (eslint + ast-grep)
 
@@ -183,6 +207,10 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_CONCURRENCY` | `10` | Параллельных chunk-pipeline |
 | `REVIEW_MAX_FILE_LINES` | `1500` | Полный текст файла в контекст |
 | `REVIEW_MAX_CONTEXT_BYTES` | `180000` | Потолок контекста |
+| `REVIEW_SKIP_ADDED_FILE_CONTEXT` | `1` | Не прикладывать полный текст **добавленных** файлов: их дифф и есть содержимое целиком. `0` — прежнее поведение |
+| `REVIEW_CHUNK_ROUTING` | `1` | Чанк без исполняемого файла (нет кода, CI-конфигурации и чувствительных путей) обслуживает один агрегатор вместо жюри. `0` — всегда полный MoA |
+| `REVIEW_CONTEXT_MARGIN` | `40` | ±строк вокруг изменённых строк файла в контексте advisors и жюри ([RFC 07](../proposals/07-windowed-file-context.md)). Центр окон — `validLines` из `parseDiff` (RIGHT-номера `+`-строк и контекстных строк хунка), пересекающиеся окна сливаются, пропуски помечаются `… (строки N–M пропущены)`. Такой путь метится в карте PR как `[THIS PART, CONTEXT WINDOWED]` и включает запрет absence-claims даже на PR из одного чанка. **`0` — окна выключены**, файлы едут целиком: это откат решения. Ноль здесь значащий (читается `nonNegEnv`, не `numEnv`) |
+| `REVIEW_CONTEXT_WINDOW_MIN_CHARS` | `8000` | Файл, чья запись контекста короче этого, прикладывается целиком — окна не считаются. Порог снимает класс «маленький файл, плотные правки», где окна не экономят ни байта, а риск усечения берут целиком |
 | `REVIEW_MAX_SYMBOLS` | `25` | Символов в blast-radius |
 | `REVIEW_MAX_DEPS_PER_SYMBOL` | `20` | Зависимостей на символ |
 | `REVIEW_GOD_NODE_THRESHOLD` | `20` | Порог «god node» в графе |

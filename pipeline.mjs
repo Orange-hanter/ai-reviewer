@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
-import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks } from './lib/diff.mjs';
+import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths } from './lib/diff.mjs';
 import { createLlmClient } from './lib/llm.mjs';
-import { createCostTracker } from './lib/cost.mjs';
+import { createCostTracker, efficiencyMetrics } from './lib/cost.mjs';
 import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
 import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs';
 import { createGraphifyClient } from './lib/graphify.mjs';
@@ -12,7 +12,8 @@ import { createReviewEngine } from './lib/engine.mjs';
 import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings, attachFingerprints } from './lib/findings.mjs';
 import { BLAST_FINDING_SOURCE } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
-import { routeFindings, findingLocationKey } from './lib/actionability.mjs';
+import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
+import { buildVerifierFileContents, windowChunkFileContents } from './lib/context-window.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
 import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
 import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath } from './lib/router.mjs';
@@ -21,6 +22,10 @@ import { buildSummary, buildRouterSummary, buildLlmUnavailableSummary } from './
 import { buildReviewJson, writeReviewExports } from './lib/export.mjs';
 import { parseTrustedAuthors } from './lib/feedback.mjs';
 import { buildTriageContext, runAutoTriage } from './lib/triage.mjs';
+import {
+  fileInputHashes, configFingerprint, readIncrementalState, writeIncrementalState,
+  planIncremental, markCarried, formatIncrementalNote,
+} from './lib/incremental.mjs';
 
 function logFindingsStage(obs, stage, findings) {
   if (!obs?.enabled) return;
@@ -29,6 +34,46 @@ function logFindingsStage(obs, stage, findings) {
     count: findings.length,
     bySeverity: countBySeverity(findings),
     sample: slimFindings(findings),
+  });
+}
+
+// Обратная карта «человеческая формулировка сигнала → ключ»: в саму находку маршрут пишет
+// actionabilityReasons текстами (их читает рендер инлайна), а метрике нужен стабильный ключ.
+const REASON_KEY_BY_WHY = new Map(
+  Object.entries(ACTIONABILITY_SIGNALS).map(([key, sig]) => [sig.why, key]),
+);
+
+/**
+ * Распределение actionability-скоров (docs/review-quality.md §3, P3.2). `inline=N · outside=M`
+ * не отвечает на вопрос «порог мешает или сигналов нет» — гистограмма отвечает: пик у порога
+ * означает первое, пик в нуле — второе. Топ причин считается по находкам, оставшимся в своде:
+ * это список того, чего им не хватило.
+ */
+function logActionabilityDistribution(obs, { findings, inlineCount, outside, threshold }) {
+  if (!obs?.enabled) return;
+  const histogram = {};
+  for (const f of findings || []) {
+    const s = f?.actionabilityScore;
+    if (!Number.isFinite(s)) continue;
+    histogram[s] = (histogram[s] || 0) + 1;
+  }
+  const reasonCounts = new Map();
+  for (const f of outside || []) {
+    for (const why of f?.actionabilityReasons || []) {
+      const key = REASON_KEY_BY_WHY.get(why) || why;
+      reasonCounts.set(key, (reasonCounts.get(key) || 0) + 1);
+    }
+  }
+  const topOutsideReasons = [...reasonCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 5)
+    .map(([key, count]) => ({ key, count }));
+  obs.logEvent('actionability', {
+    threshold,
+    inline: inlineCount,
+    outside: (outside || []).length,
+    histogram,
+    topOutsideReasons,
   });
 }
 
@@ -95,10 +140,20 @@ async function runVerifierStage(allFindings, {
   // Advisory-кандидаты на подтверждение: доказуемые minor/nit, которые претендуют на строку
   // в PR. Verifier здесь работает не на гейт (severity их не блокирует), а на право занять
   // внимание человека — в инлайн должно уходить проверенное.
+  //
+  // Порог ДОПУСКА сюда ниже порога маршрута (cfg.actionability.verifyMin, дефолт
+  // «порог − вес(verified)» = 1): совпадение порогов было курицей и яйцом — чтобы minor
+  // дошёл до verifier'а за +3, он должен был уже набрать 4 без него, то есть уже уходить
+  // в строку, и verifier для advisory работал только на понижение (docs/review-quality.md
+  // §2.2, P1). Окончательный порог маршрута НЕ трогаем: он считается заново в classify,
+  // уже с вердиктом verifier'а на руках. Цену держит лимит REVIEW_VERIFY_ADVISORY.
+  const verifyThreshold = Number.isFinite(actionability?.verifyMin)
+    ? actionability.verifyMin
+    : actionability?.threshold;
   const advisoryPool = actionability?.verifyAdvisory
     ? routeFindings(allFindings, files, {
       inlineOn: gate.blockOn,
-      threshold: actionability.threshold,
+      threshold: verifyThreshold,
       maxAdvisoryInline: actionability.verifyAdvisory,
       strict: gate.strict,
       ctx: actionabilityCtx || {},
@@ -108,7 +163,17 @@ async function runVerifierStage(allFindings, {
     candidates: advisoryPool,
     max: actionability?.verifyAdvisory || 0,
   });
-  if (advisoryPool.length) log(`verifier: +${advisoryPool.length} advisory-кандидат(ов) по доказуемости`);
+  if (advisoryPool.length) {
+    // Насколько пониженный порог расширил допуск — измеримая величина, а не вера в P1.
+    const admitted = advisoryPool.filter((f) => (f.actionabilityScore ?? 0) < (actionability?.threshold ?? 0)).length;
+    log(`verifier: +${advisoryPool.length} advisory-кандидат(ов) по доказуемости (порог допуска ${verifyThreshold} vs маршрут ${actionability?.threshold}; из них ${admitted} прошли только по пониженному порогу)`);
+    obs.logEvent('verifier_advisory', {
+      pool: advisoryPool.length,
+      admittedByLowerBar: admitted,
+      verifyThreshold,
+      routeThreshold: actionability?.threshold ?? null,
+    });
+  }
   if (!candidates.length) {
     obs.logEvent('verifier_skip', { reason: 'no_candidates' });
     return empty;
@@ -118,15 +183,16 @@ async function runVerifierStage(allFindings, {
     // Verifier получает только файлы/секции диффа с кандидатами, а не весь PR —
     // иначе на большом PR это самый жирный промпт пайплайна.
     const candFiles = new Set(candidates.map((c) => c.file).filter(Boolean));
-    const fileContents = [...contentMap.entries()]
-      .filter(([p]) => candFiles.has(p))
-      .map(([, v]) => v)
-      .join('\n');
+    // …и не файлы целиком, а окна ±contextMargin вокруг строк кандидатов: verifier смотрит
+    // одну-две строки на файл, а платил за 1500 строк — причём другой моделью, то есть без
+    // шанса переиспользовать кэш префикса advisor'ов (lib/context-window.mjs).
+    const ctxWindow = buildVerifierFileContents(contentMap, candidates, { margin: verifier.contextMargin });
+    const fileContents = ctxWindow.text;
     const sections = [...extractFileDiffSections(annotated).entries()]
       .filter(([p]) => candFiles.has(p))
       .map(([, s]) => s);
     const annotatedScoped = sections.length ? sections.join('\n') : annotated;
-    log(`verifier ctx: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, дифф ${annotatedScoped.length}/${annotated.length} симв.`);
+    log(`verifier ctx: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, контекст ${ctxWindow.before}→${ctxWindow.after} симв. (окна ±${verifier.contextMargin}), дифф ${annotatedScoped.length}/${annotated.length} симв.`);
     const verdicts = await engine.verifyFindings(candidates, {
       annotated: annotatedScoped, fileContents, blastBlocks, pr, changedFilesSection,
     });
@@ -238,7 +304,11 @@ export function createReviewPipeline(cfg, deps = {}) {
 
   async function finishObs(obs, data) {
     if (!obs?.enabled) return;
-    await obs.flush(data);
+    // Эффективность считаем здесь, а не в пяти местах присваивания finalObs: единственная
+    // точка выхода прогона, и costTracker к этому моменту видел все вызовы — включая те,
+    // что случились на ветках fail-open.
+    const efficiency = efficiencyMetrics(costTracker.snapshot(), data);
+    await obs.flush(efficiency ? { ...data, ...efficiency } : data);
   }
 
   /** @returns {Promise<number>} exit code */
@@ -315,10 +385,16 @@ export function createReviewPipeline(cfg, deps = {}) {
       }
 
       const prepT0 = Date.now();
+      // Добавленные файлы контекстом не прикладываем: их дифф И ЕСТЬ полный текст, второй
+      // экземпляр оплачивается в каждом вызове каждой роли. На PR из преимущественно новых
+      // файлов это половина всего входа. Символы для blast-radius не теряются:
+      // collectBlastSymbols разбирает changedText, куда строки нового файла уже попали.
+      const addedPaths = limits.skipAddedFileContext ? collectAddedPaths(diff) : new Set();
+      if (addedPaths.size) log(`контекст: ${addedPaths.size} добавленных файл(ов) — дифф уже содержит их целиком, полный текст не прикладываем`);
       // Сначала читаем файлы: collectBlastSymbols добирает exports из полного текста,
       // а не только из hunk-строк (иначе правка тела функции → 0 symbols → пустой blast).
       const [contentMap, rawPriorFindings, prescanResult] = await Promise.all([
-        readChangedFiles(files, limits, log),
+        readChangedFiles(files, limits, log, { addedPaths }),
         (github.readPriorStickyData
           ? github.readPriorStickyData()
           : github.readPriorFindings().then((findings) => ({ findings, runs: [], sha: '' }))
@@ -331,6 +407,23 @@ export function createReviewPipeline(cfg, deps = {}) {
       ]);
       const symbols = collectBlastSymbols(changedText, contentMap, limits.maxSymbols);
       log(`файлов: ${files.size} · символов под blast-radius: ${symbols.length}`, symbols);
+      // Окна контекста для advisors и жюри (RFC 07): в промпт едут окрестности изменённых
+      // строк, а не файлы целиком. Место в потоке — само решение, а не деталь:
+      //   ПОСЛЕ collectBlastSymbols — он добирает экспорты из ПОЛНОГО текста, и
+      //     `export function` в начале файла не попадает ни в одно окно вокруг хунков в
+      //     конце; окно раньше — тихо пустой blast-radius;
+      //   ДО fileInputHashes — RFC 05 определяет единицу сравнения как вход модели, и хэш
+      //     от окна сам инвалидируется при смене margin (правка configFingerprint,
+      //     сбрасывающая состояние целиком, не нужна);
+      //   verifier получает по-прежнему ПОЛНУЮ contentMap: он режет сам, вокруг строки
+      //     кандидата, и двойная вырезка оставила бы находку вне хунков без контекста
+      //     ровно там, где решается блокировать ли merge.
+      const ctxWindows = windowChunkFileContents(contentMap, files, {
+        margin: limits.contextMargin, minChars: limits.contextWindowMinChars,
+      });
+      if (ctxWindows.windowed.size) {
+        log(`контекст: окна ±${limits.contextMargin} вокруг изменённых строк в ${ctxWindows.windowed.size} файл(ах) из ${contentMap.size} — ${ctxWindows.before}→${ctxWindows.after} симв.`);
+      }
       // Freshness измеряем даже если diff не содержит экспортов: иначе `graph_fresh`
       // был бы неизвестен именно в тех review-plans, где blast-radius пустой.
       const blastResult = await graphify.buildBlastRadius(symbols);
@@ -353,16 +446,79 @@ export function createReviewPipeline(cfg, deps = {}) {
       // Контекст доказуемости для маршрутизации advisory: что уже было в прошлом прогоне,
       // что подтвердил prescan, какого класса файл. Строится ОДИН раз — его читают и
       // verifier-стадия (кого дополнительно проверить), и classify (кого поднять в строку).
+      // Класс пути считает Rust-бинарь через отдельный процесс на вызов, а спрашивают его
+      // трое (actionability по каждой находке, план чанков, маршрутизация ролей) — мемоизация
+      // превращает десятки запусков процесса в один на файл.
+      const fileClassCache = new Map();
+      const fileClass = (path) => {
+        if (!fileClassCache.has(path)) fileClassCache.set(path, classifyFilePath(path));
+        return fileClassCache.get(path);
+      };
+      const chunkClasses = (chunk) => [...new Set((chunk?.paths || []).map(fileClass))].sort();
       const actionabilityCtx = {
         priorKeys: new Set(priorFindings.map(findingLocationKey)),
         prescanKeys: new Set(prescanResult.findings.map(findingLocationKey)),
-        fileClass: classifyFilePath,
+        fileClass,
       };
       const changedFilesSection = buildChangedFilesSection(changedPaths);
-      const chunks = buildChunks(annotated, contentMap, limits);
-      const note0 = chunks.length > 1
-        ? `PR большой — разбит на ${chunks.length} частей для полного охвата (каждая ревьюится отдельно).`
-        : '';
+
+      // Инкрементальный прогон (RFC 05): файлы, чей вход для модели не изменился с прошлого
+      // раза, заново не ревьюим — их находки переносим. Карта PR остаётся ПОЛНОЙ: чанки
+      // увидят остальные файлы как [ANOTHER PART], и запрет absence-claims сработает как
+      // обычно. Планируем до buildChunks, чтобы нарезать только то, что действительно идёт в LLM.
+      const diffSections = extractFileDiffSections(annotated);
+      const inputHashes = fileInputHashes(changedPaths, diffSections, ctxWindows.map);
+      const configFp = configFingerprint({ ...cfg, version: cfg.profile?.version });
+      const priorIncremental = cfg.incremental?.enabled
+        ? await readIncrementalState(cfg.incremental.stateFile)
+        : null;
+      const incrementalPlan = cfg.incremental?.enabled
+        ? planIncremental({
+          state: priorIncremental,
+          hashes: inputHashes,
+          changedPaths,
+          configFp,
+          fullEvery: cfg.incremental.fullEvery,
+        })
+        : { mode: 'full', reviewPaths: new Set(changedPaths), carried: [], unchanged: [], reason: 'выключено' };
+      if (cfg.incremental?.enabled) {
+        log(`инкрементальность: ${incrementalPlan.mode} — ${incrementalPlan.reason}`);
+        obs.logEvent('incremental', {
+          mode: incrementalPlan.mode,
+          reason: incrementalPlan.reason,
+          reviewed: incrementalPlan.reviewPaths.size,
+          unchanged: incrementalPlan.unchanged.length,
+          carried: incrementalPlan.carried.length,
+        });
+      }
+      // Дифф для LLM сужаем до ревьюируемых файлов; `files`/`changedPaths` остаются полными —
+      // на них держатся карта PR, отпечатки, гейт и Δ-блок.
+      const annotatedForLlm = incrementalPlan.mode === 'incremental'
+        ? [...diffSections.entries()].filter(([p]) => incrementalPlan.reviewPaths.has(p)).map(([, s]) => s).join('\n')
+        : annotated;
+      const contextForLlm = incrementalPlan.mode === 'incremental'
+        ? new Map([...ctxWindows.map.entries()].filter(([p]) => incrementalPlan.reviewPaths.has(p)))
+        : ctxWindows.map;
+      const carriedFindings = incrementalPlan.mode === 'incremental'
+        ? markCarried(incrementalPlan.carried, priorIncremental?.headSha || '')
+        : [];
+      if (carriedFindings.length) log(`перенесено находок по неизменившимся файлам: ${carriedFindings.length}`);
+
+      const chunks = buildChunks(annotatedForLlm, contextForLlm, limits);
+      // windowedPaths дописываем ПОСЛЕ нарезки, а не заводим полем в buildChunks: окна
+      // ставит pipeline, он же и знает список — Rust-порт нарезки трогать не нужно, и
+      // поверхности для молчаливого рассинхрона сторон не появляется. Читатель ровно один —
+      // карта PR в промпте: путь с урезанным контекстом метится [THIS PART, CONTEXT WINDOWED]
+      // и включает запрет absence-claims даже на PR из одного чанка (RFC 07, решение 3).
+      if (ctxWindows.windowed.size) {
+        for (const c of chunks) c.windowedPaths = (c.paths || []).filter((p) => ctxWindows.windowed.has(p));
+      }
+      const note0 = [
+        chunks.length > 1
+          ? `PR большой — разбит на ${chunks.length} частей для полного охвата (каждая ревьюится отдельно).`
+          : '',
+        formatIncrementalNote(incrementalPlan),
+      ].filter(Boolean).join(' ');
       // Дедлайн LLM-фазы: после него новые чанки пропускаем и постим частичный отчёт —
       // процесс завершается штатно (sticky/export/observability) до убийства job раннером.
       const deadline = limits.timeBudgetMs > 0 ? Date.now() + limits.timeBudgetMs : 0;
@@ -381,6 +537,26 @@ export function createReviewPipeline(cfg, deps = {}) {
         llmConcurrency: limits.concurrency,
         chunkBytes: limits.chunkBytes,
         blast_radius: blastMetrics,
+        // Окна контекста (RFC 07): без этих величин экономия неотличима от того, что файлов
+        // в PR просто стало меньше — а решение имеет смысл ровно пока она видна отдельно.
+        contextWindows: {
+          margin: limits.contextMargin,
+          minChars: limits.contextWindowMinChars,
+          files: ctxWindows.windowed.size,
+          before: ctxWindows.before,
+          after: ctxWindows.after,
+        },
+        // Состав каждого чанка: без него «прогон стоил N токенов» не разбирается на
+        // слагаемые — не видно, что вход раздул контекст файлов, а не дифф, и что
+        // часть чанков вообще не содержит кода.
+        chunkPlan: chunks.map((c, i) => ({
+          i,
+          diff_chars: c.annotated?.length ?? 0,
+          context_chars: c.fileContents?.length ?? 0,
+          windowed_paths: c.windowedPaths?.length ?? 0,
+          paths: c.paths?.length ?? 0,
+          classes: chunkClasses(c),
+        })),
       });
 
       if (priorFindings.length) log(`прошлых находок подгружено: ${priorFindings.length} (сходимость)`);
@@ -401,12 +577,20 @@ export function createReviewPipeline(cfg, deps = {}) {
       log(`режим: ${reviewMode}${reviewMode === 'moa'
         ? ` · ${specialists.enabled ? `specialists: ${specialists.assignments.map((a) => `${a.role}=${a.model}`).join(', ')}` : `advisors: ${moa.references.join(', ')}`} · aggregator: ${moa.aggregator}` : ''} · модели: ${models.list.join(', ')} · порог: ${gate.consensusMin}`);
 
-      const reviews = await engine.reviewAllModels(chunks, {
+      // Инкрементальный прогон, в котором не изменился ни один файл: ревьюить нечего, весь
+      // отчёт собирается из перенесённых находок. Это не аутедж LLM — ветку fail-closed
+      // ниже он не поднимает, иначе «ничего не поменялось» блокировало бы merge.
+      const nothingToReview = incrementalPlan.mode === 'incremental' && incrementalPlan.reviewPaths.size === 0;
+      if (nothingToReview) log('инкрементальность: изменившихся файлов нет — LLM не вызывается');
+      const reviews = nothingToReview ? [] : await engine.reviewAllModels(chunks, {
         // changedPaths, а не готовая секция: карту PR («что в этом чанке, что ревьюится
         // отдельно») движок рисует под каждый чанк сам. changedFilesSection остаётся для
         // verifier-стадии — у неё контекст всего PR.
         blastBlocks, pr, priorFindings, changedPaths, prescanSection: prescanResult.promptSection,
         deadline,
+        // Кому из чанков нужен полный состав специалистов (RFC 04): класс пути и
+        // чувствительные пути знает эта сторона — профиль и мемоизация живут здесь.
+        chunkRouting: { fileClass, sensitive: cfg.profile?.layout?.sensitive || null },
       });
       // max, а не сумма: в consensus-режиме один пропущенный чанк считается у каждой модели.
       const skippedChunks = reviews.reduce((n, r) => Math.max(n, r.skippedChunks || 0), 0);
@@ -426,7 +610,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       ];
       logFindingsStage(obs, 'after_llm_merge', allFindings);
 
-      if (!ok.length && (gate.llmRequired || !allFindings.length)) {
+      if (!ok.length && !nothingToReview && (gate.llmRequired || !allFindings.length)) {
         const why = reviews.map((r) => `${r.model}: ${r.error}`).join('; ');
         const whyPublic = reviews.map((r) => `${r.model}: ${publicErrorLabel(r.error)}`).join('; ');
         log('все модели недоступны:', why, gate.llmRequired ? '— fail-closed (REVIEW_LLM_REQUIRED)' : '— fail-open');
@@ -556,6 +740,16 @@ export function createReviewPipeline(cfg, deps = {}) {
           currentFindings = verifierStage.findings;
           const verifierStats = verifierStage.stats;
 
+          // Перенесённые находки подмешиваем ПОСЛЕ refutation и verifier — намеренно.
+          // Обе стадии они уже прошли в том прогоне, где были найдены, и принесли свои
+          // вердикты с собой. Пропусти их здесь ещё раз — и strict-refutation понизила бы
+          // подтверждённый блокер до minor только потому, что в ЭТОМ прогоне жюри не
+          // высказывалось: файл-то не менялся и никому не показывался.
+          if (carriedFindings.length) {
+            currentFindings = [...currentFindings, ...carriedFindings];
+            logFindingsStage(obs, 'after_carry_over', currentFindings);
+          }
+
           return { findings: currentFindings, refutationStats, verifierStats };
         },
       });
@@ -581,6 +775,12 @@ export function createReviewPipeline(cfg, deps = {}) {
       logFindingsStage(obs, 'after_gate', allFindings);
 
       const { inline, outside } = findingsFmt.classify(allFindings, files, actionabilityCtx);
+      logActionabilityDistribution(obs, {
+        findings: allFindings,
+        inlineCount: inline.length,
+        outside,
+        threshold: cfg.actionability?.threshold,
+      });
       const { md, counts, total, delta, verdict } = buildSummary(cfg, {
         reviews, ok, allFindings, outside, blastBlocks, blastMetrics, files, pr, headSha, note, blockerClusters,
         verifierStats, refutationStats, prescanResult, fpRemoved,
@@ -606,6 +806,23 @@ export function createReviewPipeline(cfg, deps = {}) {
         blastMetrics, changedPaths,
       }), log, obs);
 
+      // Состояние для следующего прогона. Пишем итоговый набор — тот, что виден человеку
+      // (после FP-фильтра, refutation, verifier и гейта), потому что именно его придётся
+      // переносить. Prescan и blast-radius в перенос не идут: они детерминированы, дёшевы
+      // и пересчитываются на каждом прогоне заново.
+      if (cfg.incremental?.enabled) {
+        const carryable = allFindings.filter((f) => !f.prescan && f.source !== BLAST_FINDING_SOURCE);
+        await writeIncrementalState(cfg.incremental.stateFile, {
+          pr: pr.number,
+          headSha,
+          configFp,
+          // Счётчик прогонов подряд без полного: страховка от накопления дрейфа.
+          sinceFull: incrementalPlan.mode === 'incremental' ? Number(priorIncremental?.sinceFull || 0) + 1 : 0,
+          hashes: inputHashes,
+          findings: carryable,
+        }, log);
+      }
+
       if (dryRun) {
         log('=== DRY-RUN: вывод не постится ===');
         log(`модели-ок: ${ok.map((r) => r.model).join(', ')} · findings=${total} · inline=${inline.length} · outside=${outside.length}`);
@@ -616,7 +833,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         for (const c of inline) console.log(`${c.path}:${c.line}\n  ${c.body.split('\n').slice(0, 2).join(' / ')}`);
         console.log('\n--- SUMMARY MARKDOWN ---\n' + md);
         const exitCode = blockers.length ? 1 : 0;
-        finalObs = { exitCode, dryRun: true, wouldBlock: blockers.length > 0, blockers: blockers.length, total, counts };
+        finalObs = { exitCode, dryRun: true, wouldBlock: blockers.length > 0, blockers: blockers.length, total, counts, inline: inline.length };
         return exitCode;
       }
 
@@ -647,11 +864,11 @@ export function createReviewPipeline(cfg, deps = {}) {
 
       if (blockers.length) {
         log(`⛔ merge ЗАБЛОКИРОВАН: ${blockers.length} кластер(ов) уровня ${gate.blockOn.join('/')}`);
-        finalObs = { exitCode: 1, wouldBlock: true, blockers: blockers.length, total, counts };
+        finalObs = { exitCode: 1, wouldBlock: true, blockers: blockers.length, total, counts, inline: inline.length };
         return 1;
       }
       log(`готово — блокеров нет (${reviewMode}).`);
-      finalObs = { exitCode: 0, wouldBlock: false, blockers: 0, total, counts };
+      finalObs = { exitCode: 0, wouldBlock: false, blockers: 0, total, counts, inline: inline.length };
       return 0;
     } catch (e) {
       finalObs = {

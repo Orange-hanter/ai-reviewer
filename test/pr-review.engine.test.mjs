@@ -406,6 +406,317 @@ test('engine MoA: все specialists недоступны → error, aggregator 
   assert.match(res.error, /security\/sec-m/);
 });
 
+// --- маршрутизация ролей по содержимому чанка (RFC 04, решение 2) ---
+
+const routingCtx = {
+  pr: {},
+  chunkRouting: { fileClass: (p) => (/\.(?:ts|mjs|js)$/.test(p) ? 'logic' : 'other'), sensitive: null },
+};
+const mkRoutingOllama = (calls) => ({
+  chatText: async (_m, model) => { calls.text.push(model); return `prose from ${model}`; },
+  chatJson: async (msgs, model) => {
+    calls.json.push({ model, tip: msgs.at(-1)?.content });
+    return { summary: 's', verdict: 'comment', findings: [] };
+  },
+});
+
+test('chunk-routing: чанк из документации и данных обслуживает один агрегатор', async () => {
+  const calls = { text: [], json: [] };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: mkRoutingOllama(calls), prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const chunks = [{ annotated: 'd', fileContents: '', paths: ['docs/architecture.md', 'fixtures/a.json'], partialPaths: [] }];
+  await engine.reviewAllModels(chunks, routingCtx);
+  assert.deepEqual(calls.text, [], 'специалисты не вызываются: исполняемого кода в чанке нет');
+  assert.equal(calls.json.length, 1, 'ровно один вызов агрегатора');
+  assert.equal(calls.json[0].tip, 'base', 'без референсов агрегатор получает базовый промпт, без секции жюри');
+});
+
+test('chunk-routing: код, CI-workflow и чувствительный путь жюри не теряют', async () => {
+  const cases = [
+    { name: 'код', paths: ['lib/engine.mjs'], ctx: routingCtx },
+    { name: 'CI-workflow', paths: ['.github/workflows/ci.yml'], ctx: routingCtx },
+    { name: 'shell', paths: ['scripts/deploy.sh'], ctx: routingCtx },
+    {
+      name: 'чувствительный путь профиля',
+      paths: ['config/billing.json'],
+      ctx: { pr: {}, chunkRouting: { fileClass: () => 'other', sensitive: /billing/i } },
+    },
+    { name: 'состав чанка неизвестен', paths: [], ctx: routingCtx },
+  ];
+  for (const c of cases) {
+    const calls = { text: [], json: [] };
+    const engine = createReviewEngine(MOA_CFG, {
+      ollama: mkRoutingOllama(calls), prompt: MOA_PROMPT, log: () => {}, observability: null,
+    });
+    await engine.reviewAllModels([{ annotated: 'd', fileContents: '', paths: c.paths, partialPaths: [] }], c.ctx);
+    assert.equal(calls.text.length, 3, `${c.name}: все три специалиста опрошены`);
+  }
+});
+
+test('chunk-routing: выключенный флаг и отсутствие контекста возвращают полный MoA', async () => {
+  for (const [name, cfg, ctx] of [
+    ['REVIEW_CHUNK_ROUTING=0', { ...MOA_CFG, limits: { ...MOA_CFG.limits, chunkRouting: false } }, routingCtx],
+    ['контекст не передан (DI-прогон)', MOA_CFG, { pr: {} }],
+  ]) {
+    const calls = { text: [], json: [] };
+    const engine = createReviewEngine(cfg, {
+      ollama: mkRoutingOllama(calls), prompt: MOA_PROMPT, log: () => {}, observability: null,
+    });
+    await engine.reviewAllModels([{ annotated: 'd', fileContents: '', paths: ['docs/a.md'], partialPaths: [] }], ctx);
+    assert.equal(calls.text.length, 3, `${name}: состав ролей не урезается`);
+  }
+});
+
+// --- слияние ролей на одной модели (RFC 04, решение 4) ---
+
+const ONE_MODEL_CFG = {
+  ...MOA_CFG,
+  specialists: {
+    enabled: true,
+    merge: 'auto',
+    assignments: [
+      { role: 'security', model: 'solo' },
+      { role: 'correctness', model: 'solo' },
+      { role: 'architecture', model: 'solo' },
+    ],
+  },
+};
+const sectioned = (bodies) => [
+  `### ROLE: security\n${bodies[0]}`,
+  `### ROLE: correctness\n${bodies[1]}`,
+  `### ROLE: architecture\n${bodies[2]}`,
+].join('\n\n');
+
+// --- summary агрегата: обзор PR берётся из чанка с кодом ---
+
+// Промпт, доносящий до фейковой модели, какой это чанк: MOA_PROMPT отдаёт всем 'base'.
+const SUMMARY_PROMPT = { ...MOA_PROMPT, buildMessages: ({ annotated }) => [{ role: 'user', content: annotated }] };
+// Модель отвечает summary'ем своего чанка — так видно, чей обзор доехал до агрегата.
+// Чанк опознаём по ПЕРВОМУ сообщению: у чанка с кодом жюри дописывает в хвост секцию
+// мнений советников (buildSpecialistAggregatorMessages), у чанка без кода агрегатор
+// получает базовый промпт как есть — msgs.at(-1) в этих двух случаях разное.
+const SUMMARY_OLLAMA = {
+  chatText: async (_m, model) => `prose from ${model}`,
+  chatJson: async (msgs) => ({ summary: `обзор: ${msgs[0].content}`, findings: [] }),
+};
+const summaryChunk = (annotated, paths) => ({ annotated, fileContents: '', paths, partialPaths: [] });
+
+test('summary агрегата: docs-чанк идёт первым, но обзор берётся у чанка с кодом', async () => {
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: SUMMARY_OLLAMA, prompt: SUMMARY_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels([
+    summaryChunk('docs', ['proposals/04-token-economy.md']),
+    summaryChunk('code', ['lib/engine.mjs']),
+  ], routingCtx);
+  assert.equal(res.summary, 'обзор: code',
+    'Walkthrough не должен открываться обзором plan-документа, когда в PR есть код');
+});
+
+test('summary агрегата: без единого кодового чанка — прежнее поведение (первое непустое)', async () => {
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: SUMMARY_OLLAMA, prompt: SUMMARY_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels([
+    summaryChunk('docs', ['docs/a.md']),
+    summaryChunk('fixtures', ['fixtures/a.json']),
+  ], routingCtx);
+  assert.equal(res.summary, 'обзор: docs');
+});
+
+test('summary агрегата: маршрутизация выключена — выбор не меняется', async () => {
+  const cfg = { ...MOA_CFG, limits: { ...MOA_CFG.limits, chunkRouting: false } };
+  const engine = createReviewEngine(cfg, {
+    ollama: SUMMARY_OLLAMA, prompt: SUMMARY_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels([
+    summaryChunk('docs', ['docs/a.md']),
+    summaryChunk('code', ['lib/engine.mjs']),
+  ], routingCtx);
+  assert.equal(res.summary, 'обзор: docs', 'без маршрутизации все чанки равны — первое непустое');
+});
+
+test('summary агрегата: пустой обзор кодового чанка не съедает содержательный', async () => {
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: {
+      ...SUMMARY_OLLAMA,
+      chatJson: async (msgs) => ({
+        summary: msgs[0].content === 'code' ? '' : `обзор: ${msgs[0].content}`,
+        findings: [],
+      }),
+    },
+    prompt: SUMMARY_PROMPT,
+    log: () => {},
+    observability: null,
+  });
+  const [res] = await engine.reviewAllModels([
+    summaryChunk('docs', ['docs/a.md']),
+    summaryChunk('code', ['lib/engine.mjs']),
+  ], routingCtx);
+  assert.equal(res.summary, 'обзор: docs');
+});
+
+test('агрегат не носит verdict модели: поле удалено из контракта', async () => {
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama: {
+      ...SUMMARY_OLLAMA,
+      // модель всё равно может прислать лишнее поле — агрегат обязан его игнорировать
+      chatJson: async () => ({ summary: 's', verdict: 'changes_requested', findings: [] }),
+    },
+    prompt: SUMMARY_PROMPT,
+    log: () => {},
+    observability: null,
+  });
+  const [res] = await engine.reviewAllModels([summaryChunk('code', ['lib/engine.mjs'])], routingCtx);
+  assert.equal(res.verdict, undefined, 'verdict модели никто не читал — он не должен появляться в агрегате');
+});
+
+test('specialist merge: одна модель на все роли → один вызов, ответ разложен по ролям', async () => {
+  const textCalls = [];
+  const ollama = {
+    chatText: async (msgs, model) => {
+      textCalls.push({ model, system: msgs[0]?.content || '' });
+      return sectioned(['- [major] `a.ts:1` — sec', '- [minor] `a.ts:2` — corr', 'в моей области серьёзных замечаний нет']);
+    },
+    chatJson: async () => ({ summary: 's', verdict: 'comment', findings: [] }),
+  };
+  const engine = createReviewEngine(ONE_MODEL_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+
+  assert.equal(textCalls.length, 1, 'один prose-вызов вместо трёх');
+  assert.match(textCalls[0].system, /PANEL of 3/, 'модель предупреждена, что ролей три');
+  const byRole = Object.fromEntries(res.references.map((r) => [r.role, r.text]));
+  assert.match(byRole.security, /sec/);
+  assert.match(byRole.correctness, /corr/);
+  assert.match(byRole.architecture, /серьёзных замечаний нет/);
+  assert.ok(!byRole.security.includes('corr'), 'секции не перетекают друг в друга');
+});
+
+test('specialist merge: сорванный формат не подделывает консенсус', async () => {
+  const ollama = {
+    chatText: async () => 'сплошной текст без заголовков секций',
+    chatJson: async () => ({ summary: 's', verdict: 'comment', findings: [] }),
+  };
+  const engine = createReviewEngine(ONE_MODEL_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  const [res] = await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  assert.equal(res.references.length, 1, 'один советник, а не три копии одного текста');
+  assert.equal(res.references[0].mergedFallback, true);
+});
+
+test('specialist merge: разные модели по ролям не сливаются', async () => {
+  const models = [];
+  const ollama = {
+    chatText: async (_m, model) => { models.push(model); return 'prose'; },
+    chatJson: async () => ({ summary: 's', verdict: 'comment', findings: [] }),
+  };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  assert.deepEqual(models, ['sec-m', 'corr-m', 'arch-m'], 'три модели — три независимых мнения, сливать нечего');
+});
+
+test('specialist merge: never опрашивает роли по отдельности даже на одной модели', async () => {
+  const calls = [];
+  const ollama = {
+    chatText: async (_m, model) => { calls.push(model); return 'prose'; },
+    chatJson: async () => ({ summary: 's', verdict: 'comment', findings: [] }),
+  };
+  const engine = createReviewEngine(
+    { ...ONE_MODEL_CFG, specialists: { ...ONE_MODEL_CFG.specialists, merge: 'never' } },
+    { ollama, prompt: MOA_PROMPT, log: () => {}, observability: null },
+  );
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  assert.equal(calls.length, 3);
+});
+
+// --- раскладка под префиксный кэш (RFC 04, решение 5) ---
+
+// Мок, повторяющий РЕАЛЬНУЮ форму lib/prompt.mjs: [system, user], а жюри дописывает свою
+// секцию СПЕРЕДИ к последнему user. Именно на эту форму опирается разбор в prompt-layout.
+const REAL_SHAPE_PROMPT = {
+  buildMessages: () => [
+    { role: 'system', content: 'AGGREGATOR RULES + JSON SCHEMA' },
+    { role: 'user', content: 'КОНТЕКСТ ЧАНКА: дифф и файлы' },
+  ],
+  buildSpecialistMessages: (role, base) => [
+    { role: 'system', content: `specialist rules: ${role}` },
+    { role: 'user', content: base.at(-1).content },
+  ],
+  buildSpecialistAggregatorMessages: (base, refs) => base.map((m, i) => (
+    i === base.length - 1
+      ? { role: 'user', content: `jury refs=${refs.map((r) => r.role).join(',')}\n${m.content}` }
+      : m
+  )),
+  buildReferenceMessages: (base) => base,
+  buildAggregatorMessages: (base) => base,
+  buildVerifierMessages: ({ candidates }) => [{ role: 'user', content: `verify ${candidates.length}` }],
+};
+
+test('prompt layout: shared-prefix даёт всем ролям чанка побайтово общий префикс', async () => {
+  const seen = [];
+  const ollama = {
+    chatText: async (msgs) => { seen.push(msgs); return 'prose'; },
+    chatJson: async (msgs) => { seen.push(msgs); return { summary: 's', verdict: 'comment', findings: [] }; },
+  };
+  const engine = createReviewEngine({ ...MOA_CFG, promptLayout: 'shared-prefix' }, {
+    ollama, prompt: REAL_SHAPE_PROMPT, log: () => {}, observability: null,
+  });
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+
+  assert.equal(seen.length, 4, 'три роли и агрегатор');
+  for (const msgs of seen) {
+    assert.equal(msgs.length, 3, 'system + контекст + роль');
+    assert.equal(msgs[0].role, 'system');
+    assert.equal(msgs[2].role, 'user');
+  }
+  const prefix = (m) => `${m[0].content} ${m[1].content}`;
+  const prefixes = new Set(seen.map(prefix));
+  assert.equal(prefixes.size, 1, 'префикс совпадает у всех четырёх вызовов — иначе кэшировать нечего');
+  const roleTails = seen.map((m) => m[2].content);
+  assert.equal(new Set(roleTails).size, 4, 'инструкции ролей при этом различны');
+  assert.match(roleTails[3], /jury refs=/, 'мнения советников уехали в хвост агрегатора');
+  assert.match(roleTails[3], /AGGREGATOR RULES/, 'правила и схема ответа поехали туда же');
+  assert.match(seen[0][1].content, /КОНТЕКСТ ЧАНКА/, 'в общем префиксе — именно контекст');
+});
+
+test('prompt layout: legacy по умолчанию — прежняя форма сообщений', async () => {
+  const seen = [];
+  const ollama = {
+    chatText: async (msgs) => { seen.push(msgs); return 'prose'; },
+    chatJson: async (msgs) => { seen.push(msgs); return { summary: 's', verdict: 'comment', findings: [] }; },
+  };
+  const engine = createReviewEngine(MOA_CFG, {
+    ollama, prompt: MOA_PROMPT, log: () => {}, observability: null,
+  });
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  assert.ok(seen.every((m) => m.length <= 2), 'без флага сообщения не перестраиваются');
+});
+
+test('prompt layout: неразбираемая форма промпта откатывается на legacy', async () => {
+  const seen = [];
+  const ollama = {
+    chatText: async (msgs) => { seen.push(msgs); return 'prose'; },
+    chatJson: async (msgs) => { seen.push(msgs); return { summary: 's', verdict: 'comment', findings: [] }; },
+  };
+  // Агрегатор дописывает мнения не спереди, а сзади — срез контекста стал бы неверным.
+  const oddPrompt = {
+    ...MOA_PROMPT,
+    buildSpecialistAggregatorMessages: (base) => [...base, { role: 'user', content: 'хвостом' }],
+  };
+  const engine = createReviewEngine({ ...MOA_CFG, promptLayout: 'shared-prefix' }, {
+    ollama, prompt: oddPrompt, log: () => {}, observability: null,
+  });
+  await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
+  const agg = seen.at(-1);
+  assert.equal(agg.at(-1).content, 'хвостом', 'сообщения агрегатора остались как построены');
+});
+
 // --- verifier runner (createVerifierRunner через engine) ---
 
 test('engine verifier: chatJson verdicts — order/decision доезжают (happy path)', async () => {

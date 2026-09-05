@@ -14,7 +14,7 @@
  *
  * Матрица:
  *   1. consensus, все модели ок: агрегация находок по чанкам, дедуп внутри
- *      модели, verdict-ранк (changes_requested побеждает), summary — первое непустое;
+ *      модели, summary — первое непустое;
  *   2. consensus, primary падает → fallback-модель, fallbackFor, лог дедупа;
  *   3. consensus, все падают → error у каждой модели;
  *   4. дедлайн истёк → skipped, LLM не зовётся, fallback не запускается;
@@ -23,7 +23,7 @@
  *   6. MoA + specialists: advisors prose → jury JSON с advisorClaims, label
  *      атрибуция, references смержены; все advisors недоступны → error;
  *   7. MoA fallback: aggregator недоступен → резервная модель, juryBypassed;
- *   8. aggregate-края: вердикт-тай, missing verdict, все чанки skipped.
+ *   8. aggregate-края: лишние поля ответа, summary из чанка с кодом, все чанки skipped.
  */
 
 import { existsSync } from 'node:fs';
@@ -98,7 +98,7 @@ const PROMPT = { buildMessages: () => [{ role: 'user', content: 'x' }] };
 const CHUNKS = [{ annotated: 'd1', fileContents: '' }, { annotated: 'd2', fileContents: '' }];
 
 // ---------------------------------------------------------------------------
-// 1. Все модели ок: агрегация, дедуп внутри модели, verdict-ранк
+// 1. Все модели ок: агрегация, дедуп внутри модели, summary
 // ---------------------------------------------------------------------------
 
 await checkReview('consensus all ok', ENGINE_CFG, {
@@ -311,17 +311,18 @@ await checkReview('MoA aggregator fails → fallback (juryBypassed)', MOA_CFG, {
 });
 
 // ---------------------------------------------------------------------------
-// 8. Aggregate-края: verdict-тай (первый побеждает), missing verdict, all-skipped
+// 8. Aggregate-края: лишние поля ответа игнорируются, summary из чанка с кодом,
+//    отсутствие кодовых чанков → первое непустое
 // ---------------------------------------------------------------------------
 
-await checkReview('verdict ties keep first', {
+await checkReview('лишнее поле verdict в ответе модели не доезжает до агрегата', {
   ...ENGINE_CFG,
   models: { list: ['m1'], fallback: [] },
 }, {
   ollama: {
     chatJson: async (msgs) => ({
       summary: msgs[0].content,
-      // оба чанка дают ранк 1 (comment) — стабильный sort берёт первый
+      // поле убрано из схемы жюри, но модель вольна прислать его сама
       verdict: 'comment',
       findings: [],
     }),
@@ -331,16 +332,39 @@ await checkReview('verdict ties keep first', {
   ctx: { pr: {} },
 });
 
-await checkReview('missing verdict aggregated as-is', {
+// Выбор summary (pickAggregateSummary) сделан НАД обеими ветками — обе обязаны дать
+// один обзор, иначе Walkthrough отличался бы на машине с бинарём и без него.
+const SUMMARY_ROUTING = {
+  pr: {},
+  chunkRouting: { fileClass: (p) => (/\.mjs$/.test(p) ? 'logic' : 'other'), sensitive: null },
+};
+const SUMMARY_PROMPT = { buildMessages: ({ annotated }) => [{ role: 'user', content: annotated }] };
+const SUMMARY_OLLAMA = { chatJson: async (msgs) => ({ summary: `обзор ${msgs[0].content}`, findings: [] }) };
+
+await checkReview('summary — из чанка с кодом, а не из первого', {
   ...ENGINE_CFG,
   models: { list: ['m1'], fallback: [] },
 }, {
-  ollama: {
-    chatJson: async () => ({ summary: 's', findings: [] }), // verdict отсутствует
-  },
-  prompt: PROMPT,
-  chunks: [CHUNKS[0]],
-  ctx: { pr: {} },
+  ollama: SUMMARY_OLLAMA,
+  prompt: SUMMARY_PROMPT,
+  chunks: [
+    { annotated: 'docs', fileContents: '', paths: ['docs/a.md'], partialPaths: [] },
+    { annotated: 'code', fileContents: '', paths: ['lib/a.mjs'], partialPaths: [] },
+  ],
+  ctx: SUMMARY_ROUTING,
+});
+
+await checkReview('кодовых чанков нет → первое непустое summary', {
+  ...ENGINE_CFG,
+  models: { list: ['m1'], fallback: [] },
+}, {
+  ollama: SUMMARY_OLLAMA,
+  prompt: SUMMARY_PROMPT,
+  chunks: [
+    { annotated: 'docs', fileContents: '', paths: ['docs/a.md'], partialPaths: [] },
+    { annotated: 'fixtures', fileContents: '', paths: ['fixtures/a.json'], partialPaths: [] },
+  ],
+  ctx: SUMMARY_ROUTING,
 });
 
 // ---------------------------------------------------------------------------

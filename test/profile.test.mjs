@@ -155,15 +155,38 @@ test('конфиг берёт пути из профиля, env перебива
   resetProfile();
 });
 
-test('дефолтный конфиг не тянет чужие пути проекта', () => {
+test('дефолтный конфиг не тянет чужие пути проекта', async () => {
   resetProfile();
-  const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
-  assert.equal(cfg.profile.name, 'default');
-  assert.equal(cfg.feedback.logFile, '.ai-review/feedback/fp-feedback.jsonl');
-  assert.equal(cfg.observability.dir, '.ai-review/observability');
-  assert.equal(cfg.prescan.appDir, '');
-  // patternsFile пуст → движок берёт стартовый набор из пакета (см. lib/fp-patterns.mjs).
-  assert.equal(cfg.feedback.patternsFile, '');
+  // loadReviewConfig ищет профиль автопоиском в cwd, а у самого движка теперь есть свой
+  // .ai-reviewer.json в корне — «репозиторий без профиля» приходится собирать явно, пустым
+  // каталогом. Проверяется ровно тот же нейтральный путь, что и раньше.
+  const cwd = process.cwd();
+  const dir = await mkdtemp(join(tmpdir(), 'ai-reviewer-noprofile-'));
+  try {
+    process.chdir(dir);
+    const cfg = loadReviewConfig({}, { dryRun: true, repo: '', prNumber: 0 });
+    assert.equal(cfg.profile.name, 'default');
+    assert.equal(cfg.feedback.logFile, '.ai-review/feedback/fp-feedback.jsonl');
+    assert.equal(cfg.observability.dir, '.ai-review/observability');
+    assert.equal(cfg.prescan.appDir, '');
+    // patternsFile пуст → движок берёт стартовый набор из пакета (см. lib/fp-patterns.mjs).
+    assert.equal(cfg.feedback.patternsFile, '');
+  } finally {
+    process.chdir(cwd);
+    await rm(dir, { recursive: true, force: true });
+    resetProfile();
+  }
+});
+
+test('автопоиск: .ai-reviewer.json в корне рабочего каталога подхватывается сам', () => {
+  resetProfile();
+  const profile = resolveProfile({}, { cwd: fileURLToPath(new URL('..', import.meta.url)) });
+  assert.equal(profile.name, 'ai-reviewer', 'профиль самого движка найден без REVIEW_PROFILE');
+  assert.ok(profile.layout.sensitive.test('lib/pipeline-x.mjs'), 'lib/ — чувствительная зона');
+  assert.ok(profile.layout.sensitive.test('rust/src/report.rs'), 'rust/src/ — чувствительная зона');
+  assert.ok(profile.layout.sensitive.test('pipeline.mjs'));
+  assert.ok(!profile.layout.sensitive.test('docs/architecture.md'));
+  assert.match(profile.repoRules, /ноль runtime-зависимостей/, 'правила проекта доехали в промпт');
   resetProfile();
 });
 

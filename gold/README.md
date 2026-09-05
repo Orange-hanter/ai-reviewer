@@ -8,12 +8,21 @@
 
 ```
 gold/<id>/
-  meta.json    # { id, description, expect: { wouldBlock, mustFindTitles?, mustNotFindTitles?, note? } }
+  meta.json    # { id, description, expect: { wouldBlock, mustFindTitles?, mustNotFindTitles?, mustFindLocations?, note? } }
   diff.patch   # frozen PR diff
 ```
 
 - `wouldBlock` — ожидаемый вердикт гейта (exit code 1/0).
 - `mustFindTitles` / `mustNotFindTitles` — подстроки в title находок (lowercase, мягкий матч).
+- `mustFindLocations` — `[{ file, lines: [от, до] }]`: попадание находки в размеченную строку с
+  допуском `locationTolerance` (дефолт ±3). Язык-независимая замена сверке заголовков: формулировки
+  движка не обязаны совпадать с формулировками разметки. Скоринг — `lib/benchmark.mjs`.
+
+Дифф кейса можно урезать по файлам исходного PR (номера строк внутри оставленных файлов не
+съезжают) — факт урезания фиксируется в `expect.note`.
+
+Оффлайн-проверка разметки без LLM: `node bin/pr-review-benchmark.mjs --gold-dir` — читает все
+`meta.json` и считает по ним скоринг на пустых находках (stub); ошибка формата вылезет здесь.
 
 ## Запуск
 
@@ -30,7 +39,8 @@ Env пайплайна переопределяется как обычно (`MO
 
 | id | Тип | Что проверяет |
 |----|-----|---------------|
-| `tp-real-bugs-unescape` | tp | recall: реальные major (unescape) среди FP-шума → блок |
+| `tp-real-bugs-unescape` | tp | recall по локациям: 2 реальных major (unescape quoted-путей) среди FP-шума → блок |
+| `tp-structure-real-defects` | tp | recall по локациям: 4 реальных дефекта structure-контура среди 29 FP |
 | `fp-noise-no-real-blockers` | fp | precision: все major — подтверждённые FP → без блока |
 | `clean-code-carryover-fingerprint` | clean | precision: смерженный PR без critical/major |
 | `clean-code-footer-last-marker` | clean | футер по последнему маркеру; цитаты маркера в тексте |

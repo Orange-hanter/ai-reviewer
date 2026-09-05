@@ -4,7 +4,10 @@
   "description": "PR #477 pre-fix: реальные major (unescape git C-quoting в parseDiffNewPath/parseDiffGitPath) среди FP-шума — recall-контроль: пайплайн обязан заблокировать",
   "expect": {
     "wouldBlock": true,
-    "mustFindTitles": ["escape"],
-    "note": "2 реальных major на diff.mjs подтверждены вручную и исправлены; hermes-метрики в этом же диффе — известные FP"
+    "mustFindLocations": [
+      { "file": "ops/pr-review/lib/diff.mjs", "lines": [5, 6] },
+      { "file": "ops/pr-review/lib/diff.mjs", "lines": [9, 10] }
+    ],
+    "note": "2 реальных major на diff.mjs подтверждены вручную и исправлены; hermes-метрики в этом же диффе — известные FP. Разметка по локациям, а не по mustFindTitles: заголовки движок пишет по-русски («не снимается экранирование C-quoted путей»), и подстрочная сверка с английским «escape» промахивалась даже на прогонах, где дефект был найден в нужной строке"
   }
 }

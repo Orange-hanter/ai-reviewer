@@ -119,7 +119,13 @@ Verifier для advisory работает только «на понижение
 4. **Не гонять dry-run как единственный режим.** Сигнал `repeated` (+2) появляется только
    при наличии прошлого sticky; постоянные прогоны на PR дают его бесплатно.
 
-### P1 — разорвать курицу и яйцо (небольшая правка, `pipeline.mjs` + `lib/config.mjs`)
+> **Статус (2026-09-04).** P0.1–P0.3 закрыты для локальной среды (профиль `.ai-reviewer.json`,
+> граф и `ast-grep` — см. [model-tuning.md](model-tuning.md), «Локальный прогон с полными
+> сигналами»); P1 — `REVIEW_VERIFY_ADVISORY_MIN`; P2 — [RFC 06](../proposals/06-actionability-single-penalty.md);
+> P3.1 — `gold/tp-structure-real-defects`; P3.2 — событие `actionability` в observability.
+> Открыт только P0.4 (постоянные прогоны на PR вместо dry-run) и ретро по FP-паттернам (P3.3).
+
+### P1 — разорвать курицу и яйцо (небольшая правка, `pipeline.mjs` + `lib/config.mjs`) — **сделано**
 
 Отбирать advisory-кандидатов verifier'а по **пониженному** порогу — по смыслу
 `threshold − вес(verified)`, то есть 4 − 3 = 1. Кандидатом становится всё, что *станет*
@@ -129,7 +135,7 @@ Verifier для advisory работает только «на понижение
 жёсткой константы, лимит `REVIEW_VERIFY_ADVISORY` (5) удерживает цену. В R2 это дало бы
 verifier'у 12 находок группы «без claims» — включая все три реальных minor.
 
-### P2 — не штрафовать дважды за один вердикт (`lib/actionability.mjs`)
+### P2 — не штрафовать дважды за один вердикт (`lib/actionability.mjs`) — **сделано, RFC 06**
 
 `juryDowngraded` −2 применять только когда severity **не** была уже понижена refutation'ом
 (`f.refutationStatus === 'downgraded'` — признак уже применённого штрафа), либо считать jury
