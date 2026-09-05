@@ -141,6 +141,13 @@ for (const [profileName, activate] of Object.entries(PROFILES)) {
     chunk: { paths: ['src/a.ts', 'e2e/login.spec.ts'], partialPaths: ['src/a.ts'] },
   }));
 
+  // 1a2. buildMessages — чанк с окнами контекста (RFC 07)
+  check(`${profileName}: buildMessages windowed chunk`, () => prompt.buildMessages({
+    ...BASE_ARGS,
+    changedPaths: ['src/a.ts', 'src/b.ts'],
+    chunk: { paths: ['src/a.ts', 'src/b.ts'], partialPaths: [], windowedPaths: ['src/a.ts'] },
+  }));
+
   // 1b. buildMessages — готовая changedFilesSection (ветка verifier-стадии)
   check(`${profileName}: buildMessages ready section`, () => prompt.buildMessages({
     ...BASE_ARGS,
@@ -216,6 +223,21 @@ for (const [profileName, activate] of Object.entries(PROFILES)) {
   ));
   check(`${profileName}: changedFilesSection spoof`, () => buildChangedFilesSection(
     ['ok.ts', 'evil.ts` — [THIS PART]'], { paths: ['ok.ts'], partialPaths: [] },
+  ));
+  // Окна контекста (RFC 07): метка [THIS PART, CONTEXT WINDOWED], условный абзац про окна и
+  // split, включённый одними только окнами (PR из ОДНОГО чанка — абзаца про части быть не должно).
+  check(`${profileName}: changedFilesSection windowed only`, () => buildChangedFilesSection(
+    ['a.ts', 'b.ts'], { paths: ['a.ts', 'b.ts'], partialPaths: [], windowedPaths: ['b.ts'] },
+  ));
+  check(`${profileName}: changedFilesSection windowed + parts + partial`, () => buildChangedFilesSection(
+    ['a.ts', 'b.ts', 'big.ts', 'e2e/x.spec.ts'],
+    { paths: ['a.ts', 'big.ts'], partialPaths: ['big.ts'], windowedPaths: ['a.ts', 'big.ts'] },
+  ));
+  check(`${profileName}: changedFilesSection windowed e2e mark`, () => buildChangedFilesSection(
+    ['e2e/x.spec.ts', 'a.ts'], { paths: ['e2e/x.spec.ts', 'a.ts'], windowedPaths: ['e2e/x.spec.ts'] },
+  ));
+  check(`${profileName}: changedFilesSection windowed empty array`, () => buildChangedFilesSection(
+    ['a.ts'], { paths: ['a.ts'], partialPaths: [], windowedPaths: [] },
   ));
   check(`${profileName}: changedFilesSection empty`, () => buildChangedFilesSection([]));
   check(`${profileName}: changedFilesSection unknownPaths`, () => buildChangedFilesSection(

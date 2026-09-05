@@ -23,7 +23,7 @@ const {
   scoreFromRecord, locationMatches, DEFAULT_LOCATION_TOLERANCE,
   emitBlastRadiusFindings, resolveBlockers, normalizeFinding, setProfile, resetProfile,
   matchesKnownFalsePositive, redactSecretsForLog,
-  windowFileEntry, buildVerifierFileContents,
+  windowFileEntry, buildVerifierFileContents, windowChunkFileContents,
 } = await import('../index.mjs');
 const {
   buildGraphIndex, resolveUniqueNode, enrichAffectedDep, bareLabel,
@@ -1792,6 +1792,96 @@ test('windowFileEntry: маркер добавленного файла и фа�
   const small = mkEntry('a.ts', 20);
   assert.equal(windowFileEntry(small, [10], { margin: 80 }), small, 'окно покрывает файл целиком');
   assert.equal(windowFileEntry(small, [], { margin: 80 }), small, 'нет строк — файл целиком');
+});
+
+// ---------------------------------------------------------------------------
+// lib/context-window.mjs — окна контекста advisors и жюри (RFC 07)
+// ---------------------------------------------------------------------------
+
+/** Карта parseDiff в том виде, в каком её читает windowChunkFileContents. */
+const mkFiles = (spec) => new Map(Object.entries(spec).map(([p, lines]) => [p, { validLines: new Set(lines) }]));
+
+test('windowChunkFileContents: разнесённые хунки → окна вокруг изменённых строк, номера восстановимы', () => {
+  const contentMap = new Map([['a.ts', mkEntry('a.ts', 300)]]);
+  const files = mkFiles({ 'a.ts': [50, 51, 250] });
+  const r = windowChunkFileContents(contentMap, files, { margin: 10, minChars: 0 });
+  const body = entryBody(r.map.get('a.ts'));
+  assert.deepEqual(body.filter((l) => l.startsWith('… (строки')), [
+    '… (строки 1–39 пропущены)',
+    '… (строки 62–239 пропущены)',
+    '… (строки 261–300 пропущены)',
+  ], 'два окна (40–61 и 240–260), между ними и по краям — маркеры пропуска');
+  assert.deepEqual(r.windowed, new Set(['a.ts']));
+  assert.ok(r.after < r.before, `окна короче файла: ${r.before} → ${r.after}`);
+});
+
+test('windowChunkFileContents: файл короче minChars едет целиком — усечение там не экономит', () => {
+  const small = mkEntry('small.ts', 30);
+  const big = mkEntry('big.ts', 300);
+  const r = windowChunkFileContents(new Map([['small.ts', small], ['big.ts', big]]),
+    mkFiles({ 'small.ts': [15], 'big.ts': [150] }), { margin: 5, minChars: small.length });
+  assert.equal(r.map.get('small.ts'), small, 'ровно на пороге — целиком (порог строгий: > minChars)');
+  assert.notEqual(r.map.get('big.ts'), big);
+  assert.deepEqual(r.windowed, new Set(['big.ts']));
+});
+
+test('windowChunkFileContents: margin=0 — окна выключены, карта та же (откат RFC 07)', () => {
+  const contentMap = new Map([['a.ts', mkEntry('a.ts', 300)], ['b.ts', mkEntry('b.ts', 400)]]);
+  const files = mkFiles({ 'a.ts': [50, 250], 'b.ts': [10] });
+  const r = windowChunkFileContents(contentMap, files, { margin: 0, minChars: 0 });
+  assert.equal(r.map, contentMap, 'возвращается ИСХОДНАЯ карта, а не пересобранная копия');
+  for (const [path, entry] of contentMap) assert.equal(r.map.get(path), entry, `${path} побайтово прежний`);
+  assert.equal(r.windowed.size, 0, 'ни один путь не помечен оконным → метки и абзаца в промпте нет');
+  assert.equal(r.after, r.before, 'замер показывает нулевую экономию, а не «до/после» от разных величин');
+});
+
+test('windowChunkFileContents: маркер добавленного файла и файл без изменённых строк не режутся', () => {
+  const marker = '### new.ts\n(новый файл — его полное содержимое целиком приведено в диффе ниже)';
+  const untouched = mkEntry('u.ts', 300);
+  const r = windowChunkFileContents(new Map([['new.ts', marker], ['u.ts', untouched]]),
+    mkFiles({ 'new.ts': [1, 2, 3] }), { margin: 10, minChars: 0 });
+  assert.equal(r.map.get('new.ts'), marker, 'тела в кавычках нет — резать нечего');
+  assert.equal(r.map.get('u.ts'), untouched, 'нет validLines — центрировать окно не на чем');
+  assert.equal(r.windowed.size, 0);
+});
+
+test('collectBlastSymbols: окна теряют export в начале файла — потому окна ставятся ПОСЛЕ blast-radius', () => {
+  // Файл, где `export function` стоит в начале, а правка — в конце: ровно тот случай, ради
+  // которого порядок в pipeline.mjs зафиксирован (RFC 07, решение 4). Перепутанный порядок
+  // не падает и не логируется — он молча отдаёт пустой blast-radius.
+  const body = ['export function blastAwayMarker() { return 1; }',
+    ...Array.from({ length: 299 }, (_, i) => `  // строка ${i + 2}`)].join('\n');
+  const entry = `### a.ts\n\`\`\`\n${body}\n\`\`\``;
+  const files = mkFiles({ 'a.ts': [290] });
+  const full = collectBlastSymbols('  // строка 290', new Map([['a.ts', entry]]), 25);
+  const windowedMap = windowChunkFileContents(new Map([['a.ts', entry]]), files, { margin: 10, minChars: 0 }).map;
+  const windowed = collectBlastSymbols('  // строка 290', windowedMap, 25);
+  assert.ok(full.includes('blastAwayMarker'), 'по полному тексту export виден');
+  assert.ok(!windowed.includes('blastAwayMarker'), 'по окнам — нет: считать символы после окон нельзя');
+});
+
+test('buildChangedFilesSection: windowedPaths → метка CONTEXT WINDOWED и запрет absence на PR из ОДНОГО чанка', () => {
+  const s = buildChangedFilesSection(['a.ts', 'b.ts'], {
+    paths: ['a.ts', 'b.ts'], partialPaths: [], windowedPaths: ['b.ts'],
+  });
+  assert.ok(s.includes('- `b.ts` — [THIS PART, CONTEXT WINDOWED]'), 'оконный путь помечен третьей меткой');
+  assert.ok(s.includes('- `a.ts` — [THIS PART]'), 'неоконный путь метку не получает');
+  assert.ok(!s.includes('SOME HUNKS ONLY]\n'), 'подменять метку частичности нельзя: все хунки на месте');
+  assert.ok(s.includes('HARD RULE — NO ABSENCE CLAIMS'), 'запрет включается одними окнами, без разрезания на части');
+  assert.ok(s.includes('строки N–M пропущены'), 'правило ссылается на маркер пропуска дословно');
+  assert.ok(!s.includes('This PR is reviewed in parts'), 'PR из одного чанка ни на какие части не разрезан');
+});
+
+test('buildChangedFilesSection: без windowedPaths карта PR про окна молчит (откат)', () => {
+  const whole = buildChangedFilesSection(['a.ts', 'b.ts'], { paths: ['a.ts', 'b.ts'], partialPaths: [] });
+  assert.ok(!whole.includes('CONTEXT WINDOWED'));
+  assert.ok(!whole.includes('строки N–M пропущены'));
+  assert.ok(!whole.includes('NO ABSENCE CLAIMS'), 'весь PR в одном чанке и без окон — запрещать нечего');
+
+  const parts = buildChangedFilesSection(['a.ts', 'b.ts'], { paths: ['a.ts'], partialPaths: [] });
+  assert.ok(parts.includes('This PR is reviewed in parts'), 'разрезанный PR получает абзац про части');
+  assert.ok(parts.includes('HARD RULE — NO ABSENCE CLAIMS'));
+  assert.ok(!parts.includes('CONTEXT WINDOWED'), 'абзац про окна — только при непустом windowedPaths');
 });
 
 test('buildVerifierFileContents: только файлы кандидатов, окна вокруг их строк, замер до/после', () => {

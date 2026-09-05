@@ -259,6 +259,69 @@ test('pipeline: fail-closed пишет llm/gate observability и пингует 
   }
 });
 
+// Дифф по РЕАЛЬНОМУ файлу репозитория: readChangedFiles читает рабочий каталог, а окна
+// имеет смысл мерить только на файле, который длиннее порога и правится точечно.
+// lib/config.mjs — 20+ КБ и 400+ строк, два хунка на противоположных концах.
+const WINDOWED_DIFF = `diff --git a/lib/config.mjs b/lib/config.mjs
+--- a/lib/config.mjs
++++ b/lib/config.mjs
+@@ -30,1 +30,2 @@
+ // контекст хунка
++const nearTheTop = 1;
+@@ -400,1 +400,2 @@
+ // контекст хунка
++const nearTheBottom = 2;
+`;
+
+/** Прогон с записью чанков и события plan: и то и другое читается только тут. */
+async function runWindowed(env) {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-ctx-window-'));
+  let chunks = null;
+  try {
+    await runPipeline({
+      diff: WINDOWED_DIFF,
+      reviews: [{ model: 'm1', summary: 'ок', findings: [] }],
+      observabilityDir: dir,
+      env,
+      mutateDeps: (deps) => {
+        const orig = deps.engine.reviewAllModels;
+        deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
+      },
+    });
+    const records = (await readFile(join(dir, 'pr-review-runs.jsonl'), 'utf8'))
+      .trim().split('\n').map(JSON.parse);
+    return { chunks, plan: records.find((r) => r.type === 'plan') };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('pipeline: окна контекста режут вход чанков, blast-radius считается по полному файлу', async () => {
+  const on = await runWindowed({});
+  const off = await runWindowed({ REVIEW_CONTEXT_MARGIN: '0' });
+
+  assert.equal(on.plan.contextWindows.margin, 40, 'дефолт RFC 07');
+  assert.equal(on.plan.contextWindows.files, 1, 'lib/config.mjs длиннее порога и правится точечно');
+  assert.ok(on.plan.contextWindows.after < on.plan.contextWindows.before,
+    `контекст урезан: ${on.plan.contextWindows.before} → ${on.plan.contextWindows.after}`);
+  assert.deepEqual(on.chunks[0].windowedPaths, ['lib/config.mjs']);
+  assert.ok(on.plan.chunkPlan[0].context_chars < off.plan.chunkPlan[0].context_chars,
+    'в чанк уехало меньше символов, чем без окон');
+
+  // Порядок стадий (RFC 07, решение 4): символы blast-radius берутся из ПОЛНОГО текста.
+  // Поставь окна раньше — и здесь молча станет меньше символов.
+  assert.equal(on.plan.symbols, off.plan.symbols, 'blast-radius те же символы с окнами и без');
+});
+
+test('pipeline: REVIEW_CONTEXT_MARGIN=0 — контекст прежний, чанки без windowedPaths (откат)', async () => {
+  const off = await runWindowed({ REVIEW_CONTEXT_MARGIN: '0' });
+  assert.equal(off.plan.contextWindows.margin, 0, '0 — значащее значение, а не повод взять дефолт 40');
+  assert.equal(off.plan.contextWindows.files, 0);
+  assert.equal(off.plan.contextWindows.after, off.plan.contextWindows.before, 'ничего не урезано');
+  assert.equal(off.chunks[0].windowedPaths, undefined, 'поля нет → карта PR про окна молчит');
+  assert.equal(off.plan.chunkPlan[0].windowed_paths, 0);
+});
+
 test('export R9: fp/verifierStatus/actionabilityScore в артефакте, fp совпадает с футером sticky', async () => {
   // Регресс, ради которого тест написан: `fp` считался только внутри buildSummary — в список
   // для футера. В артефакт уходил тот же массив находок, но без отпечатка, и потребитель

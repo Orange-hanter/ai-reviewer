@@ -13,7 +13,7 @@ import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, 
 import { BLAST_FINDING_SOURCE } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
-import { buildVerifierFileContents } from './lib/context-window.mjs';
+import { buildVerifierFileContents, windowChunkFileContents } from './lib/context-window.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
 import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
 import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath } from './lib/router.mjs';
@@ -407,6 +407,23 @@ export function createReviewPipeline(cfg, deps = {}) {
       ]);
       const symbols = collectBlastSymbols(changedText, contentMap, limits.maxSymbols);
       log(`файлов: ${files.size} · символов под blast-radius: ${symbols.length}`, symbols);
+      // Окна контекста для advisors и жюри (RFC 07): в промпт едут окрестности изменённых
+      // строк, а не файлы целиком. Место в потоке — само решение, а не деталь:
+      //   ПОСЛЕ collectBlastSymbols — он добирает экспорты из ПОЛНОГО текста, и
+      //     `export function` в начале файла не попадает ни в одно окно вокруг хунков в
+      //     конце; окно раньше — тихо пустой blast-radius;
+      //   ДО fileInputHashes — RFC 05 определяет единицу сравнения как вход модели, и хэш
+      //     от окна сам инвалидируется при смене margin (правка configFingerprint,
+      //     сбрасывающая состояние целиком, не нужна);
+      //   verifier получает по-прежнему ПОЛНУЮ contentMap: он режет сам, вокруг строки
+      //     кандидата, и двойная вырезка оставила бы находку вне хунков без контекста
+      //     ровно там, где решается блокировать ли merge.
+      const ctxWindows = windowChunkFileContents(contentMap, files, {
+        margin: limits.contextMargin, minChars: limits.contextWindowMinChars,
+      });
+      if (ctxWindows.windowed.size) {
+        log(`контекст: окна ±${limits.contextMargin} вокруг изменённых строк в ${ctxWindows.windowed.size} файл(ах) из ${contentMap.size} — ${ctxWindows.before}→${ctxWindows.after} симв.`);
+      }
       // Freshness измеряем даже если diff не содержит экспортов: иначе `graph_fresh`
       // был бы неизвестен именно в тех review-plans, где blast-radius пустой.
       const blastResult = await graphify.buildBlastRadius(symbols);
@@ -450,7 +467,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       // увидят остальные файлы как [ANOTHER PART], и запрет absence-claims сработает как
       // обычно. Планируем до buildChunks, чтобы нарезать только то, что действительно идёт в LLM.
       const diffSections = extractFileDiffSections(annotated);
-      const inputHashes = fileInputHashes(changedPaths, diffSections, contentMap);
+      const inputHashes = fileInputHashes(changedPaths, diffSections, ctxWindows.map);
       const configFp = configFingerprint({ ...cfg, version: cfg.profile?.version });
       const priorIncremental = cfg.incremental?.enabled
         ? await readIncrementalState(cfg.incremental.stateFile)
@@ -480,14 +497,22 @@ export function createReviewPipeline(cfg, deps = {}) {
         ? [...diffSections.entries()].filter(([p]) => incrementalPlan.reviewPaths.has(p)).map(([, s]) => s).join('\n')
         : annotated;
       const contextForLlm = incrementalPlan.mode === 'incremental'
-        ? new Map([...contentMap.entries()].filter(([p]) => incrementalPlan.reviewPaths.has(p)))
-        : contentMap;
+        ? new Map([...ctxWindows.map.entries()].filter(([p]) => incrementalPlan.reviewPaths.has(p)))
+        : ctxWindows.map;
       const carriedFindings = incrementalPlan.mode === 'incremental'
         ? markCarried(incrementalPlan.carried, priorIncremental?.headSha || '')
         : [];
       if (carriedFindings.length) log(`перенесено находок по неизменившимся файлам: ${carriedFindings.length}`);
 
       const chunks = buildChunks(annotatedForLlm, contextForLlm, limits);
+      // windowedPaths дописываем ПОСЛЕ нарезки, а не заводим полем в buildChunks: окна
+      // ставит pipeline, он же и знает список — Rust-порт нарезки трогать не нужно, и
+      // поверхности для молчаливого рассинхрона сторон не появляется. Читатель ровно один —
+      // карта PR в промпте: путь с урезанным контекстом метится [THIS PART, CONTEXT WINDOWED]
+      // и включает запрет absence-claims даже на PR из одного чанка (RFC 07, решение 3).
+      if (ctxWindows.windowed.size) {
+        for (const c of chunks) c.windowedPaths = (c.paths || []).filter((p) => ctxWindows.windowed.has(p));
+      }
       const note0 = [
         chunks.length > 1
           ? `PR большой — разбит на ${chunks.length} частей для полного охвата (каждая ревьюится отдельно).`
@@ -512,6 +537,15 @@ export function createReviewPipeline(cfg, deps = {}) {
         llmConcurrency: limits.concurrency,
         chunkBytes: limits.chunkBytes,
         blast_radius: blastMetrics,
+        // Окна контекста (RFC 07): без этих величин экономия неотличима от того, что файлов
+        // в PR просто стало меньше — а решение имеет смысл ровно пока она видна отдельно.
+        contextWindows: {
+          margin: limits.contextMargin,
+          minChars: limits.contextWindowMinChars,
+          files: ctxWindows.windowed.size,
+          before: ctxWindows.before,
+          after: ctxWindows.after,
+        },
         // Состав каждого чанка: без него «прогон стоил N токенов» не разбирается на
         // слагаемые — не видно, что вход раздул контекст файлов, а не дифф, и что
         // часть чанков вообще не содержит кода.
@@ -519,6 +553,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           i,
           diff_chars: c.annotated?.length ?? 0,
           context_chars: c.fileContents?.length ?? 0,
+          windowed_paths: c.windowedPaths?.length ?? 0,
           paths: c.paths?.length ?? 0,
           classes: chunkClasses(c),
         })),

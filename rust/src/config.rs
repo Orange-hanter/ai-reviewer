@@ -79,6 +79,21 @@ fn num_env(env: &Map<String, Value>, key: &str, def: f64) -> f64 {
     }
 }
 
+/// nonNegEnv из lib/util.mjs: конечное и >= 0, где НОЛЬ — значащее значение
+/// («выключено»), а не повод взять дефолт. Отсутствие переменной и пустая строка —
+/// «не задано» → def (в отличие от js_number_env, где пустая строка это 0).
+fn non_neg_env(env: &Map<String, Value>, key: &str, def: f64) -> f64 {
+    match env.get(key) {
+        None | Some(Value::Null) => return def,
+        Some(Value::String(s)) if s.trim().is_empty() => return def,
+        _ => {}
+    }
+    match js_number_env(env, key) {
+        Some(n) if n.is_finite() && n >= 0.0 => n,
+        _ => def,
+    }
+}
+
 /// ratioEnv из lib/util.mjs: конечное в [0, 1], иначе def.
 fn ratio_env(env: &Map<String, Value>, key: &str, def: f64) -> f64 {
     match js_number_env(env, key) {
@@ -834,6 +849,10 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             // Чанк без исполняемого кода обслуживает один агрегатор вместо жюри
             // (RFC 04, lib/chunk-routing.mjs).
             "chunkRouting": env_flag(env, "REVIEW_CHUNK_ROUTING", true),
+            // Окна контекста для advisors и жюри (RFC 07, lib/context-window.mjs):
+            // НОЛЬ — «окна выключены» (откат), поэтому non_neg_env, а не num_env.
+            "contextMargin": num_json(non_neg_env(env, "REVIEW_CONTEXT_MARGIN", 40.0)),
+            "contextWindowMinChars": num_json(non_neg_env(env, "REVIEW_CONTEXT_WINDOW_MIN_CHARS", 8000.0)),
             "maxContextBytes": num_json(num_env(env, "REVIEW_MAX_CONTEXT_BYTES", 180_000.0)),
             "chunkBytes": num_json(num_env(env, "REVIEW_CHUNK_BYTES", 56_000.0)),
             "maxChunks": num_json(num_env(env, "REVIEW_MAX_CHUNKS", 40.0)),
@@ -946,6 +965,17 @@ mod tests {
         assert_eq!(num_env(&e, "D", 3.0), 3.0);
         assert_eq!(num_env(&e, "E", 3.0), 3.0);
         assert_eq!(num_env(&e, "MISSING", 3.0), 3.0);
+    }
+
+    #[test]
+    fn non_neg_env_zero_is_meaningful() {
+        let e = env(&[("A", "0"), ("B", ""), ("C", "abc"), ("D", "-3"), ("E", "40")]);
+        assert_eq!(non_neg_env(&e, "A", 40.0), 0.0, "0 — значащее значение (выключено)");
+        assert_eq!(non_neg_env(&e, "B", 40.0), 40.0, "пустая строка — «не задано»");
+        assert_eq!(non_neg_env(&e, "C", 40.0), 40.0);
+        assert_eq!(non_neg_env(&e, "D", 40.0), 40.0);
+        assert_eq!(non_neg_env(&e, "E", 40.0), 40.0);
+        assert_eq!(non_neg_env(&e, "MISSING", 40.0), 40.0);
     }
 
     #[test]

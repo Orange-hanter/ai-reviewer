@@ -160,8 +160,9 @@ fn arr_arg(args: &Value, key: &str) -> Vec<Value> {
 // см. SPECIALIST_MAX_ITEMS в lib/prompt.mjs — расхождение здесь означает разные промпты
 // на машине с бинарём и без него.
 const REFERENCE_TAIL: &str = r#"
-Analyze the PR diff and full file context. List ONLY real defects: bugs, security/RBAC issues,
-layer-boundary violations, missing tests for non-trivial logic. Do NOT nitpick style (eslint/tsc).
+Analyze the PR diff and the attached file context (windows around the changed lines). List ONLY
+real defects: bugs, security/RBAC issues, layer-boundary violations, missing tests for
+non-trivial logic. Do NOT nitpick style (eslint/tsc).
 Write IN RUSSIAN as concise bullet points:
 - [severity] `file:line` — title: explanation (severity = critical|major|minor)
   quote: <one line copied verbatim from the diff or file context>
@@ -179,7 +180,8 @@ const SPECIALIST_FOCUS: &[(&str, &str)] = &[
 
 const SPECIALIST_TAIL: &str = r#"
 
-Analyze the PR diff and full file context. List ONLY issues in YOUR specialty. Write IN RUSSIAN as bullets:
+Analyze the PR diff and the attached file context (windows around the changed lines). List ONLY issues
+in YOUR specialty. Write IN RUSSIAN as bullets:
 - [severity] `file:line` — title: explanation (severity = critical|major|minor)
   quote: <one line copied verbatim from the diff or file context>
 Report AT MOST 8 items, strongest first — a long tail costs the jury more than it finds.
@@ -225,7 +227,7 @@ Respond STRICTLY with a single JSON object inside a ```json fence, with no text 
       "confidence": 0.0-1.0,
       "title": "short title, WRITTEN IN RUSSIAN",
       "body": "2–3 sentences: what breaks, why, and the fix, WRITTEN IN RUSSIAN",
-      "quote": "1–3 lines of code copied verbatim from the shown diff or full file context",
+      "quote": "1–3 lines of code copied verbatim from the shown diff or attached file context",
       "suggestion": "opt. fixed code as one or several lines"
     }
   ]
@@ -252,11 +254,13 @@ paths, shell quoting, URL/HTML/JSON escaping) and never decodes it back is an or
 it at its real severity. Only report a truly LOCAL logic error you can prove from the shown code. Look for
 real defects in the PR code, don't argue with architectural decisions.
 
-CONTEXT AND "NO OPEN QUESTIONS": you have the FULL content of the changed files (not only the diff) and
+CONTEXT AND "NO OPEN QUESTIONS": besides the diff you get the context of the changed files — windows
+around the lines this PR touches, where every cut-out region is marked «… (строки N–M пропущены)» — and
 the blast-radius of their dependencies. USE this to RESOLVE your doubts instead of leaving them open. Each
 finding must be a verified STATEMENT with a concrete fix — NOT a question ("what if…?", "please check …")
-and NOT a "maybe". If the answer is in the provided code — check it and draw a conclusion. If there is not
-enough data even with this context — do NOT invent a finding (better to skip it)."#;
+and NOT a "maybe". If the answer is in the provided code — check it and draw a conclusion. A skip marker
+means "not shown here", NEVER "does not exist" — do not conclude absence from the text behind it. If there
+is not enough data even with this context — do NOT invent a finding (better to skip it)."#;
 
 const AGGREGATOR_CONVERGENCE: &str = r#"
 
@@ -364,15 +368,23 @@ pub fn build_changed_files_section(changed_paths: &[Value], chunk: &Value, ctx: 
         Some(Value::Array(a)) => a.clone(),
         _ => Vec::new(),
     };
+    // Пути с урезанным окнами контекстом (RFC 07): поле дописывает pipeline после нарезки
+    // чанков, buildChunks о нём не знает.
+    let windowed: Vec<Value> = match chunk.get("windowedPaths") {
+        Some(Value::Array(a)) => a.clone(),
+        _ => Vec::new(),
+    };
     let mut chunk_paths: Vec<Value> = match chunk.get("paths") {
         Some(Value::Array(a)) => a.clone(),
         _ => Vec::new(),
     };
     chunk_paths.extend(partial.iter().cloned());
     // split = (chunkPaths.size > 0 || partialPaths.size > 0)
-    //   && (partialPaths.size > 0 || changedPaths.some((p) => !chunkPaths.has(p)))
+    //   && (partialPaths.size > 0 || windowedPaths.size > 0 || changedPaths.some((p) => !chunkPaths.has(p)))
     let split = (!chunk_paths.is_empty() || !partial.is_empty())
-        && (!partial.is_empty() || changed_paths.iter().any(|p| !chunk_paths.contains(p)));
+        && (!partial.is_empty()
+            || !windowed.is_empty()
+            || changed_paths.iter().any(|p| !chunk_paths.contains(p)));
     let mark = |p: &Value| -> &'static str {
         if !split {
             return "";
@@ -380,8 +392,13 @@ pub fn build_changed_files_section(changed_paths: &[Value], chunk: &Value, ctx: 
         if !chunk_paths.contains(p) {
             return " — [ANOTHER PART]";
         }
+        // Частичность старше оконности: у разрезанного файла отсутствует часть ХУНКОВ,
+        // а не только текст между ними (см. lib/prompt.mjs).
         if partial.contains(p) {
             return " — [THIS PART, SOME HUNKS ONLY]";
+        }
+        if windowed.contains(p) {
+            return " — [THIS PART, CONTEXT WINDOWED]";
         }
         " — [THIS PART]"
     };
@@ -417,7 +434,14 @@ pub fn build_changed_files_section(changed_paths: &[Value], chunk: &Value, ctx: 
     }
     let mut s = format!("## All changed files in the PR ({})\n{}\n", changed_paths.len(), rows.join("\n"));
     if split {
-        s.push_str(SPLIT_NOTE);
+        s.push('\n');
+        if !partial.is_empty() || !elsewhere.is_empty() {
+            s.push_str(SPLIT_NOTE_PARTS);
+        }
+        if !windowed.is_empty() {
+            s.push_str(SPLIT_NOTE_WINDOWED);
+        }
+        s.push_str(SPLIT_NOTE_RULE);
     }
     if !e2e.is_empty() {
         let e2e_lines: Vec<String> = e2e
@@ -430,19 +454,27 @@ pub fn build_changed_files_section(changed_paths: &[Value], chunk: &Value, ctx: 
     Ok(s)
 }
 
-/// Примечание о послеровом ревью частями + HARD RULE — NO ABSENCE CLAIMS
-/// (перенесено посимвольно из lib/prompt.mjs).
-const SPLIT_NOTE: &str = r#"
-This PR is reviewed in parts. The diff below covers ONLY the paths marked [THIS PART]
-(full file content is attached for some of them, not for all); a path marked
+/// Три блока примечания к карте PR (перенесены посимвольно из lib/prompt.mjs). Каждый
+/// УСЛОВЕН по отдельности: части — когда PR действительно разрезан, окна — когда контекст
+/// урезан (RFC 07), сам запрет — всегда, когда видно не всё.
+const SPLIT_NOTE_PARTS: &str = r#"This PR is reviewed in parts. The diff below covers ONLY the paths marked [THIS PART]
+(file context is attached for some of them, not for all); a path marked
 [THIS PART, SOME HUNKS ONLY] has further hunks shown to another part.
 Paths marked [ANOTHER PART] ARE changed by this PR — another part of the same run reviews them.
-HARD RULE — NO ABSENCE CLAIMS: never state or imply that anything listed above is "missing",
+"#;
+
+const SPLIT_NOTE_WINDOWED: &str = r#"A path marked [THIS PART, CONTEXT WINDOWED] has ALL of its hunks in the diff below, but its
+attached file context is cut to windows around the changed lines: every gap carries a
+«… (строки N–M пропущены)» marker, which means "not shown here", never "does not exist".
+"#;
+
+const SPLIT_NOTE_RULE: &str = r#"HARD RULE — NO ABSENCE CLAIMS: never state or imply that anything listed above is "missing",
 "absent from the PR", "not updated", "not added", "forgotten", "has no test/migration/doc", or that
-the PR "only touches" some of these files — you cannot see those files here, and the list itself
-proves they are changed. Do NOT assert what an [ANOTHER PART] file contains or does not contain.
+the PR "only touches" some of these files — you cannot see all of that code here, and the list itself
+proves they are changed. Do NOT assert what a file you cannot fully see contains or does not contain,
+whether it is an [ANOTHER PART] file or a region cut out behind a «… (строки N–M пропущены)» marker.
 A cross-file concern may still be raised, but only as a risk with confidence ≤ 0.5, phrased as a
-dependency to check — never as a statement about the unseen file.
+dependency to check — never as a statement about the unseen code.
 "#;
 
 /// Условный абзац системного промпта verifier'а: правила чтения blast-radius без самого
@@ -472,7 +504,7 @@ Include one verdict per candidate index. severity field only when decision is do
 
 /// buildVerifierMessages — промпт Pass B: докажи по коду или reject/downgrade.
 pub fn build_verifier_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
-    let mut system = String::from("You are a strict code review VERIFIER (second pass). You receive candidate findings from an\ninitial review. For EACH candidate you must decide using ONLY the provided diff, full file context, and\nblast-radius (if present):\n- **verified** — the defect is real and provable from the shown code;\n- **rejected** — false positive, speculative, or already mitigated in context;\n- **downgrade** — real concern but not merge-blocking (set severity to minor or nit).\n");
+    let mut system = String::from("You are a strict code review VERIFIER (second pass). You receive candidate findings from an\ninitial review. For EACH candidate you must decide using ONLY the provided diff, the attached file\ncontext (windows around the candidate lines), and blast-radius (if present):\n- **verified** — the defect is real and provable from the shown code;\n- **rejected** — false positive, speculative, or already mitigated in context;\n- **downgrade** — real concern but not merge-blocking (set severity to minor or nit).\n");
     system.push_str(&prompt_extra(&ctx.verifier_extra));
     let blast_blocks = arr_arg(args, "blastBlocks");
     if !blast_blocks.is_empty() {
@@ -533,7 +565,7 @@ pub fn build_verifier_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Valu
     let title = safe_pr_title(pr.get("title"));
 
     let user = format!(
-        "PR #{pr_number}: «{title}»\n\n{changed}{blast}## Candidates to verify ({n})\n{list}\n\n## Full content of changed files\n{file_part}\n\n## Diff (RIGHT-side line numbers)\n```diff\n{annotated}\n```",
+        "PR #{pr_number}: «{title}»\n\n{changed}{blast}## Candidates to verify ({n})\n{list}\n\n## Context of changed files (windows around the candidate lines; «… (строки N–M пропущены)» marks text not shown)\n{file_part}\n\n## Diff (RIGHT-side line numbers)\n```diff\n{annotated}\n```",
         changed = str_arg(args, "changedFilesSection"),
         n = candidates.len(),
         annotated = fence_escape(&str_arg(args, "annotated")),
@@ -580,7 +612,7 @@ pub fn build_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
 
     let file_contents = str_arg(args, "fileContents");
     let files_section = if !file_contents.is_empty() {
-        format!("## Full content of changed files (PR version — context beyond the hunks)\n{}\n\n", fence_escape(&file_contents))
+        format!("## Context of changed files (PR version — windows around the changed lines; «… (строки N–M пропущены)» marks text not shown)\n{}\n\n", fence_escape(&file_contents))
     } else {
         String::new()
     };
@@ -826,7 +858,7 @@ mod tests {
         assert!(user.contains("0. [critical] a.ts:3 — **IDOR** (m1, conf=0.9)\n   открытый доступ"));
         assert!(user.contains("1. [major] b.ts — **t2** (?, conf=1)\n   "));
         assert!(user.contains("## Blast-radius: empty — do not invent external callers"));
-        assert!(user.contains("## Full content of changed files\n(нет)"));
+        assert!(user.contains("## Context of changed files (windows around the candidate lines; «… (строки N–M пропущены)» marks text not shown)\n(нет)"));
         // fence-escape аннотированного диффа
         assert!(user.contains("@@ ``\u{200B}`diff fence"));
     }

@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { fileInputHashes, configFingerprint, readIncrementalState, INCREMENTAL_STATE_VERSION } from '../lib/incremental.mjs';
+import { windowChunkFileContents } from '../lib/context-window.mjs';
 import { loadReviewConfig } from '../lib/config.mjs';
 import { mergedTextToReferences } from '../lib/specialist-merge.mjs';
 import { createReviewEngine } from '../lib/engine.mjs';
@@ -56,6 +57,23 @@ test('fileInputHashes: дифф и контекст — разные слага�
   const swapped = fileInputHashes([path], new Map([[path, 'CTX']]), new Map([[path, 'DIFF']]));
   assert.notEqual(a[path], glued[path], 'иначе правка контекста, склеившаяся с диффом, осталась бы незамеченной');
   assert.notEqual(a[path], swapped[path], 'перестановка дифф↔контекст обязана дать другой отпечаток');
+});
+
+test('fileInputHashes: считается по ОКОННОМУ контексту — смена margin инвалидирует файл сама (RFC 07)', () => {
+  // Порядок в pipeline.mjs: окна ставятся ДО fileInputHashes. Хэш от полного файла не заметил
+  // бы смены margin, и пришлось бы дописывать margin в configFingerprint — то есть сбрасывать
+  // ВСЁ состояние вместо пофайловой инвалидации.
+  const path = 'a.ts';
+  const body = Array.from({ length: 300 }, (_, i) => `строка ${i + 1}`).join('\n');
+  const contentMap = new Map([[path, `### ${path}\n\`\`\`\n${body}\n\`\`\``]]);
+  const files = new Map([[path, { validLines: new Set([150]) }]]);
+  const sections = new Map([[path, 'DIFF']]);
+  const h = (margin) => fileInputHashes([path], sections,
+    windowChunkFileContents(contentMap, files, { margin, minChars: 0 }).map)[path];
+
+  assert.notEqual(h(40), h(60), 'разный margin — разный вход модели — разный отпечаток');
+  assert.equal(h(0), fileInputHashes([path], sections, contentMap)[path],
+    'margin=0 (откат) обязан дать ровно тот же отпечаток, что и до RFC 07');
 });
 
 test('configFingerprint: смена допуска verifier / порога маршрута / таймаута сбрасывает инкрементальность', () => {
