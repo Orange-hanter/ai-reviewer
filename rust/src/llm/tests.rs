@@ -3,8 +3,9 @@
 //! usage в финальном chunk) и контрактные тесты chat() против фейкового HTTP-сервера
 //! на std::net (429/backoff, 400 stream_options, retry-бюджет, network-ретрай).
 
-use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::io::{ErrorKind, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -163,33 +164,87 @@ fn is_transient_паритет() {
 struct FakeServer {
     url: String,
     requests: Arc<Mutex<Vec<String>>>,
-    handle: JoinHandle<()>,
+    handle: Option<JoinHandle<()>>,
+    addr: SocketAddr,
+    /// Флаг остановки: взводится в stop()/drop() перед пробуждающим самоподключением.
+    stopping: Arc<AtomicBool>,
+    /// Сколько ответов из очереди сервер реально отдал (для проверки в stop()).
+    served: Arc<AtomicUsize>,
+    queued: usize,
+}
+
+/// Клиент вправе бросить соединение раньше, чем сервер дописал ответ: исчерпанный
+/// бюджет обрывает запрос на полуслове, а на успешном потоке парсер выходит по
+/// `[DONE]`, не дочитывая хвост. Закрытый сокет отвечает RST, и первая же запись
+/// после этого даёт EPIPE/ECONNRESET — для фейкового сервера это ожидаемый исход,
+/// а не сбой. Момент прихода RST — гонка (под нагрузкой падало на любой из записей),
+/// поэтому обрыв терпим на всех, а любую ДРУГУЮ ошибку ввода-вывода по-прежнему
+/// роняем: она означала бы настоящую поломку.
+fn is_client_gone(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+    )
+}
+
+/// Ошибку записи различаем: обрыв клиентом → тихо прекращаем ответ, прочее → паника.
+fn expect_write(result: std::io::Result<()>) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(e) if is_client_gone(&e) => false,
+        Err(e) => panic!("фейковый сервер: непредвиденная ошибка записи: {e}"),
+    }
 }
 
 /// Одно подключение → один «ответ» из очереди; `None` — сразу разорвать соединение
 /// (эмуляция сетевого сбоя между accept и ответом). Тело передаётся chunked
 /// с размером чанка 5, чтобы прогнать SSE-парсер по рваным границам.
+///
+/// Очередь ответов кончилась — сервер не уходит: он продолжает принимать соединения
+/// и писать их в лог запросов, обрывая без ответа. Это и делает `requests.len()`
+/// доказательным: лишний ретрай клиента будет виден, а не потеряется на закрытом
+/// listener'е. Останавливает сервер `stop()` (см. `FakeServer::stop`).
 fn fake_server(responses: Vec<Option<(u16, Vec<(String, String)>, Vec<u8>)>>, delay: Duration) -> FakeServer {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     let requests = Arc::new(Mutex::new(Vec::new()));
     let req_log = Arc::clone(&requests);
+    let stopping = Arc::new(AtomicBool::new(false));
+    let stop_flag = Arc::clone(&stopping);
+    let served = Arc::new(AtomicUsize::new(0));
+    let served_count = Arc::clone(&served);
+    let queued = responses.len();
     let handle = std::thread::spawn(move || {
-        for response in responses {
-            let (mut conn, _) = listener.accept().unwrap();
+        let mut queue = responses.into_iter();
+        loop {
+            let Ok((mut conn, _)) = listener.accept() else { break };
+            // Пробуждающее самоподключение из stop(): запроса не будет, лог не трогаем.
+            if stop_flag.load(Ordering::SeqCst) {
+                break;
+            }
             let mut buf = [0u8; 8192];
             let mut seen = Vec::new();
             loop {
-                let n = conn.read(&mut buf).unwrap();
-                if n == 0 {
-                    break;
-                }
-                seen.extend_from_slice(&buf[..n]);
-                if seen.windows(4).any(|w| w == b"\r\n\r\n") {
-                    break;
+                match conn.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        seen.extend_from_slice(&buf[..n]);
+                        if seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    // Клиент отвалился на полузапросе — соединение всё равно было, логируем.
+                    Err(ref e) if is_client_gone(e) => break,
+                    Err(e) => panic!("фейковый сервер: непредвиденная ошибка чтения: {e}"),
                 }
             }
             req_log.lock().unwrap().push(String::from_utf8_lossy(&seen).to_string());
+            // Очередь пуста — лишнее подключение: рвём без ответа (клиент увидит сетевой сбой).
+            let Some(response) = queue.next() else {
+                drop(conn);
+                continue;
+            };
+            served_count.fetch_add(1, Ordering::SeqCst);
             let Some((status, headers, body)) = response else {
                 drop(conn); // RST: клиент увидит обрыв до ответа
                 continue;
@@ -202,16 +257,61 @@ fn fake_server(responses: Vec<Option<(u16, Vec<(String, String)>, Vec<u8>)>>, de
                 head.push_str(&format!("{k}: {v}\r\n"));
             }
             head.push_str("Transfer-Encoding: chunked\r\n\r\n");
-            conn.write_all(head.as_bytes()).unwrap();
-            for piece in body.chunks(5) {
-                conn.write_all(format!("{:x}\r\n", piece.len()).as_bytes()).unwrap();
-                conn.write_all(piece).unwrap();
-                conn.write_all(b"\r\n").unwrap();
+            if !expect_write(conn.write_all(head.as_bytes())) {
+                continue;
             }
-            conn.write_all(b"0\r\n\r\n").unwrap();
+            let mut alive = true;
+            for piece in body.chunks(5) {
+                alive = expect_write(conn.write_all(format!("{:x}\r\n", piece.len()).as_bytes()))
+                    && expect_write(conn.write_all(piece))
+                    && expect_write(conn.write_all(b"\r\n"));
+                if !alive {
+                    break;
+                }
+            }
+            if alive {
+                expect_write(conn.write_all(b"0\r\n\r\n"));
+            }
         }
     });
-    FakeServer { url: format!("http://{addr}/chat/completions"), requests, handle }
+    FakeServer {
+        url: format!("http://{addr}/chat/completions"),
+        requests,
+        handle: Some(handle),
+        addr,
+        stopping,
+        served,
+        queued,
+    }
+}
+
+impl FakeServer {
+    /// Гасит сервер и проверяет, что вся очередь ответов израсходована (эквивалент
+    /// прежнего `handle.join()`), а заодно поднимает панику серверного потока в тест.
+    fn stop(&mut self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        // Будим accept(): без этого поток стоял бы в блокирующем accept вечно.
+        let _ = TcpStream::connect(self.addr);
+        if let Some(handle) = self.handle.take() {
+            handle.join().unwrap();
+        }
+        assert_eq!(
+            self.served.load(Ordering::SeqCst),
+            self.queued,
+            "фейковый сервер: очередь ответов израсходована не полностью",
+        );
+    }
+}
+
+impl Drop for FakeServer {
+    fn drop(&mut self) {
+        // Тест мог упасть до stop() — поток не должен оставаться висеть в accept().
+        self.stopping.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect(self.addr);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 fn base_req(url: &str) -> ChatRequest {
@@ -244,7 +344,7 @@ fn payload_of(request: &str) -> Value {
 
 #[test]
 fn chat_успешный_sse_с_usage() {
-    let server = fake_server(vec![Some((200, vec![(r#"Content-Type"#.to_string(), r#"text/event-stream"#.to_string())], sse_body("привет мир")))], Duration::ZERO);
+    let mut server = fake_server(vec![Some((200, vec![(r#"Content-Type"#.to_string(), r#"text/event-stream"#.to_string())], sse_body("привет мир")))], Duration::ZERO);
     let out = chat(&base_req(&server.url)).unwrap();
     assert_eq!(out.content, "привет мир");
     assert!(!out.throttled);
@@ -252,13 +352,13 @@ fn chat_успешный_sse_с_usage() {
     assert_eq!(payload["stream_options"], json!({"include_usage": true}));
     assert_eq!(payload["reasoning_effort"], json!("low"));
     assert_eq!(payload["seed"], json!(1));
-    server.handle.join().unwrap();
+    server.stop();
 }
 
 #[test]
 fn chat_429_throttled_и_ретрай_с_retry_after() {
     // retry-after: 0 → backoff(0, "0") = 1000мс (релевантный путь, а не ожидание).
-    let server = fake_server(
+    let mut server = fake_server(
         vec![
             Some((429, vec![(r#"retry-after"#.to_string(), r#"0"#.to_string())], b"rate limited".to_vec())),
             Some((200, vec![], sse_body("ok"))),
@@ -271,12 +371,12 @@ fn chat_429_throttled_и_ретрай_с_retry_after() {
     assert_eq!(out.content, "ok");
     assert!(out.throttled, "429 всплыл флагом throttled для JS-семафоров");
     assert_eq!(server.requests.lock().unwrap().len(), 2);
-    server.handle.join().unwrap();
+    server.stop();
 }
 
 #[test]
 fn chat_400_stream_options_повтор_без_include_usage() {
-    let server = fake_server(
+    let mut server = fake_server(
         vec![
             Some((400, vec![], b"unknown field stream_options".to_vec())),
             Some((200, vec![], sse_body("ok"))),
@@ -285,56 +385,56 @@ fn chat_400_stream_options_повтор_без_include_usage() {
     );
     let out = chat(&base_req(&server.url)).unwrap();
     assert_eq!(out.content, "ok");
-    let reqs = server.requests.lock().unwrap();
+    let reqs = server.requests.lock().unwrap().clone();
     assert_eq!(reqs.len(), 2);
     assert!(payload_of(&reqs[0])["stream_options"].is_object(), "первый запрос — с include_usage");
     assert!(payload_of(&reqs[1]).get("stream_options").is_none(), "повтор — без stream_options");
-    server.handle.join().unwrap();
+    server.stop();
 }
 
 #[test]
 fn chat_400_без_stream_options_в_теле_не_ретраится() {
-    let server = fake_server(vec![Some((400, vec![], b"bad request: max_tokens".to_vec()))], Duration::ZERO);
+    let mut server = fake_server(vec![Some((400, vec![], b"bad request: max_tokens".to_vec()))], Duration::ZERO);
     let err = chat(&base_req(&server.url)).unwrap_err();
     match err {
         LlmError { status: Some(400), networky: false, .. } => {}
         other => panic!("ожидался LLM 400 без ретрая: {other:?}"),
     }
     assert_eq!(server.requests.lock().unwrap().len(), 1);
-    server.handle.join().unwrap();
+    server.stop();
 }
 
 #[test]
 fn chat_500_transient_ретрай_затем_успех() {
-    let server = fake_server(
+    let mut server = fake_server(
         vec![Some((500, vec![], b"err".to_vec())), Some((200, vec![], sse_body("ok")))],
         Duration::ZERO,
     );
     let out = chat(&base_req(&server.url)).unwrap();
     assert_eq!(out.content, "ok");
     assert_eq!(server.requests.lock().unwrap().len(), 2);
-    server.handle.join().unwrap();
+    server.stop();
 }
 
 #[test]
 fn chat_исчерпанный_бюджет_подавляет_ретрай() {
     // Сервер отвечает 500 через 300мс; бюджет 100мс → per-op таймаут сработает раньше
     // ответа (networky), бюджет израсходован → ретрая нет. Аналог JS-теста на budgetLeft().
-    let server = fake_server(vec![Some((500, vec![], b"err".to_vec()))], Duration::from_millis(300));
+    let mut server = fake_server(vec![Some((500, vec![], b"err".to_vec()))], Duration::from_millis(300));
     let mut req = base_req(&server.url);
     req.timeout_ms = 100;
     let err = chat(&req).unwrap_err();
     assert!(err.networky, "per-op таймаут — сетевой класс ошибки");
     assert_eq!(err.status, None);
     assert_eq!(server.requests.lock().unwrap().len(), 1, "ретрай подавлен бюджетом");
-    server.handle.join().unwrap();
+    server.stop();
 }
 
 #[test]
 fn chat_network_error_ретрай_затем_успех() {
     // Первое подключение сервер разрывает сразу после accept (обрыв до ответа) —
     // клиент видит сетевой сбой, ретраит с backoff и доходит до живого ответа.
-    let server = fake_server(
+    let mut server = fake_server(
         vec![None, Some((200, vec![], sse_body("ok")))],
         Duration::ZERO,
     );
@@ -343,7 +443,7 @@ fn chat_network_error_ретрай_затем_успех() {
     assert!(t.elapsed() >= Duration::from_millis(900), "backoff 1000мс перед ретраем");
     assert_eq!(out.content, "ok");
     assert_eq!(server.requests.lock().unwrap().len(), 2);
-    server.handle.join().unwrap();
+    server.stop();
 }
 
 #[test]
@@ -359,10 +459,10 @@ fn chat_connection_refused_это_networky_ошибка() {
 #[test]
 fn chat_пустой_content_пустая_ошибка() {
     let body = data_line(json!({"choices": [{"delta": {}, "finish_reason": "stop"}]})) + "data: [DONE]\n\n";
-    let server = fake_server(vec![Some((200, vec![], body.into_bytes()))], Duration::ZERO);
+    let mut server = fake_server(vec![Some((200, vec![], body.into_bytes()))], Duration::ZERO);
     let err = chat(&base_req(&server.url)).unwrap_err();
     assert!(err.empty, "флаг empty для JS-fallback");
     assert!(!err.networky);
     assert_eq!(err.error, "пустой content (finish=stop, reasoning=0симв)");
-    server.handle.join().unwrap();
+    server.stop();
 }
