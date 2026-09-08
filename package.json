@@ -19,6 +19,7 @@
     "pr-review-feedback-batch": "./bin/pr-review-feedback-batch.mjs",
     "pr-review-benchmark": "./bin/pr-review-benchmark.mjs",
     "pr-review-gold-harvest": "./bin/pr-review-gold-harvest.mjs",
+    "pr-review-scout": "./bin/pr-review-scout.mjs",
     "pr-review-structure": "./bin/pr-review-structure.mjs",
     "pr-review-structure-mcp": "./bin/pr-review-structure-mcp.mjs"
   },
@@ -47,6 +48,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "eval": "node bin/pr-review-eval.mjs",
+    "scout": "node bin/pr-review-scout.mjs",
     "check": "npm test && npm run eval && npm run check:rust",
     "check:rust": "cargo build --manifest-path rust/Cargo.toml && cargo test --manifest-path rust/Cargo.toml && npm run check:parity",
     "check:parity": "for f in rust/parity/*.parity.mjs; do echo \"— $f\"; node \"$f\" || exit 1; done",

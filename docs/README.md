@@ -11,6 +11,7 @@
 | [false-positives.md](false-positives.md) | Семейства ложных срабатываний, защиты, петля обучения |
 | [model-tuning.md](model-tuning.md) | Роли моделей, температуры, размер чанка, reasoning effort |
 | [review-quality.md](review-quality.md) | Разбор низкого сигнала ревью: замер, причины по коду, план |
+| [scent-measurement.md](scent-measurement.md) | Замер слоя косвенных признаков без LLM: несут ли поверхностные признаки адрес дефекта ([RFC 08](../proposals/08-cue-driven-briefs.md)) |
 
 Рядом с кодом:
 
