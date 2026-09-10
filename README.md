@@ -1,3 +1,11 @@
+---
+type: vision
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 <div align="center">
 
 <img src=".github/hero.png" alt="ai-reviewer — code review that has to prove itself: prescan, jury, verifier, merge gate, MCP" width="100%">
@@ -148,6 +156,24 @@ MCP-сервер `pr-review-structure-mcp` и его метод `structure_conte
 { "mcpServers": { "ai-reviewer-structure": { "command": "npx", "args": ["pr-review-structure-mcp"] } } }
 ```
 
+Полный прогон из чата — отдельный сервер `pr-review-mcp` ([RFC 08](proposals/08-review-mcp.md), [RFC 09](proposals/09-cursor-plugin-mcp.md)): сначала дешёвые стадии (`review_route` / `review_prescan` / `fp_check`), полный MoA — `review_run` как pinned dry-run, без постинга в GitHub. Это превью (`previewWouldBlock`), не merge-гейт. Клиентский timeout должен быть не меньше `REVIEW_TIME_BUDGET_MIN`. Cursor Plugin (local): [`cursor-plugin/README.md`](cursor-plugin/README.md).
+
+```json
+{
+  "mcpServers": {
+    "ai-reviewer": {
+      "command": "npx",
+      "args": ["pr-review-mcp"],
+      "env": {
+        "REVIEW_MCP_ROOT": "/abs/path/to/repo",
+        "OLLAMA_API_KEY": "...",
+        "REVIEW_PROFILE": "/abs/path/to/profile.json"
+      }
+    }
+  }
+}
+```
+
 Статусы, приоритеты evidence, cod-doc-интеграция — [docs/structure.md](docs/structure.md).
 
 ## Быстрый старт
@@ -194,6 +220,7 @@ npx pr-review-structure \
 | `pr-review-feedback` · `-batch` | Сбор <img src=".github/icons/fp-up.svg" alt="👍" height="15">/<img src=".github/icons/fp-down.svg" alt="👎" height="15"> с PR |
 | `pr-review-structure` | Structure facts/assessment, drift, property drafts и Markdown |
 | `pr-review-structure-mcp` | Pinned-SHA `structure_context` MCP для агентов |
+| `pr-review-mcp` | Dry-run ревью из чата (`review_run` и дешёвые стадии); не гейт |
 
 ## Профиль проекта
 

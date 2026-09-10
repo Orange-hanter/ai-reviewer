@@ -1,8 +1,38 @@
+---
+type: journal
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Changelog
 
 ## Unreleased
 
+### Добавлено — Cursor Plugin и агентные стадии ревью-MCP ([RFC 09](proposals/09-cursor-plugin-mcp.md))
+
+Дешёвый контур без LLM: `review_route`, `review_prescan`, `fp_check`, `fingerprint_check`,
+`review_artifact`. `review_findings` читает sidecar на диске. Живой дифф сверяет `headSha`
+с `git rev-parse HEAD` (грязное дерево — `uncommitted: true`). За `REVIEW_MCP_EXTRA=1` —
+`blast_scope`, `actionability_explain`, `review_metrics`.
+
+Cursor Plugin: каталог `cursor-plugin/` (два MCP, slash-команды, skill, rule). Не гейт;
+движок в плагин не входит. Local install: `cursor-plugin/README.md`.
+
+### Добавлено — MCP полного прогона для агента ([RFC 08](proposals/08-review-mcp.md))
+
+Отдельный stdio-сервер `pr-review-mcp`: тулзы `review_run` (полный MoA, пин `headSha`) и
+`review_findings` (страница того же прогона). GitHub не пишется. В ответе `previewWouldBlock`,
+не `wouldBlock` сворма — merge по-прежнему только `exit 1` в CI. Корень чтения —
+`REVIEW_MCP_ROOT` (не `STRUCTURE_MCP_ROOT`). Транспорт `Content-Length` вынесен в
+`lib/mcp-stdio.mjs` и общий с structure MCP.
+
+Пайплайн: `runDetailed()` отдаёт артефакт из памяти; `--head-sha` / `cli.headSha` заполняет
+пин на file-diff; dry-run summary больше не идёт в сырой `console.log` (иначе ломает кадры MCP).
+
 ## 0.3.0 — нативное ядро (Rust) + экономия токенов (RFC 04–07) — 2026-09-05
+
 
 ### Добавлено — окна контекста для advisors и жюри ([RFC 07](proposals/07-windowed-file-context.md))
 

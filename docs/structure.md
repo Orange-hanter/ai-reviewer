@@ -1,3 +1,12 @@
+---
+type: architecture
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+last_reviewed: 2026-09-10
+---
+
 # Structure, contracts and test scenarios
 
 `pr-review-structure` is an off-PR analysis path. It does not change the merge gate. It produces evidence-backed facts and assessments that cod-doc, agents and CI can consume.
@@ -103,6 +112,8 @@ Start the stdio MCP server:
 ```bash
 npx pr-review-structure-mcp
 ```
+
+Полный прогон ревью из чата — другой сервер, `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)): другой корень (`REVIEW_MCP_ROOT`), другой TTL. Этот процесс отдаёт только `structure_context`.
 
 The server exposes `structure_context`. Calls must include:
 

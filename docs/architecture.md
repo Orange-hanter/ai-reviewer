@@ -1,3 +1,12 @@
+---
+type: architecture
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+last_reviewed: 2026-09-10
+---
+
 # Архитектура
 
 Автоматическое ревью pull request'а: unified diff → blast-radius по графу кода →
@@ -45,7 +54,7 @@ flowchart TB
 | Модуль | Назначение |
 |--------|------------|
 | `bin/pr-review.mjs` | CLI полного прогона |
-| `pipeline.mjs` | `createReviewPipeline()`, `runReview()` — оркестрация |
+| `pipeline.mjs` | `createReviewPipeline()`, `run()` / `runDetailed()`, `runReview()` — оркестрация |
 | `lib/profile.mjs` | [Профиль проекта](profiles.md): маркеры, правила, раскладка, пути |
 | `lib/config.mjs` | `loadReviewConfig()` — профиль + env + CLI в один замороженный объект |
 | `lib/diff.mjs` | Парсинг diff, чанкинг, аннотация номеров строк |
@@ -68,6 +77,10 @@ flowchart TB
 | `lib/structure*.mjs` | Off-PR structure facts/assessment: Graphify + SCIP + LCOV + scenario evidence |
 | `bin/pr-review-structure.mjs` | CLI structure facts, assessments, drift и cod-doc Markdown projection |
 | `bin/pr-review-structure-mcp.mjs` | Pinned-SHA `structure_context` для агентов |
+| `bin/pr-review-mcp.mjs` | Агентный dry-run ревью (`review_run` / дешёвые стадии); не гейт |
+| `lib/mcp-stdio.mjs` | Общий Content-Length транспорт обоих MCP |
+| `lib/review-mcp.mjs` | Тулзы ревью-MCP: пин, confinement, slim preview, sidecar |
+| `cursor-plugin/` | Cursor Plugin: команды, skill, rule; оба MCP. Не гейт |
 | `lib/observability.mjs`, `lib/metrics.mjs` | JSONL-лог прогонов и сводка по нему |
 | `lib/eval.mjs` | Golden fixtures без LLM |
 
@@ -136,6 +149,12 @@ symbols/ranges, LCOV фиксирует execution, mutation/property providers �
 Провайдеры отдают receipts; статусы `covered|partial|missing|unverifiable` считает только
 детерминированный assessment engine. Контекст для планирования всегда привязан к SHA или
 fingerprint snapshot.
+
+### Cursor Plugin — не гейт
+
+Каталог [`cursor-plugin/`](../cursor-plugin/) подключает оба stdio MCP в IDE (slash-команды,
+skill, rule). Находки в чате advisory; `previewWouldBlock` не блокирует merge. Merge-гейт —
+только CI `pr-review` (`exit 1`).
 
 ## Границы
 

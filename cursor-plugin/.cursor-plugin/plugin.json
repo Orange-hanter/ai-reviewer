@@ -1,0 +1,25 @@
+{
+  "name": "ai-reviewer",
+  "version": "0.1.0",
+  "description": "Агентный контур ai-reviewer: дешёвые стадии пайплайна и pinned dry-run MoA. Не merge-гейт.",
+  "keywords": ["code-review", "mcp", "pr-review"],
+  "variables": {
+    "AI_REVIEWER_ROOT": {
+      "type": "string",
+      "description": "Абсолютный путь к клону пакета ai-reviewer (не в плагин не кладётся)."
+    },
+    "REVIEW_MCP_ROOT": {
+      "type": "string",
+      "description": "Репозиторий потребителя: корень confinement для review и structure MCP."
+    },
+    "REVIEW_PROFILE": {
+      "type": "string",
+      "default": "",
+      "description": "Путь к профилю потребителя (REVIEW_PROFILE). Пусто — дефолт движка."
+    },
+    "OLLAMA_API_KEY": {
+      "type": "string",
+      "description": "Ключ Ollama Cloud. Без default: Cursor подставляет из окружения IDE."
+    }
+  }
+}

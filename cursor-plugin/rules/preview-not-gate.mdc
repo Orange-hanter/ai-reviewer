@@ -1,0 +1,8 @@
+---
+description: Находки IDE advisory; merge блокирует только CI pr-review.
+alwaysApply: true
+---
+
+Находки ai-reviewer в чате — advisory. `previewWouldBlock` не блокирует merge и не заменяет CI.
+
+Merge блокирует только workflow `pr-review` с `exit 1` на подтверждённых блокерах. Не обещай пользователю, что MCP «закрыл» или «открыл» PR.

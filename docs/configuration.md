@@ -1,3 +1,11 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Конфигурация
 
 Приоритет: **env / CLI (прогон) → профиль проекта (репозиторий) → дефолты движка**.
@@ -11,7 +19,7 @@ default-off — `1`/`true`/`yes`/`on` как вкл. Пустое/незадан
 ## CLI
 
 ```bash
-pr-review [--dry-run] [--diff path/to.patch] [--pr N] [--repo owner/repo]
+pr-review [--dry-run] [--diff path/to.patch] [--head-sha SHA] [--pr N] [--repo owner/repo]
 pr-review-eval [--fixtures dir] [--json]
 pr-review-gold [--case id]                  # shadow-прогон с LLM на gold-диффах
 pr-review-metrics [path.jsonl]              # сводка по observability-логу
@@ -25,6 +33,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 |------|------------|
 | `--dry-run` | Не постить в GitHub; summary в stdout |
 | `--diff` | Offline-режим: unified diff из файла (без PR API) |
+| `--head-sha` | Пин коммита для file-diff (MCP и dry-run). Без флага при `--diff` `headSha` в артефакте пустой |
 | `--pr` / `--repo` | Явный PR (иначе `PR_NUMBER`, `GITHUB_REPOSITORY`) |
 
 ## Профиль
@@ -195,7 +204,26 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_STRUCTURE_MAX_UNRESOLVED_RATE` | `0.1` | Выше порога запрещён строгий `missing` |
 | `STRUCTURE_MCP_ROOT` | рабочий каталог процесса | Единственный корень, из которого MCP-серверу разрешено читать `factsPath`/`assessmentPath`. Пути приходят от клиента и проверяются через `realpath` (symlink наружу не проходит), выход за корень — ошибка `path escapes allowed root`. Задавайте явно: дефолт зависит от того, откуда запущен агент — см. [structure.md](structure.md#confinement-what-the-server-is-allowed-to-read) |
 
-Подробности протокола и MCP — в [structure.md](structure.md).
+## Review MCP (агентный dry-run)
+
+Отдельный stdio-сервер `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)). Это превью для агента, не merge-гейт: GitHub не пишется, даже если в env процесса есть `GITHUB_TOKEN`. Structure MCP — другой процесс (`STRUCTURE_MCP_ROOT` сюда не подставлять).
+
+Клиентский timeout MCP должен быть не меньше `REVIEW_TIME_BUDGET_MIN` (минуты, не секунды): иначе агент видит обрыв, а не вердикт. Логи прогона уходят как `notifications/message`.
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_MCP_ROOT` | рабочий каталог процесса | Единственный корень, из которого ревью-MCP читает `diffPath` / `priorExportPath` / sidecar / артефакты. `realpath`, symlink наружу не проходит. Задавайте явно |
+| `REVIEW_MCP_EXTRA` | `0` | `1` — в `tools/list` появляются `blast_scope`, `actionability_explain`, `review_metrics` |
+
+Тулзы по умолчанию ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)):
+
+- `review_run` — полный MoA, пин `headSha` обязателен, единственный LLM; мьютекс `review already running`
+- `review_findings` — страница того же прогона по `runFingerprint` (sidecar `{root}/.ai-review/mcp/runs/{fingerprint}.json`, не только память)
+- `review_route` / `review_prescan` / `fp_check` / `fingerprint_check` / `review_artifact` — дешёвый контур без LLM
+
+Живой дифф (`review_run`, `review_route`, `review_prescan`): если корень — git и `uncommitted` не true, `headSha` сверяется префиксом с `rev-parse HEAD`; грязное дерево — ошибка `working tree dirty; pass uncommitted: true`. Не git — сверку пропускаем, `headSha` всё равно обязателен.
+
+В ответе `previewWouldBlock`, не `wouldBlock` сворма. Cursor Plugin — каталог [`cursor-plugin/`](../cursor-plugin/).
 
 ## Бюджеты
 

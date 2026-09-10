@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "ai-reviewer": {
+      "command": "node",
+      "args": ["${AI_REVIEWER_ROOT}/bin/pr-review-mcp.mjs"],
+      "env": {
+        "REVIEW_MCP_ROOT": "${REVIEW_MCP_ROOT}",
+        "REVIEW_PROFILE": "${REVIEW_PROFILE}",
+        "OLLAMA_API_KEY": "${OLLAMA_API_KEY}"
+      }
+    },
+    "ai-reviewer-structure": {
+      "command": "node",
+      "args": ["${AI_REVIEWER_ROOT}/bin/pr-review-structure-mcp.mjs"],
+      "env": {
+        "STRUCTURE_MCP_ROOT": "${REVIEW_MCP_ROOT}"
+      }
+    }
+  }
+}
