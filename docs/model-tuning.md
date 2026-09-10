@@ -1,3 +1,11 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Выбор моделей и параметров
 
 Провайдер по умолчанию — Ollama Cloud. Он не публикует внятной документации по каждой модели,

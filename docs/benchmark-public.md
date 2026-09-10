@@ -1,3 +1,11 @@
+---
+type: analysis
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-03
+---
+
 # Публичный замер precision/recall — 2026-09-03
 
 Первый замер движка на репозиториях, которые мы не писали и не размечали под себя

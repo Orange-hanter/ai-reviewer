@@ -1,3 +1,11 @@
+---
+type: design
+status: review
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # 02 — Точная привязка покрытия функций: FNL/FNA, сверка FNH, детектор противоречий
 
 > Категория: 🟡 Адаптация · Риск: низкий · Зависимости: нет

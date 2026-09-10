@@ -1,3 +1,12 @@
+---
+type: standard
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+last_reviewed: 2026-09-10
+---
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -154,6 +163,9 @@ mutation/property evidence, MCP-сервер с пином по SHA. Разбо�
 `.ai-review/` и `.graphify/` — gitignored артефакты локальных прогонов.
 
 ## Документация
+
+L0-навигатор — `MASTER.md`. Журнал разработки — `docs/dev/journal.md` (как вести —
+`docs/dev/README.md`). Реестр RFC — `proposals/README.md`.
 
 `docs/architecture.md` (поток и решения) · `docs/configuration.md` (все env и поля артефакта) ·
 `docs/profiles.md` (схема профиля) · `docs/false-positives.md` (семейства FP и защиты) ·

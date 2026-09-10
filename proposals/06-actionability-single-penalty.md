@@ -1,3 +1,11 @@
+---
+type: design
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # 06 — Один вердикт жюри — один штраф в actionability
 
 > Категория: 🎯 Прямое · Риск: низкий · Зависимости: [RFC 04](04-token-economy.md) (измеримость), `docs/review-quality.md` (разбор)

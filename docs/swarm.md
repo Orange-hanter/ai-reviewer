@@ -1,3 +1,11 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Swarm contract (E22 / E23)
 
 Machine-readable bridge between **ai-reviewer** (merge gate) and a PR-swarm

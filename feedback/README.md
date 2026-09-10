@@ -1,3 +1,11 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # R8 — GitHub feedback harvest
 
 Сбор сигналов «ложное срабатывание» / «верное замечание» для eval loop и аналитики.

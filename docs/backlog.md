@@ -1,3 +1,11 @@
+---
+type: plan
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Бэклог: фичи и идеи из анализа рынка AI-ревью (2026-08-27)
 
 Источник — сравнительное исследование открытых (PR-Agent, Kodus, Red Hat ai-code-review,

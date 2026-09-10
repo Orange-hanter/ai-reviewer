@@ -1,3 +1,11 @@
+---
+type: design
+status: review
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # 07 — Окно контекста для advisors и жюри: меньше файла, честнее промпт
 
 > Категория: 🔵 Архитектура · Риск: средний · Зависимости: [RFC 04](04-token-economy.md) (методика замера и решение 1), [RFC 05](05-incremental-review.md) (хэш входа как единица сравнения)

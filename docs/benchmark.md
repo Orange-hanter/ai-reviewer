@@ -1,3 +1,11 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Benchmark methodology
 
 Offline precision/recall reporting for the ai-reviewer gold set (`gold/`), aligned with Entelligence-style evaluation.

@@ -1,3 +1,11 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Интеграция в репозиторий-потребитель
 
 Движок живёт в отдельном репозитории и **никогда не берётся из кода PR**: CI выкачивает его

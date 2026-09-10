@@ -1,3 +1,11 @@
+---
+type: design
+status: review
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # 01 — Граница structure-платформы: часть пакета merge-гейта или соседний пакет
 
 > Категория: 🔵 Архитектура · Риск: средний · Зависимости: нет

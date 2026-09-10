@@ -1,3 +1,11 @@
+---
+type: analysis
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Низкий сигнал ревью: разбор прогона и план лечения
 
 Документ описывает конкретный замер (два прогона движка на Claude Sonnet, 2026-09-02),
