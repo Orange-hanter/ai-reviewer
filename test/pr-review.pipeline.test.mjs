@@ -696,3 +696,23 @@ test('observability: событие actionability несёт гистограм�
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('pipeline: runDetailed отдаёт артефакт с cli.headSha на file-diff, без GitHub', async () => {
+  const tmp = join(tmpdir(), `pr-review-headsha-${process.pid}-${Math.random().toString(36).slice(2)}.patch`);
+  await writeFile(tmp, CODE_DIFF);
+  try {
+    const cfg = loadReviewConfig({
+      ...ENV,
+      REVIEW_EXPORT: '0',
+    }, { dryRun: true, diffFile: tmp, repo: '', prNumber: 0, headSha: 'abc1234deadbeef' });
+    const { deps, calls } = mkDeps({ reviews: [criticalReview] });
+    const detailed = await createReviewPipeline(cfg, deps).runDetailed();
+    assert.equal(detailed.artifact.headSha, 'abc1234deadbeef');
+    assert.equal(detailed.exitCode, 1);
+    assert.equal(detailed.wouldBlock, true);
+    assert.equal(calls.postReview.length, 0, 'dry-run не постит review');
+    assert.equal(calls.upsertSticky.length, 0);
+  } finally {
+    await rm(tmp, { force: true });
+  }
+});

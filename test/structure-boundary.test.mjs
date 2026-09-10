@@ -65,6 +65,13 @@ test('граница: bin/pr-review.mjs (вход гейта) не импорт�
   assert.deepEqual(hits, [], `вход гейта импортирует structure: ${hits.join(', ')}`);
 });
 
+test('граница: bin/pr-review-mcp.mjs (ревью-MCP) не импортирует structure-модули', async () => {
+  const src = await readFile(join(ROOT, 'bin', 'pr-review-mcp.mjs'), 'utf8');
+  const hits = matches(src, STRUCTURE_IMPORT);
+  assert.deepEqual(hits, [], `ревью-MCP импортирует structure: ${hits.join(', ')}`);
+});
+
+
 test('сам детектор ловит нарушение — иначе тест зелёный по недосмотру', () => {
   const fake = "import { assessStructure } from './structure-assessments.mjs';";
   assert.equal(matches(fake, STRUCTURE_IMPORT).length, 1);
