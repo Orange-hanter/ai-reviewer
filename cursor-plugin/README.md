@@ -14,7 +14,7 @@ last_updated: 2026-09-12
 
 Cloud Agents не видят local stdio MCP. Кнопка **Authenticate** этому серверу не нужна (это не OAuth). Не вызывайте `mcp_auth`.
 
-Один plugin-процесс — один `REVIEW_MCP_ROOT` на все окна. Два потребителя сразу — workspace MCP в каждом репо, без дубля plugin. Одновременно plugin MCP и workspace MCP с именами `ai-reviewer` / `ai-reviewer-structure` — запрещено: для разработки движка достаточно **W или P-install**, не оба.
+Один plugin-процесс — один `REVIEW_MCP_ROOT` на все окна. Два потребителя сразу — workspace/user MCP в каждом репо ([`examples/cursor/mcp.json`](../examples/cursor/mcp.json): абсолютный лаунчер engine + `REVIEW_MCP_ROOT=${workspaceFolder}`), без второго plugin-сервера. Одновременно plugin MCP и user/workspace MCP с одним корнем — два мьютекса и два sidecar; оставьте один канал. Для разработки движка достаточно **W или P-install**, не оба.
 
 ## Локальная установка (P-engine-install)
 
@@ -39,10 +39,10 @@ Configure (**Customize → Plugins → Configure**) — опциональный
 - `REVIEW_PROFILE` — опционально
 - `OLLAMA_API_KEY` — из Configure, в файлы плагина не кладётся; для `initialize` / дешёвых тулзов не нужен
 
-`mcp.json` вызывает `/bin/sh` и `./bin/review-mcp.sh` в **git-шаблоне** (путь от корня плагина).
-`install-local.sh` в установленной копии подставляет абсолютный `$dest/bin/review-mcp.sh`:
-cwd plugin MCP у Cursor — часто другое окно, не каталог плагина; относительный `./bin` даёт
-`Connection closed` и кнопку Authenticate. Лаунчер сам находит Node и клон движка. `type` — `stdio`.
+`mcp.json` в **git-шаблоне** вызывает `/bin/sh -c` с `$HOME/.cursor/plugins/local/ai-reviewer/bin/review-mcp.sh`
+(не `./bin` от cwd окна). `install-local.sh` в установленной копии подставляет абсолютный
+`$dest/bin/review-mcp.sh`. cwd plugin MCP у Cursor — часто другое окно; относительный `./bin`
+даёт `Connection closed`. Лаунчер сам находит Node и клон движка. `type` — `stdio`.
 
 В Agent chat: `/review-prescan`, `/review-preview`.
 
@@ -61,7 +61,7 @@ cwd plugin MCP у Cursor — часто другое окно, не катало
 
 `STRUCTURE_MCP_ROOT` = тот же `REVIEW_MCP_ROOT` (репозиторий потребителя), не клон движка.
 
-Холодный старт и матрица вариантов — [RFC 10](../proposals/10-mcp-cold-start.md).
+Холодный старт — [RFC 10](../proposals/10-mcp-cold-start.md). Долгий MoA в чате (`wait: false`, `jobId`) — [RFC 12](../proposals/12-mcp-long-run.md). Пустой `review_prescan` на Rust (`no-eslint`) — норма, не баг MCP.
 
 ## CI остаётся судьёй
 

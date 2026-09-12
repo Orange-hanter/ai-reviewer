@@ -7,4 +7,4 @@ alwaysApply: true
 
 Merge блокирует только workflow `pr-review` с `exit 1` на подтверждённых блокерах. Не обещай пользователю, что MCP «закрыл» или «открыл» PR.
 
-Серверы `ai-reviewer` / `ai-reviewer-structure` — stdio, не OAuth. Не вызывай `mcp_auth` и не предлагай Authenticate. При error/loading — логи MCP и `cursor-plugin/bin/install-local.sh`, не «авторизуйся».
+Серверы `ai-reviewer` / `ai-reviewer-structure` — stdio, не OAuth. Не вызывай `mcp_auth` и не предлагай Authenticate. При error/loading — логи MCP и `cursor-plugin/bin/install-local.sh`, не «авторизуйся». Обрыв `tools/call` при живом stdio — не мёртвый сервер: полли `review_findings` по `jobId`, не чини без findings.

@@ -10,6 +10,13 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+### Добавлено — долгий MoA в IDE ([RFC 12](proposals/12-mcp-long-run.md))
+
+`review_run` принимает `wait` (default `true`). `wait: false` сразу отдаёт stub с `jobId`;
+sidecar пишется до LLM. `review_findings` / `review_artifact` принимают `jobId`; пока
+`status: running` — пустые findings, не ошибка. Git-шаблон плагина больше не использует
+`./bin` от cwd окна.
+
 ### Добавлено — холодный старт MCP ([RFC 10](proposals/10-mcp-cold-start.md))
 
 Лаунчер плагина сам находит клон (`.engine-root` / cwd / `AI_REVIEWER_ROOT`). `install-local.sh`

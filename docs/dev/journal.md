@@ -13,11 +13,11 @@ audience: [next-session-agent, maintainers]
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
 
-## 2026-09-12 — RFC 12: долгий MoA в IDE (черновик)
+## 2026-09-12 — RFC 12: долгий MoA в IDE
 
 **Зачем.** Cursor обрывает `review_run` ~30 с; sidecar пишется после MoA — агент теряет id. Plugin `./bin` резолвится в cwd чужого окна.
 
-**Сделано в этой записи:** контракт [RFC 12](../../proposals/12-mcp-long-run.md) (`draft`); план `mcp-ide-resilience` и задачи MCP-001…011 в cod-doc. Код пайплайна/гейта не трогали. Пока нет `wait: false` — полный MoA через CLI, не chat RPC.
+**Сделано:** контракт [RFC 12](../../proposals/12-mcp-long-run.md); `wait: false` + `jobId` + stub sidecar до LLM; git-шаблон плагина через `$HOME/.../bin`, не `./bin`; skill поллит `jobId`, не зовёт `mcp_auth` на abort.
 
 ## 2026-09-12 — RFC 10: холодный старт MCP
 

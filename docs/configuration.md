@@ -206,9 +206,11 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 
 ## Review MCP (агентный dry-run)
 
-Отдельный stdio-сервер `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md), [RFC 10](../proposals/10-mcp-cold-start.md)). Это превью для агента, не merge-гейт: GitHub не пишется, даже если в env процесса есть `GITHUB_TOKEN`. Structure MCP — другой процесс (`STRUCTURE_MCP_ROOT` сюда не подставлять). Холодный старт плагина — `cursor-plugin/bin/install-local.sh`; Authenticate не нужен.
+Отдельный stdio-сервер `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md), [RFC 10](../proposals/10-mcp-cold-start.md), [RFC 12](../proposals/12-mcp-long-run.md)). Это превью для агента, не merge-гейт: GitHub не пишется, даже если в env процесса есть `GITHUB_TOKEN`. Structure MCP — другой процесс (`STRUCTURE_MCP_ROOT` сюда не подставлять). Холодный старт плагина — `cursor-plugin/bin/install-local.sh`; Authenticate не нужен.
 
-Клиентский timeout MCP должен быть не меньше `REVIEW_TIME_BUDGET_MIN` (минуты, не секунды): иначе агент видит обрыв, а не вердикт. Логи прогона уходят как `notifications/message`.
+В IDE вызывайте `review_run` с `wait: false`: RPC сразу отдаёт stub с `jobId`, MoA идёт в том же процессе. Обрыв `tools/call` ~30 с не убивает прогон, пока stdin жив. Поллинг — `review_findings` / `review_artifact` по `jobId`. `wait: true` (default) — прежнее синхронное поведение для тестов и CLI. Sidecar: `{root}/.ai-review/mcp/runs/{jobId}.json`.
+
+Пустой `review_prescan` на Rust-диффе (`skipped: no-eslint`, 0 находок) — ожидаемо: в пакете нет eslint по `.rs`. Потребительский ast-grep — opt-in профиля, не лечение транспорта.
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
@@ -219,8 +221,8 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 
 Тулзы по умолчанию ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)):
 
-- `review_run` — полный MoA, пин `headSha` обязателен, единственный LLM; мьютекс `review already running`
-- `review_findings` — страница того же прогона по `runFingerprint` (sidecar `{root}/.ai-review/mcp/runs/{fingerprint}.json`, не только память)
+- `review_run` — полный MoA, пин `headSha` обязателен, единственный LLM; мьютекс `review already running` на **другой** пин. `wait` default true; `wait: false` — stub `status: running` + `jobId`
+- `review_findings` — страница того же прогона по `jobId` или `runFingerprint` (sidecar `{root}/.ai-review/mcp/runs/{jobId}.json`). Пока `running` — пустые findings, не `unknown runFingerprint`
 - `review_route` / `review_prescan` / `fp_check` / `fingerprint_check` / `review_artifact` — дешёвый контур без LLM
 
 Живой дифф (`review_run`, `review_route`, `review_prescan`): если корень — git и `uncommitted` не true, `headSha` сверяется префиксом с `rev-parse HEAD`; грязное дерево — ошибка `working tree dirty; pass uncommitted: true`. Не git — сверку пропускаем, `headSha` всё равно обязателен.

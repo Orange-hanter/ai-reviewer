@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:de0499397bdb`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:aefa246dc7b9`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:bff30c8c3fc6`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:95c01e43883a`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -97,7 +97,7 @@ graph TD
 
 ### Cursor Plugin
 - **Описание:** local install, два MCP, skill, rule.
-- **Ссылка:** `📁 cursor-plugin/README.md | 🗃️ doc:cursor-plugin_README_md | 🔑 sha:11671346d61c`
+- **Ссылка:** `📁 cursor-plugin/README.md | 🗃️ doc:cursor-plugin_README_md | 🔑 sha:e58726a8c069`
 - **Статус:** `🟢 VERIFIED`
 
 ### Structure-контур
@@ -112,7 +112,7 @@ graph TD
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:107508598ba3`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:7e82acaaae54`
 - **Статус:** `🟢 VERIFIED`
 
 ### Стандарт агента

@@ -2,7 +2,7 @@
 import './helpers/reference-profile.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, rm, mkdtemp } from 'node:fs/promises';
+import { writeFile, rm, mkdtemp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -231,9 +231,10 @@ test('review_run: process.exit не вызывается на soft-fail die', as
   });
 });
 
-test('review_run: второй параллельный вызов — review already running', async () => {
+test('review_run: тот же пин пока running — stub, другой пин — already running', async () => {
   await withRoot(async (root) => {
     await writeFile(join(root, 'changes.patch'), CODE_DIFF);
+    await writeFile(join(root, 'other.patch'), CODE_DIFF);
     let release;
     const hold = new Promise((r) => { release = r; });
     const extra = {
@@ -245,15 +246,24 @@ test('review_run: второй параллельный вызов — review al
       diffPath: join(root, 'changes.patch'),
       headSha: HEAD,
     }), extra);
-    const second = await handleReviewMcpRequest(runCall({
+    const same = await handleReviewMcpRequest(runCall({
       diffPath: join(root, 'changes.patch'),
       headSha: HEAD,
     }), extra);
-    assert.equal(second.error.code, -32602);
-    assert.match(second.error.message, /already running/);
+    assert.equal(same.error, undefined, same.error?.message);
+    assert.equal(same.result.structuredContent.status, 'running');
+    assert.match(same.result.structuredContent.jobId, /^[0-9a-f]{64}$/);
+    const other = await handleReviewMcpRequest(runCall({
+      diffPath: join(root, 'other.patch'),
+      headSha: HEAD,
+    }), extra);
+    assert.equal(other.error.code, -32602);
+    assert.match(other.error.message, /already running/);
     release();
     const done = await first;
     assert.equal(done.error, undefined, done.error?.message);
+    assert.equal(done.result.structuredContent.status, 'completed');
+    assert.equal(done.result.structuredContent.jobId, same.result.structuredContent.jobId);
   });
 });
 
@@ -341,6 +351,65 @@ test('review_findings после resetReviewMcpStore читает sidecar с д�
     assert.equal(page.error, undefined, page.error?.message);
     assert.ok(page.result.structuredContent.findings.length >= 1);
     assert.equal(page.result.structuredContent.headSha, HEAD);
+  });
+});
+
+test('wait:false: stub до MoA, findings running, затем completed по jobId', async () => {
+  await withRoot(async (root) => {
+    await writeFile(join(root, 'changes.patch'), CODE_DIFF);
+    let release;
+    const hold = new Promise((r) => { release = r; });
+    let background;
+    const extra = extraBase(root, {
+      pipelineDeps: pipelineDeps({ engineHold: hold }),
+      captureRun: (p) => { background = p; },
+    });
+    const res = await handleReviewMcpRequest(runCall({
+      diffPath: join(root, 'changes.patch'),
+      headSha: HEAD,
+      wait: false,
+    }), extra);
+    assert.equal(res.error, undefined, res.error?.message);
+    const stub = res.result.structuredContent;
+    assert.equal(stub.status, 'running');
+    assert.match(stub.jobId, /^[0-9a-f]{64}$/);
+    assert.equal(stub.runFingerprint, '');
+    assert.equal(stub.previewWouldBlock, false);
+    const names = await readdir(join(root, '.ai-review/mcp/runs'));
+    assert.deepEqual(names, [`${stub.jobId}.json`]);
+
+    const page = await handleReviewMcpRequest(findingsCall({ jobId: stub.jobId, headSha: HEAD }), extra);
+    assert.equal(page.error, undefined, page.error?.message);
+    assert.equal(page.result.structuredContent.status, 'running');
+    assert.deepEqual(page.result.structuredContent.findings, []);
+    assert.equal(page.result.structuredContent.total, 0);
+
+    const art = await handleReviewMcpRequest(toolCall('review_artifact', { jobId: stub.jobId }), extra);
+    assert.equal(art.result.structuredContent.status, 'running');
+    assert.equal(art.result.structuredContent.previewWouldBlock, false);
+
+    release();
+    await background;
+    const done = await handleReviewMcpRequest(findingsCall({ jobId: stub.jobId }), extra);
+    assert.equal(done.error, undefined, done.error?.message);
+    assert.equal(done.result.structuredContent.status, 'completed');
+    assert.ok(done.result.structuredContent.findings.length >= 1);
+    assert.match(done.result.structuredContent.runFingerprint, /^[0-9a-f]{64}$/);
+
+    resetReviewMcpStore();
+    const fromDisk = await handleReviewMcpRequest(findingsCall({
+      runFingerprint: done.result.structuredContent.runFingerprint,
+    }), extra);
+    assert.equal(fromDisk.error, undefined, fromDisk.error?.message);
+    assert.ok(fromDisk.result.structuredContent.findings.length >= 1);
+
+    const again = await handleReviewMcpRequest(runCall({
+      diffPath: join(root, 'changes.patch'),
+      headSha: HEAD,
+      wait: false,
+    }), extra);
+    assert.equal(again.result.structuredContent.status, 'completed');
+    assert.equal(again.result.structuredContent.jobId, stub.jobId);
   });
 });
 

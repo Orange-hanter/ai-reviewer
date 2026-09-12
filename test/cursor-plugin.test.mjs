@@ -117,7 +117,7 @@ test('plugin.json: JSON Schema variables без required', async () => {
   assert.deepEqual(required, []);
 });
 
-test('mcp.json: ./bin лаунчеры, type stdio, ключ только как ${OLLAMA_API_KEY}', async () => {
+test('mcp.json: лаунчер через HOME, type stdio, ключ только как ${OLLAMA_API_KEY}', async () => {
   const mcp = await readJson('mcp.json');
   const names = Object.keys(mcp.mcpServers);
   assert.deepEqual(names, ['ai-reviewer', 'ai-reviewer-structure']);
@@ -127,8 +127,11 @@ test('mcp.json: ./bin лаунчеры, type stdio, ключ только как
   assert.equal(structure.type, 'stdio');
   assert.equal(review.command, '/bin/sh');
   assert.equal(structure.command, '/bin/sh');
-  assert.equal(review.args[0], './bin/review-mcp.sh');
-  assert.equal(structure.args[0], './bin/structure-mcp.sh');
+  assert.equal(review.args[0], '-c');
+  assert.match(review.args[1], /\$HOME\/\.cursor\/plugins\/local\/ai-reviewer\/bin\/review-mcp\.sh/);
+  assert.equal(structure.args[0], '-c');
+  assert.match(structure.args[1], /\$HOME\/\.cursor\/plugins\/local\/ai-reviewer\/bin\/structure-mcp\.sh/);
+  assert.equal(review.args.some((a) => a.includes('./bin')), false);
   assert.equal(review.env.AI_REVIEWER_ROOT, '${AI_REVIEWER_ROOT}');
   assert.equal(review.env.REVIEW_MCP_ROOT, '${REVIEW_MCP_ROOT}');
   assert.equal(review.env.OLLAMA_API_KEY, '${OLLAMA_API_KEY}');
@@ -166,6 +169,8 @@ test('skill и rule запрещают mcp_auth / Authenticate', async () => {
   const rule = await readFile(join(PLUGIN, 'rules/preview-not-gate.mdc'), 'utf8');
   assert.match(skill, /mcp_auth/);
   assert.match(skill, /Не вызывай `mcp_auth`/);
+  assert.match(skill, /wait: false/);
+  assert.match(skill, /jobId/);
   assert.match(rule, /mcp_auth/);
   assert.match(rule, /Authenticate/);
 });
@@ -368,6 +373,34 @@ test('относительный ./bin из чужого cwd не находит
     HOME,
   }, alien);
   assert.notEqual(result.code, 0);
+});
+
+test('git-шаблон $HOME: handshake из чужого cwd после install-local в fake HOME', async (t) => {
+  const home = await mkdtemp(join(tmpdir(), 'mcp-home-'));
+  const dest = join(home, '.cursor/plugins/local/ai-reviewer');
+  try {
+    await mkdir(dest, { recursive: true });
+  } catch (error) {
+    t.skip(`нельзя создать $HOME/.cursor (${error.code || error.message})`);
+    return;
+  }
+  const alien = await mkdtemp(join(tmpdir(), 'alien-cwd-'));
+  const installed = spawnSync('/bin/sh', [join(PLUGIN, 'bin/install-local.sh'), dest], {
+    encoding: 'utf8',
+    cwd: ROOT,
+  });
+  assert.equal(installed.status, 0, installed.stderr);
+  const mcp = JSON.parse(await readFile(join(PLUGIN, 'mcp.json'), 'utf8'));
+  const result = await spawnHandshake('/bin/sh', mcp.mcpServers['ai-reviewer'].args, {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '',
+    REVIEW_MCP_ROOT: '',
+    HOME: home,
+  }, alien);
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  const names = result.messages[1].result.tools.map((tool) => tool.name);
+  assert.ok(names.includes('review_route'));
 });
 
 test('structure handshake: tools/list без Rust/пайплайна', async () => {
