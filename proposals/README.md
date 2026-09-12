@@ -3,8 +3,8 @@ type: standard
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
-last_reviewed: 2026-09-10
+last_updated: 2026-09-12
+last_reviewed: 2026-09-12
 ---
 
 # Proposals (RFC)
@@ -27,6 +27,9 @@ RFC пишется, если идея трогает ≥ 2 модуля движ
 | 07 | [Окно контекста для advisors и жюри](07-windowed-file-context.md) | 🔵 Архитектура | Окна вокруг изменённых строк вместо целых файлов — и промпт, который перестаёт обещать полный файл | средний | на решении |
 | 08 | [MCP полного прогона](08-review-mcp.md) | 🔵 Архитектура | Агентный dry-run MoA через отдельный MCP, не второй гейт и не structure | средний | принято; реализация в пакете |
 | 09 | [Cursor Plugin и агентные стадии ревью-MCP](09-cursor-plugin-mcp.md) | 🔵 Архитектура | Slash-команды/skill/rule вокруг двух MCP; дешёвые стадии пайплайна до MoA | средний | на решении |
+| 10 | [Холодный старт MCP](10-mcp-cold-start.md) | 🔵 Архитектура | Матрица P/W и корней; лаунчер без Configure; handshake без пайплайна; не Authenticate | средний | на решении |
+| 11 | [HTTP MCP и OAuth Cursor](11-http-mcp-oauth.md) | 🔵 Архитектура | Третий контур (hosted/Cloud Agents); не лечение кнопки Authenticate на stdio | высокий | черновик |
+| 12 | [Долгий MoA в IDE](12-mcp-long-run.md) | 🔵 Архитектура | `wait`/`jobId` против таймаута tools/call; spawn без cwd окна; один канал на потребителя | средний | черновик |
 
 ## Формат
 

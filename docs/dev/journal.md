@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-10
+last_updated: 2026-09-12
 audience: [next-session-agent, maintainers]
 ---
 
@@ -12,6 +12,18 @@ audience: [next-session-agent, maintainers]
 
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
+
+## 2026-09-12 — RFC 12: долгий MoA в IDE (черновик)
+
+**Зачем.** Cursor обрывает `review_run` ~30 с; sidecar пишется после MoA — агент теряет id. Plugin `./bin` резолвится в cwd чужого окна.
+
+**Сделано в этой записи:** контракт [RFC 12](../../proposals/12-mcp-long-run.md) (`draft`); план `mcp-ide-resilience` и задачи MCP-001…011 в cod-doc. Код пайплайна/гейта не трогали. Пока нет `wait: false` — полный MoA через CLI, не chat RPC.
+
+## 2026-09-12 — RFC 10: холодный старт MCP
+
+**Зачем.** Plugin MCP не доходил до `connected`: `variables.required` → Authenticate, command от `${AI_REVIEWER_ROOT}`, handshake тянул `pipeline.mjs`, агент шёл в `mcp_auth`.
+
+**Сделано:** RFC 10; `install-local.sh` + `.engine-root` + абсолютный лаунчер (cwd plugin MCP ≠ корень плагина); `mcp.json` git-шаблон `./bin/…`; `variables.required: []`; тонкий handshake; канон W без `-ws`; skill/rule запрещают `mcp_auth`. Черновик направления HTTP/OAuth — [RFC 11](../../proposals/11-http-mcp-oauth.md) (`draft`). Eval/gate не трогали. `REVIEW_MCP_PROTOCOL_VERSION` = 1.
 
 ## 2026-09-10 — RFC 08/09: агентный MCP и Cursor Plugin
 

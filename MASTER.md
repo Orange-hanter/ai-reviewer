@@ -4,12 +4,12 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-10
+last_updated: 2026-09-12
 ---
 
 # 🧭 Project Navigator: ai-reviewer
 
-> 📊 Meta: `{"version": "0.3.0", "last_updated": "2026-09-10", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
+> 📊 Meta: `{"version": "0.3.0", "last_updated": "2026-09-12", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
 
 > L0 для агента. Истина по гейту — architecture. Журнал разработки — `docs/dev/journal.md`. RFC — `proposals/`.
 
@@ -36,6 +36,9 @@ graph TD
     Root --> Rfc[proposals/README.md]
     Rfc --> Rfc08[proposals/08-review-mcp.md]
     Rfc --> Rfc09[proposals/09-cursor-plugin-mcp.md]
+    Rfc --> Rfc10[proposals/10-mcp-cold-start.md]
+    Rfc --> Rfc11[proposals/11-http-mcp-oauth.md]
+    Rfc --> Rfc12[proposals/12-mcp-long-run.md]
     Root --> Plugin[cursor-plugin/README.md]
     Root --> Struct[docs/structure.md]
 ```
@@ -49,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:e18a952c6cd3`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:de0499397bdb`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -64,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:4ee99eaba033`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:bff30c8c3fc6`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -74,12 +77,27 @@ graph TD
 
 ### RFC 09 — Cursor Plugin
 - **Описание:** дешёвые стадии, sidecar, git-пин, `cursor-plugin/`.
-- **Ссылка:** `📁 proposals/09-cursor-plugin-mcp.md | 🗃️ doc:proposals_09-cursor-plugin-mcp_md | 🔑 sha:fa4535a53ec8`
+- **Ссылка:** `📁 proposals/09-cursor-plugin-mcp.md | 🗃️ doc:proposals_09-cursor-plugin-mcp_md | 🔑 sha:d35848d9886d`
 - **Статус:** `🟡 DRAFT`
+
+### RFC 10 — Холодный старт MCP
+- **Описание:** матрица P/W, `.engine-root`, handshake без пайплайна, не Authenticate.
+- **Ссылка:** `📁 proposals/10-mcp-cold-start.md | 🗃️ doc:proposals_10-mcp-cold-start_md | 🔑 sha:d490111ce323`
+- **Статус:** `🟡 DRAFT`
+
+### RFC 11 — HTTP MCP и OAuth (черновик)
+- **Описание:** третий контур hosted/Cloud Agents; не лечение Authenticate на stdio.
+- **Ссылка:** `📁 proposals/11-http-mcp-oauth.md | 🗃️ doc:proposals_11-http-mcp-oauth_md | 🔑 sha:2f4f89c9a793`
+- **Статус:** `⚪ DRAFT`
+
+### RFC 12 — Долгий MoA в IDE (черновик)
+- **Описание:** `wait`/`jobId` против таймаута tools/call; spawn без cwd окна; один канал на потребителя.
+- **Ссылка:** `📁 proposals/12-mcp-long-run.md | 🗃️ doc:proposals_12-mcp-long-run_md | 🔑 sha:fe7c33c348d4`
+- **Статус:** `⚪ DRAFT`
 
 ### Cursor Plugin
 - **Описание:** local install, два MCP, skill, rule.
-- **Ссылка:** `📁 cursor-plugin/README.md | 🗃️ doc:cursor-plugin_README_md | 🔑 sha:ecbd09c43fa1`
+- **Ссылка:** `📁 cursor-plugin/README.md | 🗃️ doc:cursor-plugin_README_md | 🔑 sha:11671346d61c`
 - **Статус:** `🟢 VERIFIED`
 
 ### Structure-контур
@@ -88,13 +106,13 @@ graph TD
 - **Статус:** `🟢 VERIFIED`
 
 ### Индекс RFC
-- **Описание:** таблица решений 01–09.
-- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:dcab3bf8c5db`
+- **Описание:** таблица решений 01–12.
+- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:7083655d0877`
 - **Статус:** `🟢 VERIFIED`
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:03e21503e489`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:107508598ba3`
 - **Статус:** `🟢 VERIFIED`
 
 ### Стандарт агента
@@ -106,7 +124,7 @@ graph TD
 
 ```json
 {
-  "next_step": "Коммиты RFC 09 по порядку из плана; local plugin → /review-prescan → /review-preview",
+  "next_step": "RFC 12 в review (владелец); очередь mcp-ide-resilience: MCP-001 / MCP-006; MoA в чате — CLI, пока wait:false нет",
   "required_input": "",
   "blocked_by": []
 }
@@ -124,6 +142,12 @@ graph TD
     "missing_info": []
   },
   "changelog": [
+    {
+      "date": "2026-09-12",
+      "action": "RFC 12 (черновик) и план mcp-ide-resilience в реестре",
+      "author": "cursor-grok",
+      "scope": "master"
+    },
     {
       "date": "2026-09-10",
       "action": "Фронтматтер, журнал разработки, execution-log RFC 08/09, реестр хэшей",
