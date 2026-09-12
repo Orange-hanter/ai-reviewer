@@ -4,7 +4,7 @@ status: review
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-10
+last_updated: 2026-09-12
 ---
 
 # 09 — Cursor Plugin и агентные стадии ревью-MCP
@@ -123,6 +123,10 @@ In-memory Map — кэш; miss → диск; нет файла → `unknown runF
 cursor-plugin/
   .cursor-plugin/plugin.json
   mcp.json
+  bin/review-mcp.sh
+  bin/structure-mcp.sh
+  bin/mcp-env.sh
+  bin/install-local.sh
   commands/review-preview.md
   commands/review-prescan.md
   commands/fp-check.md
@@ -132,10 +136,14 @@ cursor-plugin/
   README.md
 ```
 
-`mcp.json` — ровно два сервера: `node ${AI_REVIEWER_ROOT}/bin/pr-review-mcp.mjs` и
-`pr-review-structure-mcp.mjs`. `OLLAMA_API_KEY` только как `${OLLAMA_API_KEY}`.
-`GITHUB_TOKEN` не класть. `STRUCTURE_MCP_ROOT` = `${REVIEW_MCP_ROOT}` (репозиторий
-потребителя, не клон движка).
+`mcp.json` — ровно два сервера, `type: stdio`. Command — `/bin/sh`, `args` —
+`./bin/review-mcp.sh` / `./bin/structure-mcp.sh` (путь от корня **плагина**, не
+`${AI_REVIEWER_ROOT}/…`; GUI Cursor часто без `node` в PATH; лаунчер ищет бинарь
+и клон движка сам, см. [RFC 10](10-mcp-cold-start.md)). `OLLAMA_API_KEY` только как
+`${OLLAMA_API_KEY}`. `GITHUB_TOKEN` не класть. `STRUCTURE_MCP_ROOT` = `${REVIEW_MCP_ROOT}`
+(репозиторий потребителя, не клон движка). `variables` в `plugin.json` — JSON Schema
+`{ type: object, properties }` и `required: []` (иначе Cursor не спавнит stdio
+и показывает Authenticate).
 
 Slash-команды — Agent chat, не Command Palette. Skill: route → prescan → fp_check →
 (опц.) fingerprint_check → `review_run` последним. Rule always-on: находки IDE advisory;

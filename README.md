@@ -156,7 +156,7 @@ MCP-сервер `pr-review-structure-mcp` и его метод `structure_conte
 { "mcpServers": { "ai-reviewer-structure": { "command": "npx", "args": ["pr-review-structure-mcp"] } } }
 ```
 
-Полный прогон из чата — отдельный сервер `pr-review-mcp` ([RFC 08](proposals/08-review-mcp.md), [RFC 09](proposals/09-cursor-plugin-mcp.md)): сначала дешёвые стадии (`review_route` / `review_prescan` / `fp_check`), полный MoA — `review_run` как pinned dry-run, без постинга в GitHub. Это превью (`previewWouldBlock`), не merge-гейт. Клиентский timeout должен быть не меньше `REVIEW_TIME_BUDGET_MIN`. Cursor Plugin (local): [`cursor-plugin/README.md`](cursor-plugin/README.md).
+Полный прогон из чата — отдельный сервер `pr-review-mcp` ([RFC 08](proposals/08-review-mcp.md), [RFC 09](proposals/09-cursor-plugin-mcp.md), [RFC 10](proposals/10-mcp-cold-start.md)): сначала дешёвые стадии (`review_route` / `review_prescan` / `fp_check`), полный MoA — `review_run` как pinned dry-run, без постинга в GitHub. Это превью (`previewWouldBlock`), не merge-гейт. Клиентский timeout должен быть не меньше `REVIEW_TIME_BUDGET_MIN`. Cursor Plugin: `cursor-plugin/bin/install-local.sh` (копия в `~/.cursor/plugins/local`, не symlink; Configure и Authenticate не нужны) — [`cursor-plugin/README.md`](cursor-plugin/README.md).
 
 ```json
 {

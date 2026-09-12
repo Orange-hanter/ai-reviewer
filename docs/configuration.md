@@ -206,13 +206,15 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 
 ## Review MCP (агентный dry-run)
 
-Отдельный stdio-сервер `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)). Это превью для агента, не merge-гейт: GitHub не пишется, даже если в env процесса есть `GITHUB_TOKEN`. Structure MCP — другой процесс (`STRUCTURE_MCP_ROOT` сюда не подставлять).
+Отдельный stdio-сервер `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md), [RFC 10](../proposals/10-mcp-cold-start.md)). Это превью для агента, не merge-гейт: GitHub не пишется, даже если в env процесса есть `GITHUB_TOKEN`. Structure MCP — другой процесс (`STRUCTURE_MCP_ROOT` сюда не подставлять). Холодный старт плагина — `cursor-plugin/bin/install-local.sh`; Authenticate не нужен.
 
 Клиентский timeout MCP должен быть не меньше `REVIEW_TIME_BUDGET_MIN` (минуты, не секунды): иначе агент видит обрыв, а не вердикт. Логи прогона уходят как `notifications/message`.
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `REVIEW_MCP_ROOT` | рабочий каталог процесса | Единственный корень, из которого ревью-MCP читает `diffPath` / `priorExportPath` / sidecar / артефакты. `realpath`, symlink наружу не проходит. Задавайте явно |
+| `REVIEW_MCP_ROOT` | лаунчер: корень engine | Единственный корень, из которого ревью-MCP читает `diffPath` / `priorExportPath` / sidecar / артефакты. `realpath`, symlink наружу не проходит. Плейсхолдер `${…}` ≡ не задано; битый путь — `exit 1` на старте |
+| `AI_REVIEWER_ROOT` | `.engine-root` / cwd-клон / `cursor-plugin/../..` | Клон пакета с `bin/pr-review-mcp.mjs`. Configure перебивает `.engine-root` |
+| `AI_REVIEWER_NODE` | `PATH`, `~/.local/bin/node`, Homebrew | Абсолютный путь к `node` ≥ 22, если GUI без `node` в PATH |
 | `REVIEW_MCP_EXTRA` | `0` | `1` — в `tools/list` появляются `blast_scope`, `actionability_explain`, `review_metrics` |
 
 Тулзы по умолчанию ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)):

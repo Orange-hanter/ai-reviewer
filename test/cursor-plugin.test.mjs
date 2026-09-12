@@ -1,40 +1,135 @@
 /**
- * Контракт Cursor Plugin: два MCP, нет секрета в файле, переменные из plugin.json.
+ * Контракт Cursor Plugin и холодный старт MCP (RFC 09/10).
  * Без запуска Cursor и без LLM.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { chmod, cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 const PLUGIN = join(ROOT, 'cursor-plugin');
 
 async function readJson(rel) {
   return JSON.parse(await readFile(join(PLUGIN, rel), 'utf8'));
 }
 
-test('plugin.json объявляет name, version и required variables', async () => {
+function parseMcpFrames(buffer) {
+  const messages = [];
+  let rest = buffer;
+  while (true) {
+    const headerEnd = rest.indexOf('\r\n\r\n');
+    if (headerEnd < 0) break;
+    const header = rest.subarray(0, headerEnd).toString('latin1');
+    const match = /content-length:\s*(\d+)/i.exec(header);
+    assert.ok(match, `missing Content-Length in frame: ${header}`);
+    const length = Number(match[1]);
+    assert.ok(rest.length >= headerEnd + 4 + length, 'truncated frame body');
+    messages.push(JSON.parse(rest.subarray(headerEnd + 4, headerEnd + 4 + length).toString('utf8')));
+    rest = rest.subarray(headerEnd + 4 + length);
+  }
+  return messages;
+}
+
+function frame(obj) {
+  const body = Buffer.from(JSON.stringify(obj));
+  return Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]);
+}
+
+function spawnChild(command, args, env, { cwd = ROOT, writeHandshake = false, timeoutMs = 8000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const child = spawn(command, args, {
+      env: { ...process.env, ...env },
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const stdout = [];
+    const stderr = [];
+    const watchdog = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`timeout ${timeoutMs}ms. stderr: ${Buffer.concat(stderr).toString()}`));
+    }, timeoutMs);
+    child.stdout.on('data', (chunk) => stdout.push(chunk));
+    child.stderr.on('data', (chunk) => stderr.push(chunk));
+    if (writeHandshake) {
+      child.stdin.write(frame({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '0' } },
+      }));
+      child.stdin.write(frame({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }));
+    }
+    child.stdin.end();
+    child.on('error', (error) => {
+      clearTimeout(watchdog);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      clearTimeout(watchdog);
+      resolve({
+        code,
+        ms: Date.now() - started,
+        messages: parseMcpFrames(Buffer.concat(stdout)),
+        stderr: Buffer.concat(stderr).toString(),
+      });
+    });
+  });
+}
+
+function spawnHandshake(command, args, env, cwd = ROOT) {
+  return spawnChild(command, args, env, { cwd, writeHandshake: true, timeoutMs: 8000 });
+}
+
+function spawnFailFast(command, args, env, cwd) {
+  return spawnChild(command, args, env, { cwd, writeHandshake: false, timeoutMs: 4000 });
+}
+
+async function isolatedPlugin({ engineRoot } = {}) {
+  const dir = await mkdtemp(join(tmpdir(), 'mcp-plugin-'));
+  await mkdir(join(dir, 'bin'));
+  await cp(join(PLUGIN, 'bin/mcp-env.sh'), join(dir, 'bin/mcp-env.sh'));
+  await cp(join(PLUGIN, 'bin/review-mcp.sh'), join(dir, 'bin/review-mcp.sh'));
+  await chmod(join(dir, 'bin/review-mcp.sh'), 0o755);
+  if (engineRoot) await writeFile(join(dir, '.engine-root'), `${engineRoot}\n`);
+  return dir;
+}
+
+const PATH_NO_NODE = '/usr/bin:/bin';
+const HOME = process.env.HOME;
+
+test('plugin.json: JSON Schema variables без required', async () => {
   const plugin = await readJson('.cursor-plugin/plugin.json');
   assert.equal(plugin.name, 'ai-reviewer');
   assert.equal(typeof plugin.version, 'string');
-  assert.ok(plugin.variables.AI_REVIEWER_ROOT);
-  assert.ok(plugin.variables.REVIEW_MCP_ROOT);
-  assert.ok(plugin.variables.REVIEW_PROFILE);
-  assert.ok(plugin.variables.OLLAMA_API_KEY);
-  assert.equal(plugin.variables.OLLAMA_API_KEY.default, undefined);
+  assert.equal(plugin.variables.type, 'object');
+  const { properties, required } = plugin.variables;
+  assert.ok(properties.AI_REVIEWER_ROOT);
+  assert.ok(properties.REVIEW_MCP_ROOT);
+  assert.ok(properties.REVIEW_PROFILE);
+  assert.ok(properties.OLLAMA_API_KEY);
+  assert.equal(properties.OLLAMA_API_KEY.default, undefined);
+  assert.deepEqual(required, []);
 });
 
-test('mcp.json: два сервера, ключ только как ${OLLAMA_API_KEY}, нет GITHUB_TOKEN', async () => {
+test('mcp.json: ./bin лаунчеры, type stdio, ключ только как ${OLLAMA_API_KEY}', async () => {
   const mcp = await readJson('mcp.json');
   const names = Object.keys(mcp.mcpServers);
   assert.deepEqual(names, ['ai-reviewer', 'ai-reviewer-structure']);
   const review = mcp.mcpServers['ai-reviewer'];
   const structure = mcp.mcpServers['ai-reviewer-structure'];
-  assert.equal(review.command, 'node');
-  assert.match(review.args[0], /pr-review-mcp\.mjs$/);
-  assert.match(structure.args[0], /pr-review-structure-mcp\.mjs$/);
+  assert.equal(review.type, 'stdio');
+  assert.equal(structure.type, 'stdio');
+  assert.equal(review.command, '/bin/sh');
+  assert.equal(structure.command, '/bin/sh');
+  assert.equal(review.args[0], './bin/review-mcp.sh');
+  assert.equal(structure.args[0], './bin/structure-mcp.sh');
+  assert.equal(review.env.AI_REVIEWER_ROOT, '${AI_REVIEWER_ROOT}');
   assert.equal(review.env.REVIEW_MCP_ROOT, '${REVIEW_MCP_ROOT}');
   assert.equal(review.env.OLLAMA_API_KEY, '${OLLAMA_API_KEY}');
   assert.equal(structure.env.STRUCTURE_MCP_ROOT, '${REVIEW_MCP_ROOT}');
@@ -42,4 +137,249 @@ test('mcp.json: два сервера, ключ только как ${OLLAMA_API
   assert.equal(dumped.includes('GITHUB_TOKEN'), false);
   assert.match(dumped, /\$\{OLLAMA_API_KEY\}/);
   assert.equal(/sk-[a-zA-Z0-9]{10,}/.test(dumped), false);
+  assert.equal(dumped.includes('${AI_REVIEWER_ROOT}/cursor-plugin'), false);
+});
+
+test('W-engine: .cursor/mcp.json канонические имена без -ws', async () => {
+  const mcp = JSON.parse(await readFile(join(ROOT, '.cursor/mcp.json'), 'utf8'));
+  assert.deepEqual(Object.keys(mcp.mcpServers), ['ai-reviewer', 'ai-reviewer-structure']);
+  const review = mcp.mcpServers['ai-reviewer'];
+  assert.equal(review.type, 'stdio');
+  assert.equal(review.command, '/bin/sh');
+  assert.match(review.args[0], /\$\{workspaceFolder\}\/cursor-plugin\/bin\/review-mcp\.sh$/);
+  assert.equal(review.env.AI_REVIEWER_ROOT, '${workspaceFolder}');
+  assert.equal(review.env.REVIEW_MCP_ROOT, '${workspaceFolder}');
+});
+
+test('W-consumer: examples/cursor/mcp.json — REVIEW_MCP_ROOT=workspace, engine из env', async () => {
+  const mcp = JSON.parse(await readFile(join(ROOT, 'examples/cursor/mcp.json'), 'utf8'));
+  assert.deepEqual(Object.keys(mcp.mcpServers), ['ai-reviewer', 'ai-reviewer-structure']);
+  const review = mcp.mcpServers['ai-reviewer'];
+  assert.equal(review.type, 'stdio');
+  assert.match(review.args[0], /\$\{env:AI_REVIEWER_ROOT\}\/cursor-plugin\/bin\/review-mcp\.sh$/);
+  assert.equal(review.env.REVIEW_MCP_ROOT, '${workspaceFolder}');
+  assert.equal(review.env.AI_REVIEWER_ROOT, '${env:AI_REVIEWER_ROOT}');
+});
+
+test('skill и rule запрещают mcp_auth / Authenticate', async () => {
+  const skill = await readFile(join(PLUGIN, 'skills/review-loop/SKILL.md'), 'utf8');
+  const rule = await readFile(join(PLUGIN, 'rules/preview-not-gate.mdc'), 'utf8');
+  assert.match(skill, /mcp_auth/);
+  assert.match(skill, /Не вызывай `mcp_auth`/);
+  assert.match(rule, /mcp_auth/);
+  assert.match(rule, /Authenticate/);
+});
+
+test('bin/pr-review-mcp.mjs не импортирует pipeline на верхнем уровне', async () => {
+  const src = await readFile(join(ROOT, 'bin/pr-review-mcp.mjs'), 'utf8');
+  assert.equal(/(?:from|import)\s*\(?\s*['"][^'"]*pipeline\.mjs['"]/.test(src), false);
+  assert.equal(/from\s+['"][^'"]*review-mcp\.mjs['"]/.test(src), false);
+  assert.match(src, /import\('\.\.\/lib\/review-mcp\.mjs'\)/);
+});
+
+test('P-configure: initialize + tools/list через абсолютный node, без node в PATH', async () => {
+  const result = await spawnHandshake(join(PLUGIN, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: ROOT,
+    REVIEW_MCP_ROOT: ROOT,
+    HOME,
+    OLLAMA_API_KEY: '',
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer');
+  const names = result.messages[1].result.tools.map((tool) => tool.name);
+  assert.ok(names.includes('review_route'));
+  assert.ok(names.includes('review_run'));
+});
+
+test('Cheap-without-key: initialize без OLLAMA_API_KEY', async () => {
+  const result = await spawnHandshake(process.execPath, [join(ROOT, 'bin/pr-review-mcp.mjs')], {
+    REVIEW_MCP_ROOT: ROOT,
+    OLLAMA_API_KEY: '',
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer');
+  const names = result.messages[1].result.tools.map((tool) => tool.name);
+  assert.ok(names.includes('review_route'));
+});
+
+test('pr-review-mcp: плейсхолдер REVIEW_MCP_ROOT не валит initialize', async () => {
+  const result = await spawnHandshake(process.execPath, [join(ROOT, 'bin/pr-review-mcp.mjs')], {
+    REVIEW_MCP_ROOT: '${REVIEW_MCP_ROOT}',
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer');
+});
+
+test('P-engine-install: .engine-root, пустой AI_REVIEWER_ROOT, PATH без node', async () => {
+  const dir = await isolatedPlugin({ engineRoot: ROOT });
+  const result = await spawnHandshake(join(dir, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '',
+    REVIEW_MCP_ROOT: '',
+    HOME,
+  }, dir);
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer');
+  const names = result.messages[1].result.tools.map((tool) => tool.name);
+  assert.ok(names.includes('review_route'));
+});
+
+test('плейсхолдеры в env резолвятся через .engine-root', async () => {
+  const dir = await isolatedPlugin({ engineRoot: ROOT });
+  const result = await spawnHandshake(join(dir, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '${AI_REVIEWER_ROOT}',
+    REVIEW_MCP_ROOT: '${REVIEW_MCP_ROOT}',
+    HOME,
+  }, dir);
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer');
+});
+
+test('клон: лаунчер без AI_REVIEWER_ROOT находит engine через cursor-plugin/../..', async () => {
+  const result = await spawnHandshake(join(PLUGIN, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '',
+    REVIEW_MCP_ROOT: '',
+    HOME,
+  }, ROOT);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer');
+});
+
+test('fail-fast: нет engine и нет .engine-root → exit ≠ 0', async () => {
+  const dir = await isolatedPlugin();
+  const result = await spawnFailFast(join(dir, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '',
+    REVIEW_MCP_ROOT: '',
+    HOME,
+  }, dir);
+  assert.notEqual(result.code, 0);
+  assert.ok(result.ms < 2000, `fail-fast ${result.ms}ms`);
+  assert.match(result.stderr, /AI_REVIEWER_ROOT/);
+  assert.match(result.stderr, /install-local/);
+});
+
+test('fail-fast: битый REVIEW_MCP_ROOT → exit ≠ 0', async () => {
+  const dir = await isolatedPlugin({ engineRoot: ROOT });
+  const result = await spawnFailFast(join(dir, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '',
+    REVIEW_MCP_ROOT: '/no/such/ai-reviewer-consumer',
+    HOME,
+  }, dir);
+  assert.notEqual(result.code, 0);
+  assert.ok(result.ms < 2000, `fail-fast ${result.ms}ms`);
+  assert.match(result.stderr, /REVIEW_MCP_ROOT/);
+});
+
+test('fail-fast: битый REVIEW_MCP_ROOT в bin → exit 1', async () => {
+  const result = await spawnFailFast(process.execPath, [join(ROOT, 'bin/pr-review-mcp.mjs')], {
+    REVIEW_MCP_ROOT: '/no/such/ai-reviewer-consumer',
+  }, ROOT);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /REVIEW_MCP_ROOT не существует/);
+});
+
+test('fail-fast: AI_REVIEWER_NODE не исполняемый', async () => {
+  const result = await spawnFailFast(join(PLUGIN, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_NODE: join(tmpdir(), 'no-such-node'),
+    AI_REVIEWER_ROOT: ROOT,
+    REVIEW_MCP_ROOT: ROOT,
+    HOME,
+  }, ROOT);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /AI_REVIEWER_NODE/);
+});
+
+test('fail-fast: нет node в PATH и fallbacks', async (t) => {
+  const extras = ['/opt/homebrew/bin/node', '/usr/local/bin/node'];
+  if (extras.some((p) => existsSync(p))) {
+    t.skip('на машине есть Homebrew/usr local node — PATH-без-node покрыт P-configure');
+    return;
+  }
+  const home = await mkdtemp(join(tmpdir(), 'mcp-home-'));
+  const dir = await isolatedPlugin({ engineRoot: ROOT });
+  const result = await spawnFailFast(join(dir, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '',
+    REVIEW_MCP_ROOT: '',
+    HOME: home,
+  }, dir);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /node ≥ 22 не найден/);
+});
+
+test('install-local.sh пишет .engine-root и абсолютный лаунчер, не путь engine', async () => {
+  const dest = await mkdtemp(join(tmpdir(), 'plugin-dest-'));
+  const result = spawnSync('/bin/sh', [join(PLUGIN, 'bin/install-local.sh'), dest], {
+    encoding: 'utf8',
+    cwd: ROOT,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const engineRoot = (await readFile(join(dest, '.engine-root'), 'utf8')).trim();
+  assert.equal(engineRoot, ROOT);
+  const mcp = JSON.parse(await readFile(join(dest, 'mcp.json'), 'utf8'));
+  assert.equal(mcp.mcpServers['ai-reviewer'].args[0], `${dest}/bin/review-mcp.sh`);
+  assert.equal(mcp.mcpServers['ai-reviewer-structure'].args[0], `${dest}/bin/structure-mcp.sh`);
+  assert.equal(mcp.mcpServers['ai-reviewer'].env.AI_REVIEWER_ROOT, '${AI_REVIEWER_ROOT}');
+  assert.equal(mcp.mcpServers['ai-reviewer'].env.REVIEW_MCP_ROOT, '${REVIEW_MCP_ROOT}');
+  const dumped = JSON.stringify(mcp);
+  assert.equal(dumped.includes(ROOT), false);
+});
+
+test('абсолютный лаунчер: handshake из чужого cwd (не корень плагина)', async () => {
+  const dest = await mkdtemp(join(tmpdir(), 'plugin-dest-'));
+  const alien = await mkdtemp(join(tmpdir(), 'alien-cwd-'));
+  const installed = spawnSync('/bin/sh', [join(PLUGIN, 'bin/install-local.sh'), dest], {
+    encoding: 'utf8',
+    cwd: ROOT,
+  });
+  assert.equal(installed.status, 0, installed.stderr);
+  const launcher = `${dest}/bin/review-mcp.sh`;
+  const result = await spawnHandshake('/bin/sh', [launcher], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '',
+    REVIEW_MCP_ROOT: '',
+    HOME,
+  }, alien);
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  const names = result.messages[1].result.tools.map((tool) => tool.name);
+  assert.ok(names.includes('review_route'));
+});
+
+test('относительный ./bin из чужого cwd не находит лаунчер', async () => {
+  const dest = await mkdtemp(join(tmpdir(), 'plugin-dest-'));
+  const alien = await mkdtemp(join(tmpdir(), 'alien-cwd-'));
+  const installed = spawnSync('/bin/sh', [join(PLUGIN, 'bin/install-local.sh'), dest], {
+    encoding: 'utf8',
+    cwd: ROOT,
+  });
+  assert.equal(installed.status, 0, installed.stderr);
+  const result = await spawnFailFast('/bin/sh', ['./bin/review-mcp.sh'], {
+    PATH: PATH_NO_NODE,
+    HOME,
+  }, alien);
+  assert.notEqual(result.code, 0);
+});
+
+test('structure handshake: tools/list без Rust/пайплайна', async () => {
+  const result = await spawnHandshake(join(PLUGIN, 'bin/structure-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: ROOT,
+    REVIEW_MCP_ROOT: ROOT,
+    HOME,
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer-structure');
+  const names = result.messages[1].result.tools.map((tool) => tool.name);
+  assert.ok(names.includes('structure_context'));
 });

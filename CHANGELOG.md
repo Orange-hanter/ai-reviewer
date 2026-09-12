@@ -10,6 +10,13 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+### Добавлено — холодный старт MCP ([RFC 10](proposals/10-mcp-cold-start.md))
+
+Лаунчер плагина сам находит клон (`.engine-root` / cwd / `AI_REVIEWER_ROOT`). `install-local.sh`
+копирует плагин, пишет якорь и **абсолютный** путь лаунчера (cwd plugin MCP у Cursor — чужое
+окно, не каталог плагина). Handshake (`initialize` / `tools/list`) не импортирует пайплайн.
+`variables.required` пустой — Cursor не показывает Authenticate на stdio.
+
 ### Добавлено — Cursor Plugin и агентные стадии ревью-MCP ([RFC 09](proposals/09-cursor-plugin-mcp.md))
 
 Дешёвый контур без LLM: `review_route`, `review_prescan`, `fp_check`, `fingerprint_check`,

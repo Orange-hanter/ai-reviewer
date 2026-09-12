@@ -10,6 +10,8 @@ owner: ai-reviewer
 
 Тулзы `ai-reviewer` — превью для агента, не merge-гейт. Merge блокирует только CI `pr-review` (`exit 1`). Поле вердикта — `previewWouldBlock`, не `wouldBlock`.
 
+Транспорт — **stdio**, не OAuth. **Не вызывай `mcp_auth`** у namespace `plugin-ai-reviewer-*` / `ai-reviewer*`. Кнопка Authenticate на этом сервере не нужна и не чинит spawn. Если статус `loading` / `error` / в чате только `mcp_auth` — это сломанный stdio (нет engine, нет node, hang handshake), а не «нужно авторизоваться»: логи MCP, `cursor-plugin/bin/install-local.sh`, Reload Window. Не читай файлы репозитория вместо тулзов, пока не исчерпан stdio.
+
 Cloud Agents не видят local stdio MCP — не обходи это HTTP-сервером.
 
 ## Порядок

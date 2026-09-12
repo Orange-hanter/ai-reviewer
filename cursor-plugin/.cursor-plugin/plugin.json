@@ -4,22 +4,30 @@
   "description": "Агентный контур ai-reviewer: дешёвые стадии пайплайна и pinned dry-run MoA. Не merge-гейт.",
   "keywords": ["code-review", "mcp", "pr-review"],
   "variables": {
-    "AI_REVIEWER_ROOT": {
-      "type": "string",
-      "description": "Абсолютный путь к клону пакета ai-reviewer (не в плагин не кладётся)."
+    "type": "object",
+    "properties": {
+      "AI_REVIEWER_ROOT": {
+        "type": "string",
+        "title": "Корень пакета ai-reviewer",
+        "description": "Абсолютный путь к клону пакета (нужен bin/pr-review-mcp.mjs). Движок в плагин не кладётся. Пусто — .engine-root после install-local.sh."
+      },
+      "REVIEW_MCP_ROOT": {
+        "type": "string",
+        "title": "Репозиторий ревью",
+        "description": "Корень confinement: репозиторий потребителя. Пусто — тот же, что engine."
+      },
+      "REVIEW_PROFILE": {
+        "type": "string",
+        "title": "Профиль",
+        "default": "",
+        "description": "Путь к профилю потребителя (REVIEW_PROFILE). Пусто — дефолт движка."
+      },
+      "OLLAMA_API_KEY": {
+        "type": "string",
+        "title": "Ollama API key",
+        "description": "Ключ Ollama Cloud. Значение задаётся в Plugins → Configure, в файлы плагина не кладётся. Для initialize / дешёвых тулзов не нужен."
+      }
     },
-    "REVIEW_MCP_ROOT": {
-      "type": "string",
-      "description": "Репозиторий потребителя: корень confinement для review и structure MCP."
-    },
-    "REVIEW_PROFILE": {
-      "type": "string",
-      "default": "",
-      "description": "Путь к профилю потребителя (REVIEW_PROFILE). Пусто — дефолт движка."
-    },
-    "OLLAMA_API_KEY": {
-      "type": "string",
-      "description": "Ключ Ollama Cloud. Без default: Cursor подставляет из окружения IDE."
-    }
+    "required": []
   }
 }
