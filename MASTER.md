@@ -97,7 +97,7 @@ graph TD
 
 ### RFC 13 — Судья гейта (черновик)
 - **Описание:** стадия-судья поверх `resolveBlockers`; коридор из двух рельсов; вопросы владельцу В1–В3.
-- **Ссылка:** `📁 proposals/13-gate-judge.md | 🗃️ doc:proposals_13-gate-judge_md | 🔑 sha:dc4364b82bf6`
+- **Ссылка:** `📁 proposals/13-gate-judge.md | 🗃️ doc:proposals_13-gate-judge_md | 🔑 sha:504602dff893`
 - **Статус:** `⚪ DRAFT`
 
 ### Cursor Plugin

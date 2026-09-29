@@ -43,7 +43,8 @@ Merge сейчас блокируется фактом находки: есть 
 - **Отчёт и exit code расходятся.** Sticky считает `blockerClusters` через `g[0]?.consensusBlock`
   (`pipeline.mjs:813`), `applyPrescanBlockPolicyJs` гасит флаг выборочно (`lib/findings.mjs:640-650`),
   а prescan-находки идут в `allFindings` первыми (`pipeline.mjs:649-652`). Смешанный кластер
-  «advisory-prescan + LLM-major» даёт exit 1 и «✅ можно мёржить» в sticky. Rust уже на
+  «advisory-prescan + LLM-major» даёт exit 1, а sticky — заголовок «💬 есть замечания» с
+  ✅-строками (`lib/report.mjs:534, 547-551`). Rust уже на
   some-семантике (`rust/src/findings.rs:576-585`). `verdict.blocked` и `verdictReproducibility`
   считаются от того же `blockerClusters` (`lib/report.mjs:533, 594`).
 - **Verifier по умолчанию делает почти все блокеры подтверждёнными.** `REVIEW_VERIFIER` и
@@ -58,7 +59,8 @@ Merge сейчас блокируется фактом находки: есть 
   `findingsFmt.classify` (`pipeline.mjs:830`). Раньше он есть, только если `runVerifierStage`
   отобрал advisory-кандидатов через `routeFindings` (`pipeline.mjs:161-169`) — нужен verifier,
   `verifyAdvisory > 0` и неистёкший дедлайн. Причины скора лежат текстом (`actionabilityReasons`),
-  обратное отображение в ключи — `REASON_KEY_BY_WHY` (`pipeline.mjs:48-50`).
+  обратное отображение в ключи — `REASON_KEY_BY_WHY` (`pipeline.mjs:48-50`). Скоры из стадии
+  verifier посчитаны **до** его вердикта и не содержат +3 за `verified`.
 - **История в футере.** Запись — `footerData` с окном `runs` из 5 (`lib/report.mjs:676-682`),
   slim-находка `{file,line,severity,title,model,dupCount?,fp?}` (`lib/report.mjs:575-582`),
   без ограничения числа. Чтение режет находки до 40 и окно до 5 на обеих ветках
@@ -157,7 +159,12 @@ checkout.
 10. **Eval и strict (GATE-022).** Eval не воспроизводит strict-verifier; фикстура
     `judge-release-soft` проверяет конфигурацию, которой в CI по умолчанию нет. Либо научить
     eval strict-режиму, либо явно пометить фикстуру как non-strict.
-11. **Съехавшие ссылки** в описаниях задач (около двадцати) — поправить при grooming;
+11. **Итог судьи — во все производные (GATE-014, GATE-018, GATE-020).** Кроме `blockers`, от
+    вердикта зависят `blockerClusters` в `buildSummary` (`pipeline.mjs:838`) и payload события
+    `verdict`, который собирается в `lib/report.mjs:705-709` (и `rust/src/report.rs`). Без этого
+    sticky, `verdict.blocked` и `verdictReproducibility` покажут детерминированный исход при
+    изменённом exit code — тот же класс расхождения, что чинит GATE-002.
+12. **Съехавшие ссылки** в описаниях задач (около двадцати) — поправить при grooming;
     основные: `classify` на `:830`, событие `verdict` на `:853`, «Verifier (Pass B)» в
     `docs/configuration.md` на `:126-135`, «Два независимых судьи» в `docs/architecture.md` на
     `:137-142`, счётчик eval ещё и в `docs/architecture.md:188`.
