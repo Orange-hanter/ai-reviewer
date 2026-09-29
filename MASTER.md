@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:7498824e6f63`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:3298ddc462f2`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -95,6 +95,11 @@ graph TD
 - **Ссылка:** `📁 proposals/12-mcp-long-run.md | 🗃️ doc:proposals_12-mcp-long-run_md | 🔑 sha:91f4cd250536`
 - **Статус:** `🟢 VERIFIED`
 
+### RFC 13 — Судья гейта (черновик)
+- **Описание:** стадия-судья поверх `resolveBlockers`; коридор из двух рельсов; вопросы владельцу В1–В3.
+- **Ссылка:** `📁 proposals/13-gate-judge.md | 🗃️ doc:proposals_13-gate-judge_md | 🔑 sha:dc4364b82bf6`
+- **Статус:** `⚪ DRAFT`
+
 ### Cursor Plugin
 - **Описание:** local install, два MCP, skill, rule.
 - **Ссылка:** `📁 cursor-plugin/README.md | 🗃️ doc:cursor-plugin_README_md | 🔑 sha:2ff130c14ca9`
@@ -106,8 +111,8 @@ graph TD
 - **Статус:** `🟢 VERIFIED`
 
 ### Индекс RFC
-- **Описание:** таблица решений 01–12.
-- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:86899851e6db`
+- **Описание:** таблица решений 01–13.
+- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:f32a35aa6049`
 - **Статус:** `🟢 VERIFIED`
 
 ### Changelog
@@ -139,7 +144,7 @@ graph TD
 
 ```json
 {
-  "next_step": "mcp-ide-resilience: MCP-011 (REVIEW_INCREMENTAL на крупном Rust-диффе); затем план gate-judge с GATE-001 (RFC 13)",
+  "next_step": "RFC 13: ответы владельца на В1–В3, затем grooming задач gate-judge по разделу «Поправки к декомпозиции»; GATE-002 можно делать сразу; MCP-011",
   "required_input": "",
   "blocked_by": []
 }
@@ -157,6 +162,12 @@ graph TD
     "missing_info": []
   },
   "changelog": [
+    {
+      "date": "2026-09-29",
+      "action": "RFC 13 (черновик) по сверке плана gate-judge с кодом",
+      "author": "claude",
+      "scope": "master"
+    },
     {
       "date": "2026-09-29",
       "action": "Аудит документации: статусы RFC 07/09/10/12 → active, next_step, реестр канона",
