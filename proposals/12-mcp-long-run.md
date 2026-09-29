@@ -1,10 +1,10 @@
 ---
 type: design
-status: draft
+status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-12
-last_updated: 2026-09-12
+last_updated: 2026-09-29
 ---
 
 # 12 — Долгий MoA в IDE: jobId, wait, spawn без cwd окна
@@ -22,6 +22,8 @@ last_updated: 2026-09-12
 Пока этот RFC не реализован: полный MoA в IDE — CLI `pr-review.mjs --dry-run`, не chat RPC.
 
 ## Текущее состояние
+
+> Снимок кода до реализации. Фазы B–D сделаны в `3f839aa`: `wait`/`jobId` есть в `lib/review-mcp-tools.mjs`, stub sidecar пишется до LLM, git-шаблон `mcp.json` спавнит `$HOME/.cursor/plugins/local/ai-reviewer/bin/…`.
 
 Сверено по коду, не по памяти:
 
@@ -149,6 +151,9 @@ jobId = sha256(canonicalJson({
 ## Миграция
 
 Аддитивно к RFC 08/09/10. Клиенты без `wait` получают sync. Старые `review_findings({ runFingerprint })` после completed работают. Новых required-полей нет. Eval/gate, `EXPORT_VERSION`, номер протокола — без изменений. Реализация B (код `lib/review-mcp.mjs`) не стартует, пока этот документ не в статусе `review`.
+
+> Правило нарушено: B–D вышли в `3f839aa`, когда документ ещё был `draft`, и статус был
+> поднят сразу до `active` задним числом (2026-09-29).
 
 ## Риски и что не делаем
 

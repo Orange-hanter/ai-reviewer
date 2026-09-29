@@ -1,10 +1,10 @@
 ---
 type: design
-status: review
+status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-12
-last_updated: 2026-09-12
+last_updated: 2026-09-29
 ---
 
 # 10 — Холодный старт MCP: корни, лаунчер, handshake
@@ -60,12 +60,12 @@ last_updated: 2026-09-12
 
 `plugin.json` `variables`: JSON Schema `{ type: object, properties }` и `required: []`. Configure — override, не условие спавна.
 
-Command в git [`cursor-plugin/mcp.json`](../cursor-plugin/mcp.json): `"command": "/bin/sh"`, `"args": ["./bin/review-mcp.sh"]` (путь относительно **корня плагина**, не `${AI_REVIEWER_ROOT}/…`).
+Command в git [`cursor-plugin/mcp.json`](../cursor-plugin/mcp.json): `"command": "/bin/sh"`, `"args": ["./bin/review-mcp.sh"]` (путь относительно **корня плагина**, не `${AI_REVIEWER_ROOT}/…`). *Заменено [RFC 12](12-mcp-long-run.md#spawn-плагина-без-cwd-окна): git-шаблон спавнит `sh -c` на `$HOME/.cursor/plugins/local/ai-reviewer/bin/…`, `./bin` больше не канон.*
 
 ### Инсталлятор
 
 - `rsync -a --delete` каталога `cursor-plugin/` → `~/.cursor/plugins/local/ai-reviewer/` (не symlink). Пишет `.engine-root` = абсолютный путь клона, из которого вызвали скрипт. Не трогает `OLLAMA_API_KEY`. Не прописывает путь **engine** в `mcp.json`.
-- **Лаунчеры в установленной копии — абсолютные** (`$dest/bin/review-mcp.sh`). Plugin MCP у Cursor спавнится с cwd чужого окна (не корень плагина): `./bin/review-mcp.sh` резолвится в `{чужой-workspace}/bin/…` → `No such file` → `Connection closed` → в чате `mcp_auth`. Git-шаблон [`cursor-plugin/mcp.json`](../cursor-plugin/mcp.json) остаётся `./bin/…` (относительно корня плагина); живой spawn держит `install-local.sh`.
+- **Лаунчеры в установленной копии — абсолютные** (`$dest/bin/review-mcp.sh`). Plugin MCP у Cursor спавнится с cwd чужого окна (не корень плагина): `./bin/review-mcp.sh` резолвится в `{чужой-workspace}/bin/…` → `No such file` → `Connection closed` → в чате `mcp_auth`. Git-шаблон [`cursor-plugin/mcp.json`](../cursor-plugin/mcp.json) остаётся `./bin/…` (относительно корня плагина); живой spawn держит `install-local.sh`. *(Шаблон позже заменён RFC 12, см. выше.)*
 
 Это единственный путь «скопировал плагин → Reload → тулзы есть» без Customize.
 
@@ -110,7 +110,7 @@ Command в git [`cursor-plugin/mcp.json`](../cursor-plugin/mcp.json): `"command"
 
 ## Миграция
 
-Аддитивно к RFC 09. Протокол ревью-MCP не меняется (`REVIEW_MCP_PROTOCOL_VERSION` = 1). Eval/gate не трогаем. Потребитель с уже заполненным Configure продолжает работать (P-configure). Старый `args` с `${AI_REVIEWER_ROOT}/cursor-plugin/bin/…` в git больше не канон — после `install-local.sh` локальная копия получает **абсолютный** `$dest/bin/review-mcp.sh` (cwd plugin MCP ≠ корень плагина). Git-шаблон остаётся `./bin/…`.
+Аддитивно к RFC 09. Протокол ревью-MCP не меняется (`REVIEW_MCP_PROTOCOL_VERSION` = 1). Eval/gate не трогаем. Потребитель с уже заполненным Configure продолжает работать (P-configure). Старый `args` с `${AI_REVIEWER_ROOT}/cursor-plugin/bin/…` в git больше не канон — после `install-local.sh` локальная копия получает **абсолютный** `$dest/bin/review-mcp.sh` (cwd plugin MCP ≠ корень плагина). Git-шаблон оставался `./bin/…` до RFC 12.
 
 Workspace-имена `-ws` в этом клоне уходят: канон `ai-reviewer` / `ai-reviewer-structure`. Кто держал оба канала — оставляет один.
 

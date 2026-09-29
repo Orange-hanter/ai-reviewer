@@ -1,10 +1,10 @@
 ---
 type: design
-status: review
+status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-12
+last_updated: 2026-09-29
 ---
 
 # 09 — Cursor Plugin и агентные стадии ревью-MCP
@@ -25,6 +25,8 @@ marketplace. Движок в плагин не кладётся (бинарни�
 заявленный ноль npm-зависимостей).
 
 ## Текущее состояние
+
+> Снимок кода до реализации (`0f47f71`, `4a7be89`). Сейчас `cursor-plugin/` есть, `bin/pr-review-mcp.mjs` делает `chdir`. Шаблон `mcp.json` с `./bin/…` позже заменён — см. [RFC 12](12-mcp-long-run.md#spawn-плагина-без-cwd-окна).
 
 Сверено по коду, не по памяти:
 
@@ -140,7 +142,9 @@ cursor-plugin/
 `./bin/review-mcp.sh` / `./bin/structure-mcp.sh` (путь от корня **плагина**, не
 `${AI_REVIEWER_ROOT}/…`; GUI Cursor часто без `node` в PATH; лаунчер ищет бинарь
 и клон движка сам, см. [RFC 10](10-mcp-cold-start.md)). `OLLAMA_API_KEY` только как
-`${OLLAMA_API_KEY}`. `GITHUB_TOKEN` не класть. `STRUCTURE_MCP_ROOT` = `${REVIEW_MCP_ROOT}`
+`${OLLAMA_API_KEY}`. `GITHUB_TOKEN` не класть. *(Заменено [RFC 12](12-mcp-long-run.md#spawn-плагина-без-cwd-окна):
+относительный `./bin/…` резолвился в cwd чужого окна; сейчас `args` — `sh -c` на
+`$HOME/.cursor/plugins/local/ai-reviewer/bin/…`.)* `STRUCTURE_MCP_ROOT` = `${REVIEW_MCP_ROOT}`
 (репозиторий потребителя, не клон движка). `variables` в `plugin.json` — JSON Schema
 `{ type: object, properties }` и `required: []` (иначе Cursor не спавнит stdio
 и показывает Authenticate).

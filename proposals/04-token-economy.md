@@ -3,7 +3,7 @@ type: design
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
+last_updated: 2026-09-29
 ---
 
 # 04 — Экономия токенов без потери качества: что режем и чем доказываем
@@ -119,6 +119,10 @@ last_updated: 2026-09-10
 входными токенами жюри, потом работой refutation — три раза за один шум.
 
 **Гейт решения:** gold-recall не ниже базы. Если падает — откатываем лимит, а не качество.
+
+> Реализовано с отклонениями: env `MOA_SPECIALIST_MAX_ITEMS` не заведён — лимит зашит
+> константой `SPECIALIST_MAX_ITEMS = 8` в `lib/prompt.mjs`; `MOA_REFERENCE_MAX_TOKENS`
+> снижен до 6000, а не 4000 (`lib/config.mjs`, CHANGELOG 0.3.0).
 
 ### 4. Один вызов вместо трёх, когда роли сидят на одной модели · 🟡 риск низкий
 

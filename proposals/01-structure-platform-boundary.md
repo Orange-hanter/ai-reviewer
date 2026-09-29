@@ -1,9 +1,9 @@
 ---
 type: design
-status: review
+status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
+last_updated: 2026-09-29
 ---
 
 # 01 — Граница structure-платформы: часть пакета merge-гейта или соседний пакет
@@ -33,6 +33,8 @@ fixtures и документация.
 правило к обратной ситуации — не к абстракции, а к разрастанию.
 
 ## Текущее состояние
+
+> Снимок кода до реализации. Пункты 1 и 5 сделаны в `507fec1` (тест границы — `test/structure-boundary.test.mjs`); пункт 2 (`loadStructureConfig`) не сделан — `REVIEW_STRUCTURE_*` по-прежнему читает `lib/config.mjs`.
 
 Сверено по `main` после мержа (не по описанию PR):
 

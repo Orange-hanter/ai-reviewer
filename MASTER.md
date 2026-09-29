@@ -4,19 +4,19 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-12
+last_updated: 2026-09-29
 ---
 
 # 🧭 Project Navigator: ai-reviewer
 
-> 📊 Meta: `{"version": "0.3.0", "last_updated": "2026-09-12", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
+> 📊 Meta: `{"version": "0.3.0", "last_updated": "2026-09-29", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
 
 > L0 для агента. Истина по гейту — architecture. Журнал разработки — `docs/dev/journal.md`. RFC — `proposals/`.
 
 ## 1. 🎯 Executive Summary
 
 - **Проект:** `ai-reviewer` — движок AI код-ревью для PR с правом блокировать merge. Чистый ESM, Node ≥ 22, ноль runtime-зависимостей. LLM по умолчанию — Ollama Cloud.
-- **Текущий статус:** `🟢 ACTIVE` — merge-гейт живой; агентный контур RFC 08/09 в пакете (Unreleased).
+- **Текущий статус:** `🟢 ACTIVE` — merge-гейт живой; агентный контур RFC 08/09/10/12 в пакете (Unreleased); ядро частично портировано на Rust с откатом на JS.
 - **Ключевые ограничения:**
   - Гейт **не знает** structure.
   - MCP-превью **не гейт**: `previewWouldBlock` ≠ `exit 1`.
@@ -78,22 +78,22 @@ graph TD
 ### RFC 09 — Cursor Plugin
 - **Описание:** дешёвые стадии, sidecar, git-пин, `cursor-plugin/`.
 - **Ссылка:** `📁 proposals/09-cursor-plugin-mcp.md | 🗃️ doc:proposals_09-cursor-plugin-mcp_md | 🔑 sha:d35848d9886d`
-- **Статус:** `🟡 DRAFT`
+- **Статус:** `🟢 VERIFIED`
 
 ### RFC 10 — Холодный старт MCP
 - **Описание:** матрица P/W, `.engine-root`, handshake без пайплайна, не Authenticate.
 - **Ссылка:** `📁 proposals/10-mcp-cold-start.md | 🗃️ doc:proposals_10-mcp-cold-start_md | 🔑 sha:d490111ce323`
-- **Статус:** `🟡 DRAFT`
+- **Статус:** `🟢 VERIFIED`
 
 ### RFC 11 — HTTP MCP и OAuth (черновик)
 - **Описание:** третий контур hosted/Cloud Agents; не лечение Authenticate на stdio.
 - **Ссылка:** `📁 proposals/11-http-mcp-oauth.md | 🗃️ doc:proposals_11-http-mcp-oauth_md | 🔑 sha:2f4f89c9a793`
 - **Статус:** `⚪ DRAFT`
 
-### RFC 12 — Долгий MoA в IDE (черновик)
+### RFC 12 — Долгий MoA в IDE
 - **Описание:** `wait`/`jobId` против таймаута tools/call; spawn без cwd окна; один канал на потребителя.
 - **Ссылка:** `📁 proposals/12-mcp-long-run.md | 🗃️ doc:proposals_12-mcp-long-run_md | 🔑 sha:fe7c33c348d4`
-- **Статус:** `⚪ DRAFT`
+- **Статус:** `🟢 VERIFIED`
 
 ### Cursor Plugin
 - **Описание:** local install, два MCP, skill, rule.
@@ -115,6 +115,21 @@ graph TD
 - **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:7e82acaaae54`
 - **Статус:** `🟢 VERIFIED`
 
+### README
+- **Описание:** точка входа потребителя: установка, CLI, подключение к CI.
+- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:000000000000`
+- **Статус:** `🟢 VERIFIED`
+
+### Индекс документации
+- **Описание:** все документы `docs/` и соседние README; сюда — всё, чего нет в этом реестре.
+- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:000000000000`
+- **Статус:** `🟢 VERIFIED`
+
+### Бэклог
+- **Описание:** открытые направления и долг слияний вне планов cod-doc.
+- **Ссылка:** `📁 docs/backlog.md | 🗃️ doc:docs_backlog_md | 🔑 sha:000000000000`
+- **Статус:** `🟢 VERIFIED`
+
 ### Стандарт агента
 - **Описание:** границы модулей, DI, fail-open, процесс RFC и релиза.
 - **Ссылка:** `📁 CLAUDE.md | 🗃️ doc:CLAUDE_md | 🔑 sha:a5f357386e6f`
@@ -124,7 +139,7 @@ graph TD
 
 ```json
 {
-  "next_step": "RFC 12 в review (владелец); очередь mcp-ide-resilience: MCP-001 / MCP-006; MoA в чате — CLI, пока wait:false нет",
+  "next_step": "mcp-ide-resilience: MCP-011 (REVIEW_INCREMENTAL на крупном Rust-диффе); затем план gate-judge с GATE-001 (RFC 13)",
   "required_input": "",
   "blocked_by": []
 }
@@ -142,6 +157,12 @@ graph TD
     "missing_info": []
   },
   "changelog": [
+    {
+      "date": "2026-09-29",
+      "action": "Аудит документации: статусы RFC 07/09/10/12 → active, next_step, реестр канона",
+      "author": "claude",
+      "scope": "master"
+    },
     {
       "date": "2026-09-12",
       "action": "RFC 12 (черновик) и план mcp-ide-resilience в реестре",
