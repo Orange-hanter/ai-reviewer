@@ -19,7 +19,7 @@ audience: [next-session-agent, maintainers]
 
 **Сделано:** статусы RFC в frontmatter, реестре и MASTER; пометки «снимок до реализации» в RFC; фаза 3.6 — в Unreleased; `configuration`/`profiles`/`architecture`/`integration`/README/CLAUDE сверены с кодом; битые ссылки в `feedback/` и `fixtures/`. Код не трогали.
 
-**cod-doc.** Файлы `cursor-plugin/README.md` и этот журнал были правлены после импорта, но drift показывал `in_sync` при `file_hash ≠ projection_hash`; ссылку `structure.md#confinement-what-the-server-is-allowed-to-read` cod-doc ошибочно считает битой (слаг заголовка с двоеточием). Оба — баги cod-doc, не документов.
+**cod-doc.** Файлы `cursor-plugin/README.md` и этот журнал были правлены после импорта, но drift показывал `in_sync` при `file_hash ≠ projection_hash`; проверка ссылок cod-doc считает битыми якоря на заголовки `###` — секциями у него заведены только `##` (например `12-mcp-long-run.md#spawn-плагина-без-cwd-окна`), на GitHub они рабочие. Оба — баги cod-doc (ADO-241, ADO-242 в проекте cod-doc), не документов. Документы разложены по дереву cod-doc, Инбокс пуст.
 
 ## 2026-09-12 — RFC 12: долгий MoA в IDE
 
