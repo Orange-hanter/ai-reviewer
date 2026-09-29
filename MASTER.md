@@ -4,12 +4,12 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-29
+last_updated: 2026-09-30
 ---
 
 # 🧭 Project Navigator: ai-reviewer
 
-> 📊 Meta: `{"version": "0.3.0", "last_updated": "2026-09-29", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
+> 📊 Meta: `{"version": "0.3.0", "last_updated": "2026-09-30", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
 
 > L0 для агента. Истина по гейту — architecture. Журнал разработки — `docs/dev/journal.md`. RFC — `proposals/`.
 
@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:3298ddc462f2`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:2df418793059`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -95,10 +95,10 @@ graph TD
 - **Ссылка:** `📁 proposals/12-mcp-long-run.md | 🗃️ doc:proposals_12-mcp-long-run_md | 🔑 sha:91f4cd250536`
 - **Статус:** `🟢 VERIFIED`
 
-### RFC 13 — Судья гейта (черновик)
-- **Описание:** стадия-судья поверх `resolveBlockers`; коридор из двух рельсов; вопросы владельцу В1–В3.
-- **Ссылка:** `📁 proposals/13-gate-judge.md | 🗃️ doc:proposals_13-gate-judge_md | 🔑 sha:504602dff893`
-- **Статус:** `⚪ DRAFT`
+### RFC 13 — Судья гейта
+- **Описание:** стадия-судья поверх `resolveBlockers`; коридор из двух рельсов; усталость вне цели, путь включения через `shadow`.
+- **Ссылка:** `📁 proposals/13-gate-judge.md | 🗃️ doc:proposals_13-gate-judge_md | 🔑 sha:22b84319ff6e`
+- **Статус:** `🟢 VERIFIED`
 
 ### Cursor Plugin
 - **Описание:** local install, два MCP, skill, rule.
@@ -112,7 +112,7 @@ graph TD
 
 ### Индекс RFC
 - **Описание:** таблица решений 01–13.
-- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:f32a35aa6049`
+- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:538fa4312880`
 - **Статус:** `🟢 VERIFIED`
 
 ### Changelog
@@ -144,7 +144,7 @@ graph TD
 
 ```json
 {
-  "next_step": "RFC 13: ответы владельца на В1–В3, затем grooming задач gate-judge по разделу «Поправки к декомпозиции»; GATE-002 можно делать сразу; MCP-011",
+  "next_step": "gate-judge: GATE-002 (fix blockerClusters), затем секция B (история в футере); MCP-011",
   "required_input": "",
   "blocked_by": []
 }
@@ -162,6 +162,12 @@ graph TD
     "missing_info": []
   },
   "changelog": [
+    {
+      "date": "2026-09-30",
+      "action": "RFC 13 принят (В1–В3), задачи gate-judge обновлены",
+      "author": "claude",
+      "scope": "master"
+    },
     {
       "date": "2026-09-29",
       "action": "RFC 13 (черновик) по сверке плана gate-judge с кодом",
