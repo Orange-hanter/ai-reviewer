@@ -3,34 +3,34 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
+last_updated: 2026-09-29
 ---
 
-# Benchmark methodology
+# Методика бенчмарка
 
-Offline precision/recall reporting for the ai-reviewer gold set (`gold/`), aligned with Entelligence-style evaluation.
+Офлайн-отчёт precision/recall по gold-набору ai-reviewer (`gold/`), согласованный с оценкой в стиле Entelligence.
 
-## Dataset
+## Набор данных
 
-- **Frozen diffs** — each case is a committed `diff.patch` plus `meta.json` with human labels.
-- **Types** — `tp` (true positive / must block or must find), `fp` (must not block / must not find noise).
-- **No live repo** — scoring uses findings JSON from a prior run or `--findings` input; LLM is optional.
+- **Замороженные диффы** — каждый кейс — закоммиченный `diff.patch` плюс `meta.json` с человеческой разметкой.
+- **Типы** — `tp` (true positive / обязан заблокировать или обязан найти), `fp` (не должен блокировать / не должен находить шум).
+- **Без живого репозитория** — оценка использует JSON находок из предыдущего прогона или вход `--findings`; LLM опциональна.
 
-## Metrics
+## Метрики
 
-| Metric | Definition |
+| Метрика | Определение |
 |--------|------------|
-| **wouldBlock** | Gate exit code / `wouldBlock` flag matches `meta.expect.wouldBlock`. Primary merge-gate metric. |
-| **Title recall** | For each `mustFindTitles` substring, at least one finding title contains it (case-insensitive). Semantic proxy — not exact string match. |
-| **Location recall** | For each `mustFindLocations` entry, at least one finding sits on that `file` within `lines ± tolerance` (default 3). Language-independent — used by the public set. |
-| **Title precision** | No finding title contains any `mustNotFindTitles` substring. |
-| **Severity ranking** | Reported separately; benchmark does not rank severity tiers — only block vs non-block and title presence. |
+| **wouldBlock** | Exit-код гейта / флаг `wouldBlock` совпадает с `meta.expect.wouldBlock`. Основная метрика merge-гейта. |
+| **Title recall** | Для каждой подстроки из `mustFindTitles` хотя бы один заголовок находки её содержит (без учёта регистра). Семантический прокси — не точное совпадение строк. |
+| **Location recall** | Для каждой записи `mustFindLocations` хотя бы одна находка стоит в этом `file` в пределах `lines ± tolerance` (по умолчанию 3). Не зависит от языка — используется публичным набором. |
+| **Title precision** | Ни один заголовок находки не содержит ни одной подстроки из `mustNotFindTitles`. |
+| **Severity ranking** | Отчитывается отдельно; бенчмарк не ранжирует уровни severity — только block vs non-block и наличие заголовка. |
 
-Title recall and location recall are counted **separately** (`recall` vs `locationRecall`):
+Title recall и location recall считаются **раздельно** (`recall` vs `locationRecall`):
 «нашёл нужное слово» и «попал в нужную строку» — разные величины, и сведение их в одну
 цифру теряет обе.
 
-## Scoring API
+## API оценки
 
 ```js
 import { scoreGoldCase, aggregateBenchmark } from 'ai-reviewer/lib/benchmark.mjs';
@@ -42,17 +42,17 @@ const summary = aggregateBenchmark([{ id, type, expect, score, wouldBlock }]);
 ## CLI
 
 ```bash
-# From prior gold run JSONL (each line: { id, meta, findings, wouldBlock, code })
+# Из JSONL предыдущего gold-прогона (каждая строка: { id, meta, findings, wouldBlock, code })
 npx pr-review-benchmark results.jsonl
 
-# Score findings file against one meta
+# Оценить файл находок против одного meta
 npx pr-review-benchmark --meta gold/tp-real-bugs-unescape/meta.json --findings run.json
 
-# List gold cases (meta-only stub)
+# Список gold-кейсов (заглушка только по meta)
 npx pr-review-benchmark --gold-dir
 ```
 
-Full pipeline shadow eval with LLM remains `pr-review-gold`; `pr-review-benchmark` wraps the same scoring functions without calling models.
+Полный shadow eval пайплайна с LLM — по-прежнему `pr-review-gold`; `pr-review-benchmark` оборачивает те же функции оценки без вызова моделей.
 
 ## Публичный набор (`gold-public/`)
 

@@ -3,48 +3,48 @@ type: architecture
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
+last_updated: 2026-09-29
 last_reviewed: 2026-09-10
 ---
 
-# Structure, contracts and test scenarios
+# Структура, контракты и тестовые сценарии
 
-`pr-review-structure` is an off-PR analysis path. It does not change the merge gate. It produces evidence-backed facts and assessments that cod-doc, agents and CI can consume.
+`pr-review-structure` — путь анализа вне PR. Merge-гейт он не меняет. Он производит факты и оценки, подкреплённые доказательствами, которые потребляют cod-doc, агенты и CI.
 
-## Artifacts
+## Артефакты
 
-The protocol has four versioned schemas in `schemas/`:
+У протокола четыре версионированные схемы в `schemas/`:
 
-- `structure-facts.v1`: boundaries, entities, contracts, dependencies, test inventory and views;
-- `structure-assessment.v1`: coverage observations, scenario statuses, risk assessments and hints;
-- `obligations-export.v1`: documented MUST/SHOULD/MAY obligations supplied by cod-doc;
-- `evidence-receipt.v1`: immutable provenance for every analysis provider.
+- `structure-facts.v1`: границы, сущности, контракты, зависимости, инвентарь тестов и представления;
+- `structure-assessment.v1`: наблюдения покрытия, статусы сценариев, оценки риска и подсказки;
+- `obligations-export.v1`: задокументированные обязательства MUST/SHOULD/MAY, которые поставляет cod-doc;
+- `evidence-receipt.v1`: неизменяемое происхождение (provenance) для каждого провайдера анализа.
 
-Facts and assessments have separate fingerprints. Changing documentation or test evidence does not duplicate code facts.
+У фактов и оценок раздельные отпечатки. Изменение документации или тестовых доказательств не дублирует факты о коде.
 
-## Providers
+## Провайдеры
 
-The producer combines independent capabilities:
+Продюсер объединяет независимые возможности:
 
-- Graphify: topology, communities and call/import candidates;
-- SCIP: exact TypeScript/JavaScript symbol kinds, ranges, references and signatures when present;
-- LCOV: exact file line counts and aggregate function execution;
-- source/ast-grep-style test inventory: test and assertion candidates;
-- Mutation Testing Elements/Stryker reports: killed, survived and uncovered mutants;
-- property reports: seeds, run counts, shrinking and counterexamples.
+- Graphify: топология, сообщества и кандидаты call/import;
+- SCIP: точные виды символов TypeScript/JavaScript, диапазоны, ссылки и сигнатуры, если есть;
+- LCOV: точные счётчики строк по файлу и агрегатное исполнение функций;
+- инвентарь тестов по исходникам в стиле ast-grep: кандидаты тестов и assertion'ов;
+- отчёты Mutation Testing Elements/Stryker: killed, survived и uncovered мутанты;
+- property-отчёты: seed'ы, число прогонов, shrinking и контрпримеры.
 
-Evidence precedence is SCIP/compiler exact → Graphify EXTRACTED → Graphify INFERRED → AMBIGUOUS. A SCIP reference is not treated as a runtime call.
+Приоритет доказательств: SCIP/compiler exact → Graphify EXTRACTED → Graphify INFERRED → AMBIGUOUS. Ссылка SCIP не считается вызовом в рантайме.
 
-Providers emit receipts, never a final `covered` decision. The deterministic assessment engine computes statuses.
+Провайдеры отдают receipts, но никогда — итоговое решение `covered`. Статусы вычисляет детерминированный assessment engine.
 
-## Scenario statuses
+## Статусы сценариев
 
-- `covered`: a confirmed obligation has a unique contract, a linked test, execution evidence and scenario-specific evidence.
-- `partial`: some evidence exists, but the scenario threshold is not met.
-- `missing`: a fresh, complete inventory has a unique contract but no test evidence.
-- `unverifiable`: stale, truncated, ambiguous or temporally mismatched input.
+- `covered`: у подтверждённого обязательства есть уникальный контракт, связанный тест, доказательство исполнения и доказательство, специфичное для сценария.
+- `partial`: часть доказательств есть, но порог сценария не достигнут.
+- `missing`: у свежего полного инвентаря есть уникальный контракт, но нет тестовых доказательств.
+- `unverifiable`: вход устаревший, усечённый, неоднозначный или рассогласованный во времени.
 
-Aggregate LCOV cannot prove an error, boundary or invariant scenario. File coverage is never substituted for function or scenario coverage.
+Агрегатный LCOV не может доказать сценарий ошибки, границы или инварианта. Покрытие файла никогда не подменяет покрытие функции или сценария.
 
 ## CLI
 
@@ -62,52 +62,53 @@ npx pr-review-structure \
   --markdown .ai-review/structure/code-structure.md
 ```
 
-At least one of Graphify, SCIP or LCOV must be readable. Missing optional providers produce warnings and lower the evidence ceiling.
+Читаемым должен быть хотя бы один из Graphify, SCIP или LCOV. Отсутствие опциональных провайдеров даёт предупреждения и понижает потолок доказательности.
 
-## Limits and honesty of the output
+## Лимиты и честность вывода
 
-Entities, dependencies and contracts are capped at the `maxItems` values declared in
-`schemas/structure-facts.v1.schema.json`. `REVIEW_STRUCTURE_MAX_ENTITIES` and
-`REVIEW_STRUCTURE_MAX_EDGES` can lower those caps but not raise them: the producer must not be
-able to emit facts its own schema rejects. When a cap bites, the run reports it in `warnings`
-and sets `provenance.truncated`. Contracts are cut weakest-evidence-first, so heuristic
-`entrypoint` candidates go before proven `implements`/`inherits` contracts.
+Сущности, зависимости и контракты ограничены значениями `maxItems`, объявленными в
+`schemas/structure-facts.v1.schema.json`. `REVIEW_STRUCTURE_MAX_ENTITIES` и
+`REVIEW_STRUCTURE_MAX_EDGES` могут эти лимиты понизить, но не повысить: продюсер не должен
+иметь возможности выдать факты, которые отвергает его собственная схема. Когда лимит срабатывает,
+прогон сообщает об этом в `warnings` и выставляет `provenance.truncated`. Контракты режутся
+начиная с самых слабых доказательств, поэтому эвристические кандидаты `entrypoint` уходят раньше
+доказанных контрактов `implements`/`inherits`.
 
-Anything dropped leaves a trace. Nodes skipped for an unsafe `source_file`, unparsed
-`source_location` values and god-node labels that resolve to more than one entity are counted
-in `warnings` rather than discarded silently. The generated `code-structure.md` states how many
-hints, scenarios and hotspots it omitted — the JSON assessment always holds the full set.
+Всё отброшенное оставляет след. Узлы, пропущенные из-за небезопасного `source_file`,
+неразобранные значения `source_location` и метки god-node, которые разрешаются в несколько
+сущностей, считаются в `warnings`, а не выбрасываются молча. Сгенерированный `code-structure.md`
+указывает, сколько подсказок, сценариев и hotspots он опустил, — JSON-оценка всегда содержит полный набор.
 
-Exit codes:
+Коды выхода:
 
-- `0`: artifacts written, including degraded partial analysis;
-- `1`: no usable source, invalid input or write failure;
-- `2`: invalid CLI usage.
+- `0`: артефакты записаны, включая деградированный частичный анализ;
+- `1`: нет пригодного источника, невалидный вход или сбой записи;
+- `2`: неверное использование CLI.
 
-## SCIP pilot
+## Пилот SCIP
 
-Generate a semantic index in the consumer repository:
+Сгенерировать семантический индекс в репозитории потребителя:
 
 ```bash
 npx @sourcegraph/scip-typescript index
 npx pr-review-structure --scip index.scip --graph .graphify/graphify-out/graph.json
 ```
 
-Graphify remains the fallback. The pilot should compare unresolved/ambiguous symbol joins before and after SCIP before making the indexer mandatory.
+Graphify остаётся fallback. Прежде чем делать индексатор обязательным, пилот должен сравнить неразрешённые/неоднозначные сопоставления символов до и после SCIP.
 
-For library consumers: `analyzeStructure({ scipIndex })` attests a re-serialized
-in-memory index under `memory:index.scip`; callers holding the serialized index
-should pass `scipBuffer` so the receipt hash matches the exact bytes.
+Для потребителей-библиотек: `analyzeStructure({ scipIndex })` аттестует пересериализованный
+индекс в памяти под `memory:index.scip`; вызывающим, у которых есть сериализованный индекс,
+следует передавать `scipBuffer`, чтобы хэш receipt совпадал с точными байтами.
 
-## Mutation and property evidence
+## Mutation- и property-доказательства
 
-Mutation reports are scoped to confirmed MUST contracts, changed contracts, god-nodes and high fan-in partial scenarios. Aggregate mutation score is inventory only; a scenario hint requires a contract-bound surviving or uncovered mutant.
+Отчёты о мутациях ограничены подтверждёнными MUST-контрактами, изменёнными контрактами, god-nodes и partial-сценариями с высоким fan-in. Агрегатный mutation score — только инвентарь; подсказка по сценарию требует выжившего или непокрытого мутанта, привязанного к контракту.
 
-Confirmed error, boundary and invariant obligations generate draft properties. Drafts must be reviewed before execution. A property report is accepted only when its semantic obligation hash still matches.
+Подтверждённые обязательства ошибки, границы и инварианта порождают черновики свойств. Черновики должны пройти ревью до исполнения. Property-отчёт принимается, только если его хэш семантического обязательства всё ещё совпадает.
 
-## Pinned MCP context
+## Закреплённый MCP-контекст
 
-Start the stdio MCP server:
+Запуск stdio MCP-сервера:
 
 ```bash
 npx pr-review-structure-mcp
@@ -115,45 +116,43 @@ npx pr-review-structure-mcp
 
 Полный прогон ревью из чата — другой сервер, `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)): другой корень (`REVIEW_MCP_ROOT`). Этот процесс отдаёт только `structure_context`.
 
-The server exposes `structure_context`. Calls must include:
+Сервер предоставляет `structure_context`. Вызов обязан содержать:
 
-- `factsPath` and `assessmentPath`;
-- either `headSha` or `snapshotFingerprint`;
-- scope/entity/contract refs and a token budget.
+- `factsPath` и `assessmentPath`;
+- либо `headSha`, либо `snapshotFingerprint`;
+- ссылки на scope/сущности/контракты и бюджет токенов.
 
-Where `snapshotFingerprint` comes from: it is the `fingerprint` field of the
-`structure_facts` payload written by a prior `pr-review-structure` run (default
-`<exportDir>/structure-facts.json`). The client reads the exported facts artifact,
-takes its `fingerprint`, and passes it together with the same file as `factsPath` —
-this pins the context to that exact snapshot instead of an implicit "latest".
-There is no circularity: the fingerprint is produced by the export run, consumed
-by later MCP calls.
+Откуда берётся `snapshotFingerprint`: это поле `fingerprint` payload'а `structure_facts`,
+записанного предыдущим прогоном `pr-review-structure` (по умолчанию
+`<exportDir>/structure-facts.json`). Клиент читает экспортированный артефакт фактов,
+берёт его `fingerprint` и передаёт вместе с тем же файлом в качестве `factsPath` —
+это закрепляет контекст за конкретным снимком вместо неявного «последнего».
+Цикла нет: отпечаток производит прогон экспорта, потребляют последующие вызовы MCP.
 
-There is no implicit “latest” for planning or fixing. The response is a bounded BFS slice with fingerprints, temporal alignment, relevant contracts, dependencies, scenarios, hints and suggested files.
+Неявного «последнего» для планирования или исправления нет. Ответ — ограниченный BFS-срез с отпечатками, временным выравниванием, релевантными контрактами, зависимостями, сценариями, подсказками и предлагаемыми файлами.
 
-### Confinement: what the server is allowed to read
+### Confinement — что серверу разрешено читать
 
-`factsPath` and `assessmentPath` arrive **from the client**, so the server treats them as
-untrusted input and never reads them as given. Both are resolved through
-`resolveContainedPath` against a single allowed root:
+`factsPath` и `assessmentPath` приходят **от клиента**, поэтому сервер считает их
+недоверенным входом и никогда не читает как есть. Оба разрешаются через
+`resolveContainedPath` относительно единственного разрешённого корня:
 
 | | |
 |---|---|
-| Root | `STRUCTURE_MCP_ROOT`, or the process working directory when it is unset |
-| Escape attempt | throws `path escapes allowed root: <path>` — the call fails, nothing is read |
-| Symlinks | resolved with `realpath` **before** the containment check, so a link pointing outside the root does not get through |
-| Missing file | containment is still checked against the nearest existing ancestor; only if that ancestor is inside the root does the original `ENOENT` propagate — an absent path outside the root reports the escape, not the absence |
+| Корень | `STRUCTURE_MCP_ROOT` → `REVIEW_MCP_ROOT` → рабочий каталог процесса; незаменённый плейсхолдер `${…}` считается незаданным, несуществующий путь — выход с ошибкой |
+| Попытка выхода | бросает `path escapes allowed root: <path>` — вызов падает, ничего не читается |
+| Symlink'и | разрешаются через `realpath` **до** проверки вложенности, поэтому ссылка, указывающая за пределы корня, не проходит |
+| Отсутствующий файл | вложенность всё равно проверяется по ближайшему существующему предку; исходный `ENOENT` пробрасывается, только если этот предок внутри корня, — отсутствующий путь вне корня сообщает о выходе, а не об отсутствии |
 
-Two consequences worth stating plainly:
+Два следствия, которые стоит сказать прямо:
 
-- **Set `STRUCTURE_MCP_ROOT` explicitly** when the server is not launched from the
-  repository root. The fallback is the working directory, so an agent started elsewhere
-  silently gets a different — possibly wider — root than intended.
-- The root bounds **reading of the artifacts**, not the content of the answer. Facts and
-  assessment written outside the root are simply unreachable; put the export directory
-  inside the root you allow.
+- **Задавайте `STRUCTURE_MCP_ROOT` явно**, когда сервер запускается не из корня
+  репозитория. Fallback — рабочий каталог, поэтому агент, запущенный в другом месте,
+  молча получает другой — возможно, более широкий — корень, чем задумано.
+- Корень ограничивает **чтение артефактов**, а не содержимое ответа. Факты и оценка,
+  записанные вне корня, просто недостижимы; кладите каталог экспорта внутрь разрешённого корня.
 
-Example MCP configuration:
+Пример конфигурации MCP:
 
 ```json
 {
@@ -167,19 +166,19 @@ Example MCP configuration:
 }
 ```
 
-## cod-doc integration
+## Интеграция с cod-doc
 
-cod-doc remains the source of truth for intent:
+cod-doc остаётся источником истины для намерений:
 
-1. export confirmed obligations;
-2. run the structure producer at a pinned commit;
-3. ingest facts and assessment snapshots;
-4. compute structure drift separately from DB↔Markdown projection drift;
-5. expose a task-scoped structure context;
-6. promote evidence-backed gaps into findings/tasks.
+1. экспортировать подтверждённые обязательства;
+2. запустить structure-продюсер на закреплённом коммите;
+3. загрузить снимки фактов и оценки;
+4. вычислить structure drift отдельно от drift проекции DB↔Markdown;
+5. отдать structure-контекст в рамках задачи;
+6. продвинуть подкреплённые доказательствами пробелы в findings/tasks.
 
-Generated Markdown is a convenience projection with `source_of_truth: false`. It must not overwrite specification documents automatically.
+Сгенерированный Markdown — удобная проекция с `source_of_truth: false`. Автоматически перезаписывать документы спецификации он не должен.
 
-## Public API
+## Публичный API
 
-The package root exports parsers, providers, assessment helpers, drift/link/waiver helpers, export functions and the MCP handler. Consumers can embed these without invoking the CLI.
+Корневой экспорт пакета отдаёт парсеры, провайдеры, хелперы оценки, хелперы drift/link/waiver, функции экспорта и MCP-обработчик. Потребители могут встраивать их без вызова CLI.

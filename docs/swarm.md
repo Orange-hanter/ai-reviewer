@@ -3,50 +3,49 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
+last_updated: 2026-09-29
 ---
 
-# Swarm contract (E22 / E23)
+# Контракт swarm (E22 / E23)
 
-Machine-readable bridge between **ai-reviewer** (merge gate) and a PR-swarm
-orchestrator (ZAIrgRush and similar). Same principle as ZAIrgRush
-`strong=verdict`: two independent judges — swarm must not self-certify merge.
+Машиночитаемый мост между **ai-reviewer** (merge-гейт) и оркестратором PR-swarm
+(ZAIrgRush и подобные). Тот же принцип, что `strong=verdict` в ZAIrgRush: два независимых
+судьи — swarm не может сам себе сертифицировать merge.
 
-## Where it appears
+## Где появляется
 
-Every JSON export (`REVIEW_EXPORT=1`) includes a `swarm` object. A sidecar
-`<toolName>-swarm.json` is written next to the main artifact for consumers that
-only need the contract.
+Каждый JSON-экспорт (`REVIEW_EXPORT=1`) содержит объект `swarm`. Рядом с основным
+артефактом пишется sidecar `<toolName>-swarm.json` — для потребителей, которым нужен
+только контракт.
 
-The contract is defined by `buildSwarmVerdict` in [`lib/swarm.mjs`](../lib/swarm.mjs). The export
-attaches it in [`buildReviewJson`](../lib/export.mjs) through the Rust port or its JS reference
-copy `buildSwarmVerdictJs`; both are held to `lib/swarm.mjs` by parity tests.
+Контракт задаёт `buildSwarmVerdict` в [`lib/swarm.mjs`](../lib/swarm.mjs). Экспорт
+прикладывает его в [`buildReviewJson`](../lib/export.mjs) через Rust-порт или его эталонную
+JS-копию `buildSwarmVerdictJs`; обе сверяются с `lib/swarm.mjs` parity-тестами.
 
-## Shape (`version: 1`)
+## Форма (`version: 1`)
 
-| Field | Meaning |
+| Поле | Значение |
 |-------|---------|
-| `role` | Always `external-verdict` |
-| `wouldBlock` | Same as gate exit intent for this run |
-| `strong` | `true` only if `wouldBlock` **and** every blocker is independently confirmed (`prescan` or `verifierStatus === 'verified'`) |
-| `blockers` | Slim blocker list (file/line/severity/source/prescan/verifierStatus/blastCaller) |
-| `blastScope` | Graphify metrics + `affected_files` |
-| `suggestedScopeFiles` | **E23**: paths from `affected_files` that are **not** in the PR diff — expand swarm task scope |
-| `verdict` | Sticky reproducibility blob when present |
-| `notes` | Human-readable hints for logs |
+| `role` | Всегда `external-verdict` |
+| `wouldBlock` | То же, что намерение гейта по exit-коду в этом прогоне |
+| `strong` | `true` только если `wouldBlock` **и** каждый блокер независимо подтверждён (`prescan` или `verifierStatus === 'verified'`) |
+| `blockers` | Урезанный список блокеров (file/line/severity/source/prescan/verifierStatus/blastCaller) |
+| `blastScope` | Метрики Graphify + `affected_files` |
+| `suggestedScopeFiles` | **E23**: пути из `affected_files`, которых **нет** в диффе PR, — расширение scope задачи swarm |
+| `verdict` | Blob воспроизводимости из sticky, если есть |
+| `notes` | Подсказки для логов в человекочитаемом виде |
 
-Soft blast majors without verifier never set `strong` (they also do not set
-`wouldBlock` under the soft-gate). Advisory-only noise stays out of the
-external verdict.
+Soft blast-majors без verifier никогда не выставляют `strong` (и `wouldBlock` при
+soft-гейте тоже не выставляют). Шум уровня advisory во внешний вердикт не попадает.
 
-## Orchestrator usage
+## Использование оркестратором
 
-1. Read `<tool>-swarm.json` (or `swarm` from the main JSON).
-2. If `strong === true` → treat as second-judge **block** (do not merge / do not
-   mark swarm verdict as pass).
-3. If `wouldBlock && !strong` → advisory for swarm; do not equate with a hard
-   external block.
-4. Union `suggestedScopeFiles` into task scope beyond the PR diff.
+1. Прочитать `<tool>-swarm.json` (или `swarm` из основного JSON).
+2. Если `strong === true` → считать это **блоком** второго судьи (не мержить / не
+   помечать вердикт swarm как pass).
+3. Если `wouldBlock && !strong` → для swarm это advisory; не приравнивать к жёсткому
+   внешнему блоку.
+4. Объединить `suggestedScopeFiles` со scope задачи сверх диффа PR.
 
-Public helpers: `buildSwarmVerdict`, `isStrongBlocker`, `suggestedScopeFiles`,
-`SWARM_CONTRACT_VERSION` from the package root export.
+Публичные хелперы из корневого экспорта пакета: `buildSwarmVerdict`, `isStrongBlocker`,
+`suggestedScopeFiles`, `SWARM_CONTRACT_VERSION`.

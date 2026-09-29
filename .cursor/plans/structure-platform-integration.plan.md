@@ -522,19 +522,19 @@ V1:
 
 Создать:
 
-- `[lib/structure.mjs](lib/structure.mjs)` — orchestration/cache/partial results;
-- `[lib/structure-provider.mjs](lib/structure-provider.mjs)`;
-- `[lib/structure-evidence.mjs](lib/structure-evidence.mjs)` — EvidenceProvider/Receipt normalization and validation;
-- `[lib/structure-scip.mjs](lib/structure-scip.mjs)` — TS/JS SCIP pilot;
-- `[lib/structure-graphify.mjs](lib/structure-graphify.mjs)`;
-- `[lib/structure-boundaries.mjs](lib/structure-boundaries.mjs)`;
-- `[lib/structure-lcov.mjs](lib/structure-lcov.mjs)`;
-- `[lib/structure-tests.mjs](lib/structure-tests.mjs)` — test inventory + ast-grep evidence;
-- `[lib/structure-scenarios.mjs](lib/structure-scenarios.mjs)`;
-- `[lib/structure-assessments.mjs](lib/structure-assessments.mjs)`;
-- `[lib/structure-hints.mjs](lib/structure-hints.mjs)`;
-- `[lib/structure-export.mjs](lib/structure-export.mjs)`;
-- `[bin/pr-review-structure.mjs](bin/pr-review-structure.mjs)`.
+- `lib/structure.mjs` — orchestration/cache/partial results;
+- `lib/structure-provider.mjs` (не создан);
+- `lib/structure-evidence.mjs` — EvidenceProvider/Receipt normalization and validation;
+- `lib/structure-scip.mjs` — TS/JS SCIP pilot;
+- `lib/structure-graphify.mjs`;
+- `lib/structure-boundaries.mjs` (не создан);
+- `lib/structure-lcov.mjs`;
+- `lib/structure-tests.mjs` — test inventory + ast-grep evidence;
+- `lib/structure-scenarios.mjs` (не создан);
+- `lib/structure-assessments.mjs`;
+- `lib/structure-hints.mjs` (не создан);
+- `lib/structure-export.mjs`;
+- `bin/pr-review-structure.mjs`.
 
 Обновить profile/config/index/package/docs; добавить modern/legacy Graphify, LCOV, obligations и tests fixtures.
 

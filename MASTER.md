@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:9c45c7113933`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:ec6b36a8d2a9`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -102,7 +102,7 @@ graph TD
 
 ### Structure-контур
 - **Описание:** facts/assessment; MCP `structure_context`; ничего не блокирует.
-- **Ссылка:** `📁 docs/structure.md | 🗃️ doc:docs_structure_md | 🔑 sha:59370d9344d1`
+- **Ссылка:** `📁 docs/structure.md | 🗃️ doc:docs_structure_md | 🔑 sha:851a4569ca1c`
 - **Статус:** `🟢 VERIFIED`
 
 ### Индекс RFC
