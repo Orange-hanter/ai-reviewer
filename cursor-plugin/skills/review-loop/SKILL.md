@@ -25,10 +25,10 @@ Cloud Agents не видят local stdio MCP — не обходи это HTTP-�
 3. `fp_check` — не чини код, если `match: true`.
 4. По желанию `fingerprint_check` — код под находкой ещё там?
 5. `review_run` — **последним**, только когда дешёвое не ответило. Единственный вызов с LLM. Всегда **`wait: false`**. Забери `jobId` из stub (`status: running`).
-6. Хвост — `review_findings` по `jobId` (пока running — пустой список; после completed можно и `runFingerprint`). Sidecar на диске переживает рестарт процесса, не обрыв RPC.
+6. Хвост — `review_findings` по `jobId` (пока running — пустой список; после completed можно и `runFingerprint`). Sidecar на диске переживает и обрыв RPC, и рестарт процесса.
 
 Не запускай MoA на каждый edit. Хуков `afterFileEdit` нет и быть не должно.
 
 Дифф — файл внутри `REVIEW_MCP_ROOT`. `headSha` обязателен; грязное дерево — `uncommitted: true`.
 
-Structure — отдельный сервер `structure_context`, не смешивать с ревью.
+Structure — отдельный сервер `ai-reviewer-structure` (тулза `structure_context`), не смешивать с ревью.

@@ -3,7 +3,7 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
+last_updated: 2026-09-29
 ---
 
 # Документация ai-reviewer
@@ -22,6 +22,11 @@ last_updated: 2026-09-10
 | [false-positives.md](false-positives.md) | Семейства ложных срабатываний, защиты, петля обучения |
 | [model-tuning.md](model-tuning.md) | Роли моделей, температуры, размер чанка, reasoning effort |
 | [review-quality.md](review-quality.md) | Разбор низкого сигнала ревью: замер, причины по коду, план |
+| [structure.md](structure.md) | Structure-контур: facts/assessment/obligations, провайдеры, MCP; вне гейта |
+| [benchmark-public.md](benchmark-public.md) | Замер на публичных диффах (`gold-public/`): precision/recall и разбор промахов |
+| [backlog.md](backlog.md) | Открытые направления и долг слияний вне планов cod-doc |
+| [../proposals/README.md](../proposals/README.md) | Реестр RFC: решения, дорогие для отката, до кода |
+| [../cursor-plugin/README.md](../cursor-plugin/README.md) | Cursor Plugin: установка, два MCP, skill и команды |
 
 Рядом с кодом:
 
@@ -30,5 +35,6 @@ last_updated: 2026-09-10
 | [../feedback/README.md](../feedback/README.md) | Формат журнала 👍/👎, promote паттернов |
 | [../fixtures/README.md](../fixtures/README.md) | Golden fixtures для eval без LLM |
 | [../gold/README.md](../gold/README.md) | Размеченные диффы для shadow-прогона с LLM |
+| [../gold-public/README.md](../gold-public/README.md) | Публичный набор: как отобраны кейсы, отбракованные кандидаты |
 | [../examples/ci/](../examples/ci/) | Шаблоны workflow для потребителя |
 | [../profiles/orakul.json](../profiles/orakul.json) | Reference-профиль (он же — база регрессионных тестов) |

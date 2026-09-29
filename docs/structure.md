@@ -113,7 +113,7 @@ Start the stdio MCP server:
 npx pr-review-structure-mcp
 ```
 
-Полный прогон ревью из чата — другой сервер, `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)): другой корень (`REVIEW_MCP_ROOT`), другой TTL. Этот процесс отдаёт только `structure_context`.
+Полный прогон ревью из чата — другой сервер, `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)): другой корень (`REVIEW_MCP_ROOT`). Этот процесс отдаёт только `structure_context`.
 
 The server exposes `structure_context`. Calls must include:
 

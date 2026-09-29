@@ -3,7 +3,7 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-12
+last_updated: 2026-09-29
 ---
 
 # Cursor Plugin для ai-reviewer
@@ -44,7 +44,7 @@ Configure (**Customize → Plugins → Configure**) — опциональный
 `$dest/bin/review-mcp.sh`. cwd plugin MCP у Cursor — часто другое окно; относительный `./bin`
 даёт `Connection closed`. Лаунчер сам находит Node и клон движка. `type` — `stdio`.
 
-В Agent chat: `/review-prescan`, `/review-preview`.
+В Agent chat: `/review-prescan`, `/review-preview`, `/fp-check`, `/structure-context`.
 
 ## Workspace MCP (W)
 
@@ -56,7 +56,7 @@ Configure (**Customize → Plugins → Configure**) — опциональный
 
 | Сервер | Bin | Тулзы |
 |--------|-----|--------|
-| `ai-reviewer` | `bin/pr-review-mcp.mjs` | `review_route`, `review_prescan`, `fp_check`, `fingerprint_check`, `review_artifact`, `review_run`, `review_findings` |
+| `ai-reviewer` | `bin/pr-review-mcp.mjs` | `review_route`, `review_prescan`, `fp_check`, `fingerprint_check`, `review_artifact`, `review_run`, `review_findings`; при `REVIEW_MCP_EXTRA=1` ещё `blast_scope`, `actionability_explain`, `review_metrics` |
 | `ai-reviewer-structure` | `bin/pr-review-structure-mcp.mjs` | `structure_context` |
 
 `STRUCTURE_MCP_ROOT` = тот же `REVIEW_MCP_ROOT` (репозиторий потребителя), не клон движка.

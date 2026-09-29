@@ -47,27 +47,27 @@ graph TD
 
 ### Как вести лог
 - **Описание:** куда писать journal / execution-log / CHANGELOG / RFC; sync в cod-doc.
-- **Ссылка:** `📁 docs/dev/README.md | 🗃️ doc:docs_dev_README_md | 🔑 sha:33834b8bc50f`
+- **Ссылка:** `📁 docs/dev/README.md | 🗃️ doc:docs_dev_README_md | 🔑 sha:4ed5f72ce9ed`
 - **Статус:** `🟢 VERIFIED`
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:aefa246dc7b9`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:00bf2fc45c03`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
 - **Описание:** execution-log реализации MCP и Cursor Plugin.
-- **Ссылка:** `📁 docs/dev/log/2026-09-10-rfc-08-09-mcp-plugin.md | 🗃️ doc:docs_dev_log_2026-09-10-rfc-08-09-mcp-plugin_md | 🔑 sha:054715c0736e`
+- **Ссылка:** `📁 docs/dev/log/2026-09-10-rfc-08-09-mcp-plugin.md | 🗃️ doc:docs_dev_log_2026-09-10-rfc-08-09-mcp-plugin_md | 🔑 sha:b170bd76399b`
 - **Статус:** `🟢 VERIFIED`
 
 ### Архитектура гейта
 - **Описание:** поток router → prescan → MoA → verifier → FP → гейт.
-- **Ссылка:** `📁 docs/architecture.md | 🗃️ doc:docs_architecture_md | 🔑 sha:79818f73cce5`
+- **Ссылка:** `📁 docs/architecture.md | 🗃️ doc:docs_architecture_md | 🔑 sha:04237a60479b`
 - **Статус:** `🟢 VERIFIED`
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:95c01e43883a`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:9c45c7113933`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -77,12 +77,12 @@ graph TD
 
 ### RFC 09 — Cursor Plugin
 - **Описание:** дешёвые стадии, sidecar, git-пин, `cursor-plugin/`.
-- **Ссылка:** `📁 proposals/09-cursor-plugin-mcp.md | 🗃️ doc:proposals_09-cursor-plugin-mcp_md | 🔑 sha:d35848d9886d`
+- **Ссылка:** `📁 proposals/09-cursor-plugin-mcp.md | 🗃️ doc:proposals_09-cursor-plugin-mcp_md | 🔑 sha:9965d2d623d6`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 10 — Холодный старт MCP
 - **Описание:** матрица P/W, `.engine-root`, handshake без пайплайна, не Authenticate.
-- **Ссылка:** `📁 proposals/10-mcp-cold-start.md | 🗃️ doc:proposals_10-mcp-cold-start_md | 🔑 sha:d490111ce323`
+- **Ссылка:** `📁 proposals/10-mcp-cold-start.md | 🗃️ doc:proposals_10-mcp-cold-start_md | 🔑 sha:17b7ed83442e`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 11 — HTTP MCP и OAuth (черновик)
@@ -92,47 +92,47 @@ graph TD
 
 ### RFC 12 — Долгий MoA в IDE
 - **Описание:** `wait`/`jobId` против таймаута tools/call; spawn без cwd окна; один канал на потребителя.
-- **Ссылка:** `📁 proposals/12-mcp-long-run.md | 🗃️ doc:proposals_12-mcp-long-run_md | 🔑 sha:fe7c33c348d4`
+- **Ссылка:** `📁 proposals/12-mcp-long-run.md | 🗃️ doc:proposals_12-mcp-long-run_md | 🔑 sha:91f4cd250536`
 - **Статус:** `🟢 VERIFIED`
 
 ### Cursor Plugin
 - **Описание:** local install, два MCP, skill, rule.
-- **Ссылка:** `📁 cursor-plugin/README.md | 🗃️ doc:cursor-plugin_README_md | 🔑 sha:e58726a8c069`
+- **Ссылка:** `📁 cursor-plugin/README.md | 🗃️ doc:cursor-plugin_README_md | 🔑 sha:2ff130c14ca9`
 - **Статус:** `🟢 VERIFIED`
 
 ### Structure-контур
 - **Описание:** facts/assessment; MCP `structure_context`; ничего не блокирует.
-- **Ссылка:** `📁 docs/structure.md | 🗃️ doc:docs_structure_md | 🔑 sha:5053444b3ee7`
+- **Ссылка:** `📁 docs/structure.md | 🗃️ doc:docs_structure_md | 🔑 sha:59370d9344d1`
 - **Статус:** `🟢 VERIFIED`
 
 ### Индекс RFC
 - **Описание:** таблица решений 01–12.
-- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:7083655d0877`
+- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:86899851e6db`
 - **Статус:** `🟢 VERIFIED`
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:7e82acaaae54`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:a975f50f3989`
 - **Статус:** `🟢 VERIFIED`
 
 ### README
 - **Описание:** точка входа потребителя: установка, CLI, подключение к CI.
-- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:000000000000`
+- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:8a2c17944ec9`
 - **Статус:** `🟢 VERIFIED`
 
 ### Индекс документации
 - **Описание:** все документы `docs/` и соседние README; сюда — всё, чего нет в этом реестре.
-- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:000000000000`
+- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:e62555178e57`
 - **Статус:** `🟢 VERIFIED`
 
 ### Бэклог
 - **Описание:** открытые направления и долг слияний вне планов cod-doc.
-- **Ссылка:** `📁 docs/backlog.md | 🗃️ doc:docs_backlog_md | 🔑 sha:000000000000`
+- **Ссылка:** `📁 docs/backlog.md | 🗃️ doc:docs_backlog_md | 🔑 sha:cd61791fe667`
 - **Статус:** `🟢 VERIFIED`
 
 ### Стандарт агента
 - **Описание:** границы модулей, DI, fail-open, процесс RFC и релиза.
-- **Ссылка:** `📁 CLAUDE.md | 🗃️ doc:CLAUDE_md | 🔑 sha:a5f357386e6f`
+- **Ссылка:** `📁 CLAUDE.md | 🗃️ doc:CLAUDE_md | 🔑 sha:f6c410eaae6c`
 - **Статус:** `🟢 VERIFIED`
 
 ## 4. ⚡ Quick Actions & Handoffs

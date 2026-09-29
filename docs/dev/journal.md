@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-12
+last_updated: 2026-09-29
 audience: [next-session-agent, maintainers]
 ---
 
@@ -12,6 +12,14 @@ audience: [next-session-agent, maintainers]
 
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
+
+## 2026-09-29 — аудит документации
+
+**Зачем.** Документы разошлись с кодом: RFC 07/09/10/12 реализованы, но числились `review`/`draft`; `integration.md` обещал fail-closed без LLM-ключа, которого нет; CHANGELOG относил фазу 3.6 Rust (`export`/`metrics`, `413273d`) к 0.3.0, хотя она пришла мержем #18 (`014e048`) после тега; Rust-слой и часть env гейта не были описаны.
+
+**Сделано:** статусы RFC в frontmatter, реестре и MASTER; пометки «снимок до реализации» в RFC; фаза 3.6 — в Unreleased; `configuration`/`profiles`/`architecture`/`integration`/README/CLAUDE сверены с кодом; битые ссылки в `feedback/` и `fixtures/`. Код не трогали.
+
+**cod-doc.** Файлы `cursor-plugin/README.md` и этот журнал были правлены после импорта, но drift показывал `in_sync` при `file_hash ≠ projection_hash`; ссылку `structure.md#confinement-what-the-server-is-allowed-to-read` cod-doc ошибочно считает битой (слаг заголовка с двоеточием). Оба — баги cod-doc, не документов.
 
 ## 2026-09-12 — RFC 12: долгий MoA в IDE
 
@@ -48,7 +56,7 @@ audience: [next-session-agent, maintainers]
 **cod-doc.** Проект `ai-reviewer` зарегистрирован (`project add` + `init`). Канон с
 frontmatter в БД; L0 — `MASTER.md` с реестром хэшей. Как вести лог — [README.md](README.md).
 
-**Не сделано в этой сессии:** коммиты (план: RFC → фаза A → B → plugin); live Ollama до находок; публичный Marketplace.
+**Не сделано в этой сессии:** коммиты (план: RFC → фаза A → B → plugin; закоммичено в тот же день — `eeb77ab`, `9d668ce`, `0f47f71`, `4a7be89`, `4527b77`); live Ollama до находок; публичный Marketplace.
 
 ## 2026-09-05 — 0.3.0
 

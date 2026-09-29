@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-10
+last_updated: 2026-09-29
 ---
 
 # Документация для агента и разработчика
@@ -38,5 +38,8 @@ cod-doc doc drift -p ai-reviewer --all # edited_in_place == 0
 ```
 
 Новый файл в дереве — `cod-doc import docs -p ai-reviewer` (с exclude fixtures/gold/examples).
-Не регистрировать `profiles/*.md`: это payload `repoRules` в промпт, не документ.
+Не регистрировать `profiles/*.md` и `examples/consumers/*/repo-rules.md`: это payload `repoRules`
+в промпт, не документ. Вне cod-doc также README каталогов данных (`fixtures/`, `gold/`,
+`gold-public/`, `examples/`), `.github/` и `.cursor/plans/`: они живут в репозитории, а
+`docs/README.md` на них ссылается.
 `doc export` не трогать: проекция на диск ещё не round-trip.

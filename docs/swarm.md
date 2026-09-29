@@ -18,8 +18,9 @@ Every JSON export (`REVIEW_EXPORT=1`) includes a `swarm` object. A sidecar
 `<toolName>-swarm.json` is written next to the main artifact for consumers that
 only need the contract.
 
-Built by [`lib/swarm.mjs`](../lib/swarm.mjs) and attached in
-[`buildReviewJson`](../lib/export.mjs).
+The contract is defined by `buildSwarmVerdict` in [`lib/swarm.mjs`](../lib/swarm.mjs). The export
+attaches it in [`buildReviewJson`](../lib/export.mjs) through the Rust port or its JS reference
+copy `buildSwarmVerdictJs`; both are held to `lib/swarm.mjs` by parity tests.
 
 ## Shape (`version: 1`)
 

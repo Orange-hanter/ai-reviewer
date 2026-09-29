@@ -3,8 +3,8 @@ type: architecture
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
-last_reviewed: 2026-09-10
+last_updated: 2026-09-29
+last_reviewed: 2026-09-29
 ---
 
 # Архитектура
@@ -30,7 +30,7 @@ flowchart TB
   subgraph pipeline [pipeline.mjs]
     ROUTE[router: skip / light / full]
     PARSE[parseDiff + чанки]
-    CTX[файлы целиком + blast-radius]
+    CTX[окна ±40 строк вокруг изменений + blast-radius]
     PRE[prescan: eslint + ast-grep]
     ENG[engine: advisors → aggregator]
     VER[verifier Pass B]
@@ -57,13 +57,20 @@ flowchart TB
 | `pipeline.mjs` | `createReviewPipeline()`, `run()` / `runDetailed()`, `runReview()` — оркестрация |
 | `lib/profile.mjs` | [Профиль проекта](profiles.md): маркеры, правила, раскладка, пути |
 | `lib/config.mjs` | `loadReviewConfig()` — профиль + env + CLI в один замороженный объект |
+| `lib/router.mjs` | Классификация путей диффа и маршрут skip / light / full |
 | `lib/diff.mjs` | Парсинг diff, чанкинг, аннотация номеров строк |
+| `lib/context-window.mjs` | Окна контекста ±`REVIEW_CONTEXT_MARGIN` вокруг изменённых строк (advisors, жюри) и строк-кандидатов (verifier); короткий файл — целиком ([RFC 07](../proposals/07-windowed-file-context.md)) |
+| `lib/incremental.mjs` | Инкрементальный прогон: перенос находок файлов с неизменным входом модели (`REVIEW_INCREMENTAL`, [RFC 05](../proposals/05-incremental-review.md)) |
 | `lib/graphify.mjs` | `graphify affected` → blast-radius изменённых символов |
 | `lib/blast-findings.mjs` | Детерминированные major по cross-layer/community callers (soft: блок merge только после verifier) |
 | `lib/prescan.mjs`, `lib/astgrep.mjs`, `lib/prescan-shared.mjs` | eslint + ast-grep по изменённым файлам |
 | `lib/engine.mjs` | MoA и consensus, fallback моделей, дедлайн прогона |
-| `lib/ollama.mjs` | SSE-чат, JSON-mode, ретраи, адаптивный семафор по 429 |
+| `lib/chunk-routing.mjs` | Чанк без исполняемого файла → один агрегатор без жюри ([RFC 04](../proposals/04-token-economy.md)) |
+| `lib/specialist-merge.mjs` | Роли на одной модели — одним вызовом и разбор ответа обратно по ролям (RFC 04) |
+| `lib/llm.mjs` | OpenAI-compatible чат: SSE, JSON-mode, ретраи, адаптивный семафор по 429 (`lib/ollama.mjs` — deprecated re-export) |
+| `lib/cost.mjs` | Учёт токенов и оценка стоимости прогона (`REVIEW_PRICE_JSON`) |
 | `lib/prompt.mjs` | Системные промпты: aggregator, advisors, verifier |
+| `lib/prompt-layout.mjs` | Раскладка сообщений под префиксный кэш: общая рамка и контекст чанка до инструкции роли (RFC 04) |
 | `lib/specialists.mjs` | Роли advisors + refutation жюри |
 | `lib/verifier.mjs` | Pass B: доказать / отклонить / понизить кандидатов в блокеры |
 | `lib/findings.mjs` | Нормализация, FP-фильтр, кластеризация, гейт |
@@ -83,6 +90,15 @@ flowchart TB
 | `cursor-plugin/` | Cursor Plugin: команды, skill, rule; оба MCP. Не гейт |
 | `lib/observability.mjs`, `lib/metrics.mjs` | JSONL-лог прогонов и сводка по нему |
 | `lib/eval.mjs` | Golden fixtures без LLM |
+| `rust/` | Rust-порт части `lib/*.mjs`: обёртка зовёт бинарь из `rust/target/debug/`, при отсутствии бинаря — JS (см. ниже) |
+
+**Rust-слой.** Модули `diff`, `router`, `findings`, `engine`, `llm`, `prompt`, `specialists`,
+`verifier`, `report`, `github`, `export`, `actionability`, `metrics`, `config`/`profile`,
+`json` и `structure-*` — тонкие JS-обёртки над бинарями в `rust/target/debug/` (JSON на stdin).
+Бинаря нет — работает эталонный JS; `AI_REVIEWER_<MOD>_BIN` переопределяет путь,
+`AI_REVIEWER_<MOD>_FORCE_JS=1` включает чистый JS. Расхождение сторон ловят скрипты
+`rust/parity/*.parity.mjs` (`npm run check:parity`). Оркестрация (`pipeline.mjs`,
+`chunk-routing`, `specialist-merge`, `incremental`) остаётся в JS.
 
 ## Ключевые решения
 
@@ -170,6 +186,8 @@ skill, rule). Находки в чате advisory; `previewWouldBlock` не бл
 |-----|---------|
 | Юнит + контракты | `npm test` |
 | Golden fixtures без LLM (16 кейсов) | `npm run eval` |
+| Rust: `cargo build` + `cargo test` + паритет JS ↔ Rust | `npm run check:rust` (паритет отдельно — `npm run check:parity`) |
+| Всё выше, как в CI | `npm run check` |
 | Shadow-прогон с LLM на размеченных диффах | `OLLAMA_API_KEY=… npx pr-review-gold` |
 
 Регрессионный набор гоняется под reference-профилем `profiles/orakul.json` — тем же, на

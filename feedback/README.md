@@ -56,7 +56,7 @@ node feedback/promote-feedback.mjs --aggregate
 
 ## CI
 
-Workflow [pr-review-feedback.yml](../../../.github/workflows/pr-review-feedback.yml):
+Workflow [pr-review-feedback.yml](../examples/ci/pr-review-feedback.yml) (шаблон для потребителя):
 
 - trigger: daily cron, label `ai-review-fp` или `workflow_dispatch`
 - trusted-copy из `origin/main` (anti pwn-request)
@@ -75,7 +75,7 @@ Weekly promote читает только уже смерженный `fp-feedbac
 3. `npx pr-review-eval` — green.
 4. PR.
 
-Пошагово → [fixtures/README.md](../fixtures/README.md) и спека §11.2.
+Пошагово → [fixtures/README.md](../fixtures/README.md).
 
 ## Env
 

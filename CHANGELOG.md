@@ -10,6 +10,13 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+### Добавлено — Rust-порт `export`/`metrics` (фаза 3.6)
+
+Сборка артефакта экспорта (JSON/SARIF/swarm) и метрик прогона портирована в Rust
+(`rust/src/export.rs`, `rust/src/metrics.rs`) под parity-тестами; `lib/export.mjs` и
+`lib/metrics.mjs` — обёртки с откатом на JS, как у остальных модулей. Коммит `413273d` вошёл
+в `main` мержем после тега v0.3.0, хотя раньше был записан в секцию 0.3.0.
+
 ### Добавлено — долгий MoA в IDE ([RFC 12](proposals/12-mcp-long-run.md))
 
 `review_run` принимает `wait` (default `true`). `wait: false` сразу отдаёт stub с `jobId`;
@@ -87,11 +94,11 @@ Cursor Plugin: каталог `cursor-plugin/` (два MCP, slash-команды
 
 ### Добавлено — Rust-ядро под тем же публичным API
 
-Горячие и чистые части движка портированы в Rust (`rust/`, фазы 0–3.6, 25 шагов):
+Горячие и чистые части движка портированы в Rust (`rust/`, фазы 0–3.5):
 `diff`, `json` (толерантный ремонт JSON от модели), `findings`, `router`, `actionability`,
 `config`/`profile`, весь structure-контур (`scip`, `lcov`, `graphify`, `tests`, `mutation`,
 `evidence`, `assessments`, `protocol`, `mcp`), `llm` (HTTP + SSE + ретраи), чистые части
-`engine`, `specialists`, `prompt`, `verifier`, `github`, `report`, `export`/`metrics`.
+`engine`, `specialists`, `prompt`, `verifier`, `github`, `report`.
 
 Контракт для потребителя не изменился: `lib/*.mjs` — тонкие обёртки с прежними экспортами и
 прежней синхронностью. Правила деградации:

@@ -37,7 +37,7 @@ npx pr-review-eval --json   # machine-readable
 node --test test/pr-review.eval.test.mjs
 ```
 
-CI: step в [pr-review.yml](../../../.github/workflows/pr-review.yml).
+CI: шаг «Eval harness fixtures» в [ci.yml](../.github/workflows/ci.yml).
 
 ## Добавить кейс вручную
 
