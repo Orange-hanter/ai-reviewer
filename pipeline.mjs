@@ -10,6 +10,7 @@ import { createGraphifyClient } from './lib/graphify.mjs';
 import { createGithubClient } from './lib/github.mjs';
 import { createReviewEngine } from './lib/engine.mjs';
 import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings, attachFingerprints } from './lib/findings.mjs';
+import { buildRepoPathIndex, listRepoFiles } from './lib/absent-path.mjs';
 import { BLAST_FINDING_SOURCE } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
@@ -274,10 +275,10 @@ async function notifyTelegram(cfg, log, { pr, counts, total, htmlUrl, reason }) 
  * FP-фильтр → beforeResolve → resolveBlockers: единый путь для fail-closed и основного pipeline.
  * Возвращает findings, clusters, blockers, список снятых FP-паттернами находок и результат beforeResolve.
  */
-export async function runGateResolution({ findings: inputFindings, changedPaths, gate, prescanCfg, patternsFile, log, beforeResolve }) {
+export async function runGateResolution({ findings: inputFindings, changedPaths, gate, prescanCfg, patternsFile, repoIndex, log, beforeResolve }) {
   const beforeFp = inputFindings;
   const beforeFpCount = beforeFp.length;
-  const afterFp = filterFalsePositiveFindings(beforeFp, changedPaths, log, { patternsFile });
+  const afterFp = filterFalsePositiveFindings(beforeFp, changedPaths, log, { patternsFile, repoIndex });
   const afterFpCount = afterFp.length;
   const afterFpSet = new Set(afterFp);
   const fpRemoved = beforeFp.filter((f) => !afterFpSet.has(f));
@@ -301,6 +302,7 @@ export function createReviewPipeline(cfg, deps = {}) {
   const findingsFmt = deps.findingsFmt ?? createFindingsFormatter(cfg);
   const prescan = deps.prescan ?? createPrescanRunner(cfg, { log });
   const telegramNotifier = deps.notifyTelegram ?? notifyTelegram;
+  const repoFiles = deps.repoFiles ?? (() => listRepoFiles());
 
   async function finishObs(obs, data) {
     if (!obs?.enabled) return;
@@ -609,6 +611,11 @@ export function createReviewPipeline(cfg, deps = {}) {
         ...dedupeAgainstPrescan(llmFindings, prescanResult.findings),
       ];
       logFindingsStage(obs, 'after_llm_merge', allFindings);
+      // Дерево репозитория для FP-семейства 7 («файла нет» о файле вне PR). null — дерево
+      // не читается или чужое (см. buildRepoPathIndex): фильтр тогда — только паттерны.
+      const repoIndex = allFindings.length
+        ? buildRepoPathIndex(await repoFiles(), changedPaths)
+        : null;
 
       if (!ok.length && !nothingToReview && (gate.llmRequired || !allFindings.length)) {
         const why = reviews.map((r) => `${r.model}: ${r.error}`).join('; ');
@@ -619,7 +626,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         // refutation/verifier — LLM-стадии, при полном аутедже недоступны по определению.
         const gateResolution = await runGateResolution({
           findings: allFindings, changedPaths, gate, prescanCfg: cfg.prescan,
-          patternsFile: cfg.feedback?.patternsFile, log,
+          patternsFile: cfg.feedback?.patternsFile, repoIndex, log,
         });
         allFindings = gateResolution.findings;
         // Отпечатки до экспорта: артефакт этой ветки (LLM-аутедж, находки только от prescan)
@@ -713,7 +720,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       // на известные ложные находки, а refutation может понизить severity уже отфильтрованного.
       const gateResolution = await runGateResolution({
         findings: allFindings, changedPaths, gate, prescanCfg: cfg.prescan,
-        patternsFile: cfg.feedback?.patternsFile, log,
+        patternsFile: cfg.feedback?.patternsFile, repoIndex, log,
         beforeResolve: async (fpFilteredFindings) => {
           let currentFindings = fpFilteredFindings;
 
