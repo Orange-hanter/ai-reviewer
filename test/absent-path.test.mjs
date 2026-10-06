@@ -38,6 +38,25 @@ test('absent-path: отсутствие символа в существующе
   assert.equal(claim('валидация отсутствует в `src/helpers.ts`'), null);
 });
 
+test('absent-path: «не найден/is missing» о содержимом существующего файла — верная находка, не снимаем', () => {
+  const tree = buildRepoPathIndex([...TREE, 'src/auth/guard.ts', 'config/csp.json'], ['src/a.ts']);
+  const c = (body) => findAbsentButExistingPath({ title: 't', body, file: 'src/a.ts' }, tree);
+  assert.equal(c('`src/auth/guard.ts` не найден в списке провайдеров — эндпоинт без авторизации'), null);
+  assert.equal(c('`config/csp.json` is missing the frame-ancestors directive'), null);
+  assert.equal(c('`config/csp.json` не существует как политика для /admin'), null);
+});
+
+test('absent-path: разрешение не шире настоящего резолвера', () => {
+  const tree = buildRepoPathIndex(
+    [...TREE, 'src/data.json', 'src/esm.ts', 'packages/x/lib/cache/index.ts', 'apps/y/lib/cache/index.ts'],
+    ['src/a.ts'],
+  );
+  const c = (body) => findAbsentButExistingPath({ title: 't', body, file: 'src/a.ts' }, tree);
+  assert.equal(c("Cannot find module './data'"), null, '.json без расширения TS не резолвит');
+  assert.equal(c("Cannot find module '@/lib/cache'"), null, 'два кандидата по суффиксу — неизвестно, куда ведёт алиас');
+  assert.equal(c("Cannot find module './esm.js'"), 'src/esm.ts', 'ESM-TS: .js в спецификаторе → .ts');
+});
+
 test('absent-path: голое имя файла ищем только в каталоге находки', () => {
   assert.equal(claim('helpers.ts не найден', 'other/x.ts'), null);
   assert.equal(resolveMentionedPath('helpers.ts', 'src/a.ts', idx), 'src/helpers.ts');
@@ -67,4 +86,12 @@ test('filterFalsePositiveFindings: repoIndex снимает находку се�
   assert.deepEqual(kept.map((f) => f.title), ['IDOR']);
   assert.ok(logs.some((m) => m.includes('src/helpers.ts')));
   assert.equal(filterFalsePositiveFindings(findings, ['src/a.ts']).length, 2);
+});
+
+test('filterFalsePositiveFindings: prescan-находку о неразрешённом импорте дерево не перебивает', () => {
+  const prescan = {
+    file: 'src/a.ts', line: 1, severity: 'major', title: 'import/no-unresolved',
+    body: "Unable to resolve path to module './helpers'", model: 'eslint', prescan: true,
+  };
+  assert.equal(filterFalsePositiveFindings([prescan], ['src/a.ts'], () => {}, { repoIndex: idx }).length, 1);
 });
