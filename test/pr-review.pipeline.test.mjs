@@ -126,6 +126,12 @@ test('pipeline: «модуля нет» о файле из дерева репо
 
   const noTree = await runPipeline({ diff: CODE_DIFF, reviews: [absent] });
   assert.equal(noTree.code, 1, 'дерево не прочитано — фильтр выключен, гейт как раньше');
+
+  const broken = await runPipeline({
+    diff: CODE_DIFF, reviews: [absent],
+    mutateDeps: (deps) => { deps.repoFiles = async () => { throw new Error('git сломан'); }; },
+  });
+  assert.equal(broken.code, 1, 'сбой чтения дерева — fail-open: фильтр выключен, прогон не падает');
 });
 
 test('pipeline: post-then-delete — старые инлайны чистятся ПОСЛЕ постинга, новые исключены', async () => {

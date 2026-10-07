@@ -68,6 +68,7 @@ test('absent-path: чужое или пустое дерево → индекс�
   assert.equal(buildRepoPathIndex(['x/y.ts'], ['a.ts', 'b.ts']), null);
   assert.equal(buildRepoPathIndex(null, ['a.ts']), null);
   assert.equal(buildRepoPathIndex([], []), null);
+  assert.ok(buildRepoPathIndex(['src/a.ts'], ['./src/a.ts']), 'пути PR нормализуются так же, как дерево');
   assert.equal(findAbsentButExistingPath({ body: 'Файл `src/helpers.ts` не существует' }, null), null);
 });
 

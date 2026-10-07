@@ -614,8 +614,11 @@ export function createReviewPipeline(cfg, deps = {}) {
       // Дерево репозитория для FP-семейства 7 («файла нет» о файле вне PR). null — дерево
       // не читается или чужое (см. buildRepoPathIndex): фильтр тогда — только паттерны.
       const repoIndex = allFindings.length
-        ? buildRepoPathIndex(await repoFiles(), changedPaths)
+        ? buildRepoPathIndex(await Promise.resolve().then(repoFiles).catch(() => null), changedPaths)
         : null;
+      // Выключенный фильтр не должен быть невидимым: иначе «защита не работала» не отличить
+      // от «ложных находок не было».
+      if (allFindings.length && !repoIndex) log('FP-семейство 7 выключено: дерево репозитория не прочитано или чужое');
 
       if (!ok.length && !nothingToReview && (gate.llmRequired || !allFindings.length)) {
         const why = reviews.map((r) => `${r.model}: ${r.error}`).join('; ');
