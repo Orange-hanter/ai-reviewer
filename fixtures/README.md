@@ -12,6 +12,7 @@ Golden PR-кейсы для регрессии post-processing + gate **без L
 | `diff.patch` | unified diff (для `changedPaths` и FP-filter) |
 | `findings.json` | `{ "findings": [...] }` — mock-вывод «модели» |
 | `verifier.json` | опц. `{ "verdicts": [...] }` — mock Pass B (R3) |
+| `repo-files.txt` | опц. дерево репозитория, путь на строку — для FP-семейства 7 («файла нет» о файле вне PR) |
 | `findings[].advisorClaims` | опц. refutation R5 |
 | `findings[].prescan` | опц. eslint-prescan finding (R6) |
 

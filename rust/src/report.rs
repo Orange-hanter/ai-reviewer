@@ -1484,7 +1484,7 @@ pub fn build_summary(
             "\n<details><summary>🗑 Отфильтровано как известные FP ({})</summary>\n\n{rows}\n\n",
             fp_removed.len(),
         ));
-        md.push_str("> _Скрыто FP-паттернами из feedback (`ops/pr-review/feedback/fp-patterns.jsonl`). Если среди них есть верное замечание — это ошибка паттерна, поправьте его._\n\n</details>\n");
+        md.push_str("> _Скрыто FP-паттернами из feedback (`ops/pr-review/feedback/fp-patterns.jsonl`) или сверкой с деревом репозитория («файла нет» о файле вне PR; путь — в логе прогона). Если среди них есть верное замечание — это ошибка фильтра, поправьте его._\n\n</details>\n");
     }
 
     let blast_summary = {
