@@ -43,6 +43,8 @@ function mkDeps({ reviews, graphify = { buildBlastRadius: async () => [] }, veri
   const deps = {
     log: () => {},
     die: (m) => { throw new Error(`die: ${m}`); },
+    // Дерево репозитория не читаем: иначе тест зависел бы от `git ls-files` каталога запуска.
+    repoFiles: async () => null,
     graphify,
     prescan: {
       run: async () => ({
@@ -108,6 +110,28 @@ test('pipeline: critical с confidence≥0.8 → блок (exit 1), inline + sti
   assert.equal(calls.postReview[0].inline[0].path, 'foo.ts');
   assert.equal(calls.postReview[0].inline[0].line, 3);
   assert.ok(calls.upsertSticky[0].includes('Merge заблокирован'));
+});
+
+test('pipeline: «модуля нет» о файле из дерева репозитория вне PR → снят как FP, merge не блокирует', async () => {
+  const absent = {
+    ...criticalReview,
+    findings: [{ ...criticalReview.findings[0], title: 'импорт несуществующего модуля', body: "Cannot find module './bar'" }],
+  };
+  const withTree = await runPipeline({
+    diff: CODE_DIFF, reviews: [absent],
+    mutateDeps: (deps) => { deps.repoFiles = async () => ['foo.ts', 'bar.ts']; },
+  });
+  assert.equal(withTree.code, 0, 'bar.ts есть в дереве — блокер ложный');
+  assert.ok(withTree.calls.upsertSticky[0].includes('Отфильтровано как известные FP (1)'));
+
+  const noTree = await runPipeline({ diff: CODE_DIFF, reviews: [absent] });
+  assert.equal(noTree.code, 1, 'дерево не прочитано — фильтр выключен, гейт как раньше');
+
+  const broken = await runPipeline({
+    diff: CODE_DIFF, reviews: [absent],
+    mutateDeps: (deps) => { deps.repoFiles = async () => { throw new Error('git сломан'); }; },
+  });
+  assert.equal(broken.code, 1, 'сбой чтения дерева — fail-open: фильтр выключен, прогон не падает');
 });
 
 test('pipeline: post-then-delete — старые инлайны чистятся ПОСЛЕ постинга, новые исключены', async () => {

@@ -1,0 +1,40 @@
+{
+  "findings": [
+    {
+      "file": "app/server/routes/orders.ts",
+      "line": 4,
+      "severity": "critical",
+      "confidence": 0.93,
+      "title": "Импорт несуществующего модуля pricing",
+      "body": "Импорт `../services/pricing` указывает на несуществующий файл — сборка упадёт.",
+      "model": "m1"
+    },
+    {
+      "file": "app/server/routes/orders.ts",
+      "line": 6,
+      "severity": "major",
+      "confidence": 0.9,
+      "title": "templates не найден",
+      "body": "Cannot find module './templates' — каталога нет в PR.",
+      "model": "m2"
+    },
+    {
+      "file": "app/server/routes/orders.ts",
+      "line": 5,
+      "severity": "critical",
+      "confidence": 0.92,
+      "title": "Импорт audit-log без файла",
+      "body": "Модуль `../services/audit-log` не существует в репозитории: импорт упадёт при старте.",
+      "model": "m1"
+    },
+    {
+      "file": "app/server/routes/orders.ts",
+      "line": 24,
+      "severity": "minor",
+      "confidence": 0.7,
+      "title": "Нет обработки отсутствующего шаблона",
+      "body": "Если `./templates/index.ts` не существует в окружении, loadTemplate бросит ENOENT без обработки.",
+      "model": "m2"
+    }
+  ]
+}

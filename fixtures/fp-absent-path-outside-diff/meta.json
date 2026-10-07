@@ -1,0 +1,11 @@
+{
+  "id": "fp-absent-path-outside-diff",
+  "description": "«модуля нет» о файле, который есть в репозитории, но не в PR → фильтруется (семейство 7); модуль, которого нет в дереве, и рантайм-«если файла нет» остаются",
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "findingCount": 2,
+    "titles": ["Импорт audit-log без файла"],
+    "noTitles": ["Импорт несуществующего модуля pricing", "templates не найден"]
+  }
+}
