@@ -49,8 +49,8 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `OLLAMA_API_KEY` | — | Обязателен для LLM-слоя |
 | `OLLAMA_BASE_URL` | `https://ollama.com/v1` | API base |
 | `REVIEW_MODE` | `moa` | `moa` \| `consensus` |
-| `MOA_REFERENCE_MODELS` | `kimi-k2.7-code,glm-5.2,deepseek-v4-flash` | Advisors (prose) |
-| `MOA_SPECIALIST_MODELS` | `security:deepseek-v4-flash,correctness:kimi-k2.7-code,architecture:glm-5.2` | Роль → модель |
+| `MOA_REFERENCE_MODELS` | `kimi-k2.7-code,glm-5.3,glm-5.3-flash` | Advisors (prose) |
+| `MOA_SPECIALIST_MODELS` | `security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3` | Роль → модель |
 | `MOA_AGGREGATOR` | `minimax-m3` | Жюри-агрегатор (JSON) |
 | `MOA_REFERENCE_TEMPERATURE` | `0.3` | Advisors |
 | `MOA_AGGREGATOR_TEMPERATURE` | `0.4` | Aggregator |
