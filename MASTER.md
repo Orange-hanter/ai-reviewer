@@ -102,7 +102,7 @@ graph TD
 
 ### RFC 14 — Карточки символов
 - **Описание:** строка объявления того, что вызывает изменённый код, во входе модели; семейство FP 8 («символа нет» по графу); шаг 0 — замер до кода.
-- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:4bcc941fc590`
+- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:0263374caf12`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 15 — Наряды по косвенным признакам
