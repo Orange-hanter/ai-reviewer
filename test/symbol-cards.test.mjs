@@ -11,7 +11,7 @@ const {
   extractUsedIdentifiers, scanDeclaration, findDeclarationEnd, buildSymbolCards, selectChunkCards,
   symbolCardsHashInput, renderSymbolCard, addedLinesOfSection, declarationRegex, createLineReader, packageImportedNames,
   resolveCardNode, hasLocalBinding, symbolCardsOutcome, isAbsenceClaim,
-  relativeImportBindings, resolveImportPath, extractNamespaceCalls, cardDeclaration,
+  relativeImportBindings, resolveImportPath, extractNamespaceCalls, cardDeclaration, maskNonCode,
 } = await import('../lib/symbol-cards.mjs');
 const { buildGraphIndex } = await import('../lib/graphify.mjs');
 const { backfillMissing } = await import('../lib/config.mjs');
@@ -624,4 +624,40 @@ test('решение 4: REVIEW_VERIFIER_SYMBOL_CARDS=1 — карточки фа
   const off = await runWithCards(env, { findings });
   assert.ok(off.verifyCtx, 'verifier вызван');
   assert.equal(off.verifyCtx.symbolCards, undefined);
+});
+
+test('маска: строка внутри многострочного литерала или комментария не даёт вызовов', () => {
+  const file = [
+    'const sql = `',
+    "  -- Postgres materialises a pg_constraint row (contype 'n') for every",
+    '  select ${quote(name)} from t',
+    '`;',
+    '/*',
+    '  helper(1) в комментарии',
+    '*/',
+    'run(x);',
+  ];
+  const masked = maskNonCode(file);
+  assert.equal(masked.length, file.length);
+  assert.ok(!masked[1].includes('row'), 'текст литерала замаскирован');
+  assert.ok(masked[2].includes('quote(name)'), 'код в ${…} сохранён');
+  assert.ok(!masked[5].includes('helper'), 'блочный комментарий замаскирован');
+  assert.deepEqual([...extractUsedIdentifiers(masked).keys()].sort(), ['quote', 'run']);
+  // в отборе: файл на диске совпадает с диффом — строка литерала не даёт кандидата `row`
+  const graph = buildGraphIndex({ nodes: [{ id: 'r', label: 'row()', source_file: 'lib/r.mjs', source_location: 'L1' }], links: [] });
+  const r = buildSymbolCards(['src/q.ts'], {
+    graphIndex: graph,
+    sections: new Map([['src/q.ts', `    2: +${file[1]}`]]),
+    windows: new Map(),
+    readLines: (f) => (f === 'src/q.ts' ? file : f === 'lib/r.mjs' ? ['export function row(x) {}'] : null),
+  });
+  assert.equal(r.metrics.candidates, 0);
+});
+
+test('маска и лексер линейны на цепочке делений', () => {
+  const line = `a${'/a'.repeat(50000)}`;
+  const t0 = performance.now();
+  maskNonCode([line]);
+  scanDeclaration([`const x = ${line};`], 0);
+  assert.ok(performance.now() - t0 < 500);
 });

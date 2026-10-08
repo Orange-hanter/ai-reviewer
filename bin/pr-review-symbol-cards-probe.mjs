@@ -14,9 +14,9 @@
 // (заголовок без `(` у функции — `export const X =`). Выборка карточек — для ручной разметки
 // «вводит ли в заблуждение»: эту долю автоматически не посчитать.
 //
-// Оговорка: файлы читаются из ТЕКУЩЕГО дерева, а диффы — исторические. Чем старше коммит,
-// тем больше карточек отсеется как `stale_graph` / `not_a_declaration`; для оценки
-// точности это консервативно (отсев, а не ложные карточки).
+// Оговорка: файлы коммита читаются в версии коммита, остальные — из ТЕКУЩЕГО дерева (граф
+// построен по нему). Чем старше коммит, тем больше карточек отсеется как `stale_graph` /
+// `not_a_declaration`; для оценки точности это консервативно (отсев, а не ложные карточки).
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -62,14 +62,25 @@ for (const sha of shas) {
   if (!paths.length) continue;
   totals.files += paths.length;
   const sections = extractFileDiffSections(annotated);
+  // Файлы коммита — в ЕГО версии (как дерево PR в CI): номера строк диффа совпадают с файлом,
+  // маска литералов и импорты верны. Остальное — из текущего дерева, согласованного с графом.
+  const inCommit = new Set(files.keys());
+  const atSha = new Map();
+  const readAt = (p) => {
+    if (!inCommit.has(p)) return readLines(p);
+    if (!atSha.has(p)) {
+      try { atSha.set(p, git('show', `${sha}:${p}`).split('\n')); } catch { atSha.set(p, null); }
+    }
+    return atSha.get(p);
+  };
   // контекст — как в пайплайне: окна вокруг изменённых строк по текущему тексту файла
   const contentMap = new Map();
   for (const p of paths) {
-    const lines = readLines(p);
+    const lines = readAt(p);
     if (lines) contentMap.set(p, `### ${p}\n\`\`\`\n${lines.join('\n')}\n\`\`\``);
   }
   const windows = windowChunkFileContents(contentMap, files, { margin, minChars: 8000 }).map;
-  const r = buildSymbolCards(paths, { graphIndex, sections, windows, readLines, root: repo });
+  const r = buildSymbolCards(paths, { graphIndex, sections, windows, readLines: readAt, root: repo });
   for (const k of ['candidates', 'resolved', 'cards', 'via_import']) totals[k] += r.metrics[k] || 0;
   for (const [k, v] of Object.entries(r.metrics.skip_reasons)) skip[k] = (skip[k] || 0) + v;
   for (const [caller, cards] of r.byPath) for (const c of cards) allCards.push({ sha: sha.slice(0, 8), caller, ...c });
