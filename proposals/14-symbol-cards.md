@@ -1,6 +1,6 @@
 ---
 type: design
-status: draft
+status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-10-08
@@ -10,6 +10,8 @@ last_updated: 2026-10-08
 # 14 — Карточки символов: модель видит объявление того, что вызывает изменённый код
 
 > Категория: 🔵 Архитектура · Риск: средний · Зависимости: [RFC 04](04-token-economy.md) (цена входа и методика замера), [RFC 05](05-incremental-review.md) (хэш входа), [RFC 07](07-windowed-file-context.md) (окна контекста), [`docs/false-positives.md`](../docs/false-positives.md) (семейства 4, 6, 7)
+
+Принято 2026-10-08. Декомпозиция — план `symbol-cards` в cod-doc (задачи `CARD-xxx`).
 
 ## Контекст
 
