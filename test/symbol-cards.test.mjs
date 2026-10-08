@@ -11,6 +11,7 @@ const {
   extractUsedIdentifiers, scanDeclaration, findDeclarationEnd, buildSymbolCards, selectChunkCards,
   symbolCardsHashInput, renderSymbolCard, addedLinesOfSection, declarationRegex, createLineReader, packageImportedNames,
   resolveCardNode, hasLocalBinding, symbolCardsOutcome, isAbsenceClaim,
+  relativeImportBindings, resolveImportPath, extractNamespaceCalls, cardDeclaration,
 } = await import('../lib/symbol-cards.mjs');
 const { buildGraphIndex } = await import('../lib/graphify.mjs');
 const { backfillMissing } = await import('../lib/config.mjs');
@@ -433,4 +434,130 @@ test('аудит 1.5: symbolCardsOutcome связывает находки с к
   assert.deepEqual(out.names, ['parseLimits']);
   assert.deepEqual(out.llm, { findings: 4, mentioning: 1, absenceClaims: 1 });
   assert.deepEqual(out.final, { findings: 2, mentioning: 1, inline: 1, bySeverity: { major: 1 }, byVerifier: { verified: 1 } });
+});
+
+// ── Аудит RFC 14, открытые пункты ──
+
+test('аудит 1.12: relativeImportBindings — именованные, псевдонимы, default, namespace, require; пакеты мимо', () => {
+  const b = relativeImportBindings([
+    "import { parse, build as make } from './a.mjs';",
+    "import def, { other } from '../b';",
+    "import * as util from './util/index.js';",
+    "import { ok } from 'node:assert';",
+    "const helpers = require('./helpers');",
+    'import {',
+    '  multi,',
+    "} from './c';",
+  ]);
+  assert.deepEqual(Object.fromEntries(b), {
+    parse: { spec: './a.mjs', imported: 'parse' },
+    make: { spec: './a.mjs', imported: 'build' },
+    def: { spec: '../b', imported: 'default' },
+    other: { spec: '../b', imported: 'other' },
+    util: { spec: './util/index.js', imported: '*' },
+    helpers: { spec: './helpers', imported: '*' },
+    multi: { spec: './c', imported: 'multi' },
+  });
+});
+
+test('аудит 1.12: resolveImportPath — точный путь, .js → .ts, расширения, index', () => {
+  const files = new Set(['src/a.ts', 'src/lib/b.mjs', 'src/util/index.ts', 'shared/c.tsx']);
+  const has = (f) => files.has(f);
+  assert.equal(resolveImportPath('src/x.ts', './a.js', has), 'src/a.ts');
+  assert.equal(resolveImportPath('src/x.ts', './lib/b.mjs', has), 'src/lib/b.mjs');
+  assert.equal(resolveImportPath('src/x.ts', './util', has), 'src/util/index.ts');
+  assert.equal(resolveImportPath('src/x.ts', '../shared/c', has), 'shared/c.tsx');
+  assert.equal(resolveImportPath('src/x.ts', './missing', has), null);
+  assert.equal(resolveImportPath('x.ts', '../../escape', has), null);
+});
+
+test('аудит 1.12: extractNamespaceCalls — только для namespace-импортов', () => {
+  const calls = extractNamespaceCalls(['const r = util.parse(x) + other.parse(y);', 'util.parse(z); util.build();'], new Set(['util']));
+  assert.deepEqual([...calls.values()], [{ ns: 'util', fn: 'parse', count: 2 }, { ns: 'util', fn: 'build', count: 1 }]);
+});
+
+const IMPORT_GRAPH = buildGraphIndex({
+  nodes: [
+    { id: 'p1', label: 'parse()', source_file: 'src/a.ts', source_location: 'L1' },
+    { id: 'p2', label: 'parse()', source_file: 'src/other.ts', source_location: 'L1' },
+    { id: 'u1', label: 'build()', source_file: 'src/util/index.ts', source_location: 'L1' },
+  ],
+  links: [],
+});
+const IMPORT_FILES = {
+  'src/a.ts': lines('export function parse(raw: string, strict = false) {\n  return raw;\n}'),
+  'src/other.ts': lines('export function parse(n: number) {\n  return n;\n}'),
+  'src/util/index.ts': lines('export function build(cfg: Cfg) {\n  return cfg;\n}'),
+  'src/caller.ts': lines("import { parse as px } from './a.js';\nimport * as util from './util';\n\nfunction go() {}"),
+};
+const importCards = (added) => buildSymbolCards(['src/caller.ts'], {
+  graphIndex: IMPORT_GRAPH, sections: new Map([['src/caller.ts', section(added)]]), windows: new Map(),
+  readLines: (f) => IMPORT_FILES[f] ?? null,
+});
+
+test('аудит 1.12: импорт снимает неоднозначность и открывает ns.fn(', () => {
+  const r = importCards(['const v = px(x);', 'const c = util.build(cfg);']);
+  assert.deepEqual(r.byPath.get('src/caller.ts').map((c) => [c.name, c.path, c.declaration]).sort(), [
+    ['build', 'src/util/index.ts', 'export function build(cfg: Cfg)'],
+    ['parse', 'src/a.ts', 'export function parse(raw: string, strict = false)'],
+  ]);
+  assert.equal(r.metrics.via_import, 2);
+  // без импорта то же имя неоднозначно по графу — карточки нет
+  const bare = buildSymbolCards(['src/z.ts'], {
+    graphIndex: IMPORT_GRAPH, sections: new Map([['src/z.ts', section(['parse(x);'])]]), windows: new Map(), readLines: () => [],
+  });
+  assert.equal(bare.metrics.skip_reasons.ambiguous, 1);
+});
+
+test('аудит 1.6: TS — стрелка и литерал типа в аннотации не обрывают заголовок', () => {
+  assert.deepEqual(
+    scanDeclaration(lines('export function make(n: number): (x: number) => number {\n  return (x) => x + n;\n}'), 0),
+    { header: 'export function make(n: number): (x: number) => number', endIdx: 2 },
+  );
+  assert.deepEqual(
+    scanDeclaration(lines('async function load(id: string): Promise<{ id: string; ok: boolean }> {\n  return { id, ok: true };\n}'), 0),
+    { header: 'async function load(id: string): Promise<{ id: string; ok: boolean }>', endIdx: 2 },
+  );
+  assert.deepEqual(
+    scanDeclaration(lines('function shape(): { a: number } {\n  return { a: 1 };\n}'), 0),
+    { header: 'function shape(): { a: number }', endIdx: 2 },
+  );
+  assert.deepEqual(
+    scanDeclaration(lines('const twice: (x: number) => number = (x) => x * 2;\nnext();'), 0),
+    { header: 'const twice: (x: number) => number = (x) =>', endIdx: 0 },
+  );
+  assert.deepEqual(
+    scanDeclaration(lines('class Box<T extends { id: string }> extends Base<T> {\n  get() {}\n}'), 0),
+    { header: 'class Box<T extends { id: string }> extends Base<T>', endIdx: 2 },
+  );
+});
+
+test('аудит 1.6: перегрузки TS собираются вместе с реализацией', () => {
+  const src = lines([
+    'export function pick(a: string): string;',
+    'export function pick(a: number): number;',
+    'export function pick(a: string | number) {',
+    '  return a;',
+    '}',
+    'const after = 1;',
+  ].join('\n'));
+  assert.deepEqual(cardDeclaration(src, 0, 'pick'), {
+    header: 'export function pick(a: string): string\nexport function pick(a: number): number\nexport function pick(a: string | number)',
+    endIdx: 4,
+  });
+});
+
+test('аудит 1.6: класс — с сигнатурой конструктора для new X(…)', () => {
+  const src = lines([
+    'export class Client extends Base {',
+    '  private readonly url: string;',
+    '  constructor(url: string, opts: Opts = {}) {',
+    '    super();',
+    '  }',
+    '}',
+  ].join('\n'));
+  assert.deepEqual(cardDeclaration(src, 0, 'Client'), {
+    header: 'export class Client extends Base { constructor(url: string, opts: Opts = {}) }',
+    endIdx: 5,
+  });
 });
