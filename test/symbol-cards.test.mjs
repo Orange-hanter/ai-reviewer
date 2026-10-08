@@ -42,11 +42,22 @@ test('packageImportedNames: имена из пакетов, но не из фа�
   assert.deepEqual([...names].sort(), ['de', 'express', 'ok', 'path', 'rf', 'scoped', 'stat']);
 });
 
-test('extractUsedIdentifiers: незакрытая строка из обратных слэшей разбирается за линейное время (ReDoS)', () => {
-  const evil = `"${'\\\\'.repeat(5000)}x(1)`;
-  const t0 = performance.now();
-  extractUsedIdentifiers([evil]);
-  assert.ok(performance.now() - t0 < 500, 'экспоненциальный перебор в регулярке литералов');
+test('разбор текста автора PR не проваливается в сверхлинейный перебор (ReDoS)', () => {
+  const n = 100_000;
+  const cases = {
+    'литерал из обратных слэшей': () => extractUsedIdentifiers([`"${'\\\\'.repeat(5000)}x(1)`]),
+    'вызов и пробелы': () => extractUsedIdentifiers([`x${' '.repeat(1990)}`]),
+    'точка и пробелы': () => extractUsedIdentifiers([`.${' '.repeat(1990)}a b c`]),
+    'import и пробелы': () => packageImportedNames([`import a${' '.repeat(n)}x`]),
+    'многострочный import без from': () => packageImportedNames(['import {', ...Array(n).fill(' '.repeat(50))]),
+    'объявление: пустые строки': () => declarationRegex('foo').test('\n'.repeat(n)),
+    'объявление: длинные аргументы': () => declarationRegex('foo').test(`foo(${'a'.repeat(n)}`),
+  };
+  for (const [label, fn] of Object.entries(cases)) {
+    const t0 = performance.now();
+    fn();
+    assert.ok(performance.now() - t0 < 500, label);
+  }
 });
 
 test('createLineReader: symlink за пределы корня не читается, обычный файл — читается', async () => {
