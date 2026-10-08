@@ -148,6 +148,28 @@ for (const [profileName, activate] of Object.entries(PROFILES)) {
     chunk: { paths: ['src/a.ts', 'src/b.ts'], partialPaths: [], windowedPaths: ['src/a.ts'] },
   }));
 
+  // 1a3. buildMessages — карточки символов (RFC 14): объявление, короткое тело, fence в тексте
+  check(`${profileName}: buildMessages symbol cards`, () => prompt.buildMessages({
+    ...BASE_ARGS,
+    changedPaths: ['src/a.ts', 'src/b.ts'],
+    chunk: {
+      paths: ['src/a.ts'],
+      partialPaths: [],
+      symbolCards: [
+        '// lib/config.mjs:L212–L248\nexport function parseLimits(raw, { strict = false } = {})',
+        '// lib/util.mjs:L3–L5 (full body)\nexport const tag = (s) => `<${s}>`\n  + "```";',
+        '// src/кириллица.ts:L7\nclass Ёлка extends Base',
+      ],
+    },
+  }));
+
+  // 1a4. buildMessages — пустой список карточек: промпт как без поля
+  check(`${profileName}: buildMessages symbol cards empty`, () => prompt.buildMessages({
+    ...BASE_ARGS,
+    changedPaths: ['src/a.ts'],
+    chunk: { paths: ['src/a.ts'], partialPaths: [], symbolCards: [] },
+  }));
+
   // 1b. buildMessages — готовая changedFilesSection (ветка verifier-стадии)
   check(`${profileName}: buildMessages ready section`, () => prompt.buildMessages({
     ...BASE_ARGS,

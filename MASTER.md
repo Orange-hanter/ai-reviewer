@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:952c505926ce`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:ca7eab38e53e`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:d5313017ae46`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:48d1319fb490`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -102,7 +102,7 @@ graph TD
 
 ### RFC 14 — Карточки символов
 - **Описание:** строка объявления того, что вызывает изменённый код, во входе модели; семейство FP 8 («символа нет» по графу); шаг 0 — замер до кода.
-- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:be8e815982ba`
+- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:f02d611902c0`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 15 — Наряды по косвенным признакам
@@ -132,7 +132,7 @@ graph TD
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:43ba5aa93780`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:b3014d9b0bfc`
 - **Статус:** `🟢 VERIFIED`
 
 ### README

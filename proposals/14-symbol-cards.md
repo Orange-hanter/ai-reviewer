@@ -291,17 +291,22 @@ export function findAbsentButExistingSymbol(finding, index)            // → { 
 **Место в потоке.** После загрузки графа (`pipeline.mjs:474`), до хэша входа (`:515`):
 карточки нужны хэшу. До чанков (`:552`): чанк собирает их из своих файлов.
 
-**Блок в промпте.** После контекста файлов, перед blast-radius:
+**Блок в промпте.** После контекста файлов, перед диффом: заголовок «defined outside the
+context shown above» верен ровно потому, что контекст уже показан. Карточки идут кодовым
+блоком — в объявлении бывают обратные кавычки, и в markdown-строке они сломали бы разметку:
 
+````
+## Declarations of symbols called by the changed lines (defined outside the context shown above)
+Each entry is the declaration only — the body is NOT shown. It proves the symbol EXISTS and what its
+signature is; it proves NOTHING about what the body does: do not report the behaviour of such a symbol
+and do not call it undefined. An entry marked (full body) shows the whole short body.
 ```
-## Declarations of symbols called by the changed lines
-Each line is the declaration only — the body is NOT shown. A card proves the symbol exists
-and what its signature is. It proves NOTHING about what the body does: do not report the
-behaviour of a carded symbol.
-- `export function parseLimits(raw, { strict = false } = {})` — lib/config.mjs:L212–L248
+// lib/config.mjs:L212–L248
+export function parseLimits(raw, { strict = false } = {})
 ```
+````
 
-Последнее предложение в заголовке блока важно. Без него карточка `validate(input)` даёт
+Предложение «proves NOTHING about what the body does» в заголовке блока важно. Без него карточка `validate(input)` даёт
 модели повод написать «`validate` не проверяет null», то есть новое утверждение об
 отсутствии, теперь уже с видимым «основанием».
 
@@ -309,14 +314,21 @@ behaviour of a carded symbol.
 
 ```js
 // lib/symbol-cards.mjs — только JS, оркестрация, как lib/chunk-routing.mjs
-export function extractUsedIdentifiers(addedLines, lang)   // → string[]
-export function buildSymbolCards(files, { graphIndex, contentMap, windows, readLines, limits })
-  // → { byPath: Map<path, string[]>, metrics: { candidates, resolved, cards, chars, skip_reasons } }
+export function extractUsedIdentifiers(addedLines)          // → Map<имя, число строк-вызывателей>
+export function scanDeclaration(lines, startIdx, { maxLines }) // → { header, endIdx | null }
+export function buildSymbolCards(paths, { graphIndex, sections, windows, readLines, limits })
+  // → { byPath: Map<path, Card[]>, metrics: { candidates, resolved, cards, skip_reasons } }
+export function selectChunkCards(byPath, chunkPaths, { max, maxChars }) // → { cards: string[], dropped, chars }
+export function symbolCardsHashInput(cards)                 // → строка для хэша RFC 05, без номеров строк
 ```
 
-- `buildMessages` получает параметр `symbolCards: string[]`. `lib/prompt.mjs` и
-  `rust/src/prompt.rs` меняются вместе, в `prompt.parity.mjs` добавляется кейс с непустыми
-  карточками.
+- Карточки едут **полем чанка** `chunk.symbolCards: string[]`, как `windowedPaths` из RFC 07:
+  `buildMessages` уже получает чанк целиком, и правки engine не нужно. `lib/prompt.mjs` и
+  `rust/src/prompt.rs` меняются вместе, в `prompt.parity.mjs` — кейсы с непустыми карточками
+  (fence, кириллица, `(full body)`) и с пустым списком.
+- Индекс графа отдаёт `buildBlastRadius` полем `graphIndex` — `graph.json` второй раз не
+  читается. Строки файлов читает `deps.readLines` (по умолчанию `createLineReader()`),
+  в тестах — подмена.
 - **Инкрементальный прогон.** Хэш входа файла считается от `{ diff, context, cards }`, где
   в `cards` идут путь и текст объявления **без номеров строк**. Номера сдвигаются от любой
   правки выше объявления или внутри тела, и с ними в хэше каждая такая правка заставляла бы
@@ -325,9 +337,13 @@ export function buildSymbolCards(files, { graphIndex, contentMap, windows, readL
   того, на какой строке лежит неизменённое объявление. Если сигнатура изменилась, файл
   ревьюится заново; если нет — находки переносятся как сейчас. Короткое тело (ниже) входит в
   хэш целиком: там изменение текста — изменение входа по существу.
-- **Метрики.** Для каждого чанка — `plan.chunkPlan[].symbol_cards` и `.symbol_cards_chars`.
-  За прогон — `run_end.symbolCards = { candidates, resolved, cards, skip_reasons }`. По
-  `candidates` решается, нужен ли шаг 3.
+- **Отпечаток конфигурации** (`configFingerprint`) включает лимиты карточек, но только при
+  включённой фиче: выключенная не меняет отпечаток, и обновление движка не сбрасывает
+  инкрементальное состояние тем, кто её не включал.
+- **Метрики** — в событии `plan`, рядом с `blast_radius`: для каждого чанка
+  `chunkPlan[].symbol_cards` и `.symbol_cards_chars`; за прогон `plan.symbolCards = {
+  candidates, resolved, cards, skip_reasons, dropped, chunks_over_limit }` (`null` — фича
+  выключена). По `chunks_over_limit` решается, нужен ли шаг 3.
 - Verifier карточки не получает. Он вырезает окна из полного `contentMap` вокруг строки
   кандидата сам, и добавлять ему вход — отдельный замер.
 
@@ -346,8 +362,8 @@ verifier и жюри. Правило «по карточке о поведени
 
 ### Шаг 3 (условный). Дешёвая модель выбирает карточки
 
-**Когда нужен.** Только если `run_end.symbolCards.candidates` больше
-`REVIEW_SYMBOL_CARDS_MAX` больше чем в ~20 % чанков на gold и реальных PR. Иначе правила
+**Когда нужен.** Только если кандидатов больше `REVIEW_SYMBOL_CARDS_MAX`
+(`plan.symbolCards.chunks_over_limit`) больше чем в ~20 % чанков на gold и реальных PR. Иначе правила
 «чаще вызывается — выше» хватает, и стадия не нужна.
 
 **Что делает.** Получает дифф чанка и список кандидатов
