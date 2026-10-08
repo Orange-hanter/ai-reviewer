@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-30
+last_updated: 2026-10-08
 ---
 
 # 🧭 Project Navigator: ai-reviewer
@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:2df418793059`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:cea04f1aed8b`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -100,6 +100,11 @@ graph TD
 - **Ссылка:** `📁 proposals/13-gate-judge.md | 🗃️ doc:proposals_13-gate-judge_md | 🔑 sha:22b84319ff6e`
 - **Статус:** `🟢 VERIFIED`
 
+### RFC 14 — Карточки символов
+- **Описание:** строка объявления того, что вызывает изменённый код, во входе модели; семейство FP 8 («символа нет» по графу); шаг 0 — замер до кода.
+- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:b1a79c55ac6d`
+- **Статус:** `🟢 VERIFIED`
+
 ### Cursor Plugin
 - **Описание:** local install, два MCP, skill, rule.
 - **Ссылка:** `📁 cursor-plugin/README.md | 🗃️ doc:cursor-plugin_README_md | 🔑 sha:2ff130c14ca9`
@@ -112,7 +117,7 @@ graph TD
 
 ### Индекс RFC
 - **Описание:** таблица решений 01–13.
-- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:538fa4312880`
+- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:a646a9c60cfe`
 - **Статус:** `🟢 VERIFIED`
 
 ### Changelog
@@ -144,7 +149,7 @@ graph TD
 
 ```json
 {
-  "next_step": "gate-judge: GATE-002 (fix blockerClusters), затем секция B (история в футере); MCP-011",
+  "next_step": "gate-judge: GATE-002 (fix blockerClusters), затем секция B (история в футере); MCP-011; symbol-cards: CARD-002 (замер шага 0)",
   "required_input": "",
   "blocked_by": []
 }
@@ -162,6 +167,12 @@ graph TD
     "missing_info": []
   },
   "changelog": [
+    {
+      "date": "2026-10-08",
+      "action": "RFC 14 принят, план symbol-cards (CARD-001…012)",
+      "author": "claude",
+      "scope": "master"
+    },
     {
       "date": "2026-09-30",
       "action": "RFC 13 принят (В1–В3), задачи gate-judge обновлены",
