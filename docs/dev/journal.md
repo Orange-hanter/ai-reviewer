@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-09-29
+last_updated: 2026-10-08
 audience: [next-session-agent, maintainers]
 ---
 
@@ -12,6 +12,28 @@ audience: [next-session-agent, maintainers]
 
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
+
+## 2026-10-08 — RFC 08: живой прогон ревью-MCP до находок
+
+**Зачем.** Единственный живой прогон `review_run` (2026-09-10) кончился `degraded / llm unavailable` — путь «MoA через MCP до находок» не был проверен.
+
+**Прогон.** stdio-клиент с `Content-Length`-кадрами, как у Cursor; `REVIEW_MCP_ROOT` — не-git каталог в `/tmp` с диффом `gold/tp-real-bugs-unescape` (106 КБ), пин `477aa0f0de`; Ollama Cloud, дефолтный ростер (GLM 5.3 / kimi / minimax-m3). `review_route` → `full`, `review_prescan` → 0 находок; `review_run` с `wait: false` отдал stub с `jobId` за 221 мс, MoA (2 чанка) закончился за 340 с; поллинг `review_findings` по `jobId` отвечал `running` всё время прогона; `review_artifact` — `previewWouldBlock: true`, `strong: true`, 1 major + 14 minor. Sidecar и экспорт записаны в корень, GitHub не тронут.
+
+**Качество против разметки кейса — частично.** Вердикт блока совпал (`wouldBlock: true`), но по другой причине:
+
+| Ожидание gold | Итог |
+|---|---|
+| `diff.mjs:5–6` major | найдено, **minor**: correctness `verified`, architecture `downgraded` («редкие имена файлов»), consensus не набран |
+| `diff.mjs:9–10` major | не найдено |
+| — | блокер `github.mjs:84`: `readPriorFindings` берёт sticky по маркеру без `isTrustedReviewAuthor`, которую делают соседние пути feedback. Код до PR (в диффе только `includes` → `hasMarker`), но наблюдение верное, не FP |
+
+Это сигнал по качеству движка (понижение реального бага одной ролью), не по RFC 08: тот же дифф идёт через `run()` и в gold-раннере.
+
+**Найдено по ходу:** не-hex `headSha` отвечал `headSha is required` — исправлено (`lib/review-mcp.mjs`, тест в `test/pr-review.mcp.test.mjs`). Корень внутри чужого git-репозитория (например, под `~/.claude`) включает сверку пина с его `HEAD` — ожидаемо по RFC 09, но неочевидно при ручном прогоне.
+
+**Сделано:** RFC 08 в реестре → «реализовано (Unreleased)» (аудит 2026-09-29 его пропустил).
+
+**Не сделано:** релиз (тег, версия, пин потребителя); разбор понижения `diff.mjs:6` ролью architecture.
 
 ## 2026-09-30 — RFC 13 принят
 

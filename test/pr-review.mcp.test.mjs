@@ -426,6 +426,23 @@ test('git: headSha does not match HEAD', async () => {
   });
 });
 
+test('пин: не-hex headSha назван форматом, а не «required»', async () => {
+  await withRoot(async (root) => {
+    await writeFile(join(root, 'changes.patch'), CODE_DIFF);
+    const extra = extraBase(root, { git: cleanGit(HEAD) });
+    const res = await handleReviewMcpRequest(runCall({
+      diffPath: join(root, 'changes.patch'),
+      headSha: 'gold-case-id',
+    }), extra);
+    assert.equal(res.error.code, -32602);
+    assert.match(res.error.message, /headSha must be 7–64 hex chars/);
+    const missing = await handleReviewMcpRequest(runCall({
+      diffPath: join(root, 'changes.patch'),
+    }), extra);
+    assert.match(missing.error.message, /headSha is required/);
+  });
+});
+
 test('git: грязное дерево без uncommitted', async () => {
   await withRoot(async (root) => {
     await writeFile(join(root, 'changes.patch'), CODE_DIFF);
