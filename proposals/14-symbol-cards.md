@@ -12,6 +12,7 @@ last_updated: 2026-10-08
 > Категория: 🔵 Архитектура · Риск: средний · Зависимости: [RFC 04](04-token-economy.md) (цена входа и методика замера), [RFC 05](05-incremental-review.md) (хэш входа), [RFC 07](07-windowed-file-context.md) (окна контекста), [`docs/false-positives.md`](../docs/false-positives.md) (семейства 4, 6, 7)
 
 Принято 2026-10-08. Декомпозиция — план `symbol-cards` в cod-doc (задачи `CARD-xxx`).
+По замеру шага 0 (раздел «Замер») шаг 1 отменён, шаг 2 делается.
 
 ## Контекст
 
@@ -159,7 +160,96 @@ JSONL наблюдаемости на эти формулировки никто
 
 Цифры записываются в журнал (`docs/dev/journal.md`) и в этот RFC, в раздел «Замер».
 
+#### Замер (2026-10-08)
+
+Скрипты разовые, в репозиторий не вошли: извлечение вызовов переписывается на JS в
+`lib/symbol-cards.mjs` (CARD-006), и держать вторую реализацию незачем.
+
+**1. Утверждения об отсутствии символа — 0.** Выборка — все заголовки находок, которые
+пишет наблюдаемость: `findings_stage` и `gate` из двух журналов прогонов (266 прогонов
+2026-07-12…2026-10-08 по `.graphify/graphify-out/observability/` и 6 по
+`.ai-review/observability/`) плюс финальные находки 18 кейсов публичного бенчмарка. Итого 208
+уникальных пар «файл + заголовок», от стадии `after_llm_merge` (до FP-фильтра) до гейта.
+Регулярка условия 1 шага 1 (утверждение об отсутствии вплотную к идентификатору в обратных
+кавычках) — 0 совпадений. Все 9 заголовков с любым словом отсутствия — про рантайм и тесты:
+«`isCurrentUser` не защищён от null/undefined», «отсутствует обработка случая отсутствия
+OrganizationMapping», «отсутствуют тесты для edge-cases». Это ровно то, что шаг 1 снимать не
+должен.
+
+Ограничение: наблюдаемость хранит заголовки, но не тела находок; утверждение могло сидеть
+только в теле. Правило (c) в промпте действует всю выборку — замер говорит, что вместе с ним
+класс не наблюдается, а не что он невозможен без него.
+
+**2. Вызовы того, что модель не видит, — есть.** Добавленные строки JS/TS-файлов gold-диффов
+этого репозитория (9 кейсов). Окно ±40 по историческим диффам восстановить нельзя: из 102
+base-blob в git есть 24. Поэтому считается нижняя оценка, от окна не зависящая: вызванное имя,
+объявление которого нет в тексте диффа и которое однозначно объявлено в **другом** файле
+репозитория, **не входящем в PR**. Такое объявление модель не видит ни в каком окне.
+
+| Кейс | Символов вне PR | Примеры |
+|---|---:|---|
+| `fp-noise-no-real-blockers` | 30 | `hasMarker`, `publicErrorLabel`, `numEnv`, `logEvent` |
+| `tp-real-bugs-unescape` | 26 | `hasMarker`, `numEnv`, `chatText` |
+| `fp-absence-consumer-out-of-chunk` | 14 | `reviewAllModels`, `buildChunks`, `createReviewEngine` |
+| `tp-structure-real-defects` | 10 | `normalizeRepoPath`, `extractGraphifyFacts`, `readScipIndex` |
+| `clean-code-carryover-fingerprint` | 6 | `loadReviewConfig`, `parseDiff`, `filterStalePriorFindings` |
+| `clean-code-footer-last-marker` | 3 | `extractStickyFooterRaw`, `extractJsonObject` |
+| `fp-absence-doc-claims-not-in-diff` | 2 | `migrateFeedbackText` |
+| `fp-regen-double-changelog-bump`, `router-light-conflict-markers-escape` | 0 | — |
+
+Медиана 6 на дифф, максимум 30, сумма 91; ненулевых 7 из 9. Верхняя оценка (имя без
+объявления в тексте диффа, где бы оно ни лежало) — медиана 27, сумма 335. В шуме — имена
+вроде `max` и `skip`, совпавшие с методами. Публичный бенчмарк сюда не вошёл: в `gold-public/`
+лежит только `meta.json`, диффы и исходники чужих репозиториев локально отсутствуют.
+
+**Решение.** Шаг 1 (секция C, CARD-003…005) отменён: на выборке класс не встречается, а
+фильтр без случаев — код без проверки. Вернуться к нему, если утверждение «символа нет» о
+существующем символе появится в `feedback/` или в разборе прогона. Шаг 2 делается: в 7 из 9
+диффов изменённые строки зовут то, чего модель не видит. Индекс графа наружу из
+`buildBlastRadius`, который был частью CARD-003, переезжает в CARD-006. Для шага 3: максимум
+30 символов вне PR на **дифф**, а чанк — его часть, так что лимит 20 на чанк, скорее всего,
+переполняться будет редко; решает метрика CARD-011.
+
+#### Gold A/B шага 2 (2026-10-08, CARD-011)
+
+`node bin/pr-review-gold.mjs` на 9 кейсах `gold/`, `REVIEW_SYMBOL_CARDS=0` против `1`, по
+одному прогону, модели по умолчанию; граф — Graphify этого репозитория от `eb22f62e`
+(`REVIEW_GOLD_GRAPH`), blast-radius заглушен в обоих.
+
+| Кейс | `0` | `1` |
+|---|---|---|
+| `fp-noise-no-real-blockers` (стоп-кейс RFC 04/07) | ❌ ложная блокировка | ✅ |
+| `fp-absence-consumer-out-of-chunk`, `fp-absence-doc-claims-not-in-diff` (стоп-кейсы) | ✅ ✅ | ✅ ✅ |
+| `tp-structure-real-defects`: не найдено размеченных локаций | 3 из 4 | 2 из 4 |
+| `tp-real-bugs-unescape` | ❌ не блокирует | ❌ не блокирует |
+| `router-light-conflict-markers-escape` | ❌ ложная блокировка | ❌ ложная блокировка |
+| Несовпадений с разметкой | 6 | 4 |
+| Вход, токенов (сумма `prompt_tokens`) | 918 635 | 914 030 (−0,5 %) |
+
+Карточек — 60 в 7 кейсах (совпало с офлайн-отбором), в 11 чанках; лимит 20 переполнен в
+**1** из 11. Находок «символ не определён» — 0 в обеих конфигурациях. Находки, в заголовке
+которых есть символ с карточкой, — две minor (`buildChunks`, `parseJsonl`), обе на строках
+диффа, то есть о коде, который модель видела, а не о теле по сигнатуре.
+
+**Решение.** Ни один стоп-сигнал не сработал, recall не упал, цена входа не выросла —
+по критериям выше `REVIEW_SYMBOL_CARDS` включается по умолчанию. Короткие тела
+(`REVIEW_SYMBOL_CARDS_BODY_MAX_LINES`) не замерялись и остаются выключенными. Шаг 3
+(ранкер, CARD-012) отменён: переполнение в 9 % чанков с карточками при пороге 20 %.
+
+Оговорки, которые не дают считать улучшение доказанным:
+
+- по **одному** прогону на конфигурацию; разница в `fp-noise` и одной локации
+  `tp-structure` в пределах того, как модель расходится между прогонами одного диффа;
+- gold-диффы сделаны в раскладке `ops/pr-review/…`, а граф — по текущей `lib/…`: часть
+  карточек указывала на нынешнюю версию функции, а не на ту, что была в PR. На живом PR граф
+  и дерево — одной версии, и это расхождение исчезает.
+
+Включение по умолчанию значит: ни одного вредного эффекта не найдено. Пользы оно не
+доказывает — её покажут `plan.symbolCards` и разбор живых прогонов.
+
 ### Шаг 1. Семейство 8: «символа нет» о символе, который есть в графе
+
+> Отменён по замеру шага 0 — см. «Замер». Текст оставлен как готовый дизайн на случай, если класс появится.
 
 **Где.** В том же FP-фильтре, что семейство 7, после LLM, только для находок LLM (не
 prescan и не `BLAST_FINDING_SOURCE`).
@@ -215,9 +305,12 @@ export function findAbsentButExistingSymbol(finding, index)            // → { 
 
 **Какие символы получают карточку.** Для каждого исполняемого файла PR:
 
-1. Собрать из **добавленных** строк имена вызовов и конструкторов: `name(`, `new Name`,
-   `obj.name(` → `name`. Ключевые слова и глобальные имена языка (`console`, `Promise`,
-   `JSON`, …) выбросить.
+1. Собрать из **добавленных** строк имена вызовов и конструкторов: `name(`, `new Name`.
+   Ключевые слова и глобальные имена языка (`console`, `Promise`, `JSON`, …) выбросить.
+   Вызов через точку (`obj.name(`) **не берётся**: по одному имени метод не разрешить —
+   на офлайн-прогоне по gold `assert.ok(` давал карточку чужой функции `ok()` почти в каждом
+   кейсе. Имена, импортированные из пакетов (`node:assert`, npm; не `./`, `@/`, `~/`), тоже
+   выбрасываются: их объявления в репозитории нет, одноимённый узел графа — чужой.
 2. Выбросить имена, объявление которых модель уже видит: в диффе или в окне этого файла.
 3. Остальные разрешить через `resolveUniqueNode`. Если имя неоднозначно, карточки нет.
 4. Текст карточки взять со строки объявления `source_file:Lnn` и продолжить до `{`, `=>` или
@@ -238,17 +331,22 @@ export function findAbsentButExistingSymbol(finding, index)            // → { 
 **Место в потоке.** После загрузки графа (`pipeline.mjs:474`), до хэша входа (`:515`):
 карточки нужны хэшу. До чанков (`:552`): чанк собирает их из своих файлов.
 
-**Блок в промпте.** После контекста файлов, перед blast-radius:
+**Блок в промпте.** После контекста файлов, перед диффом: заголовок «defined outside the
+context shown above» верен ровно потому, что контекст уже показан. Карточки идут кодовым
+блоком — в объявлении бывают обратные кавычки, и в markdown-строке они сломали бы разметку:
 
+````
+## Declarations of symbols called by the changed lines (defined outside the context shown above)
+Each entry is the declaration only — the body is NOT shown. It proves the symbol EXISTS and what its
+signature is; it proves NOTHING about what the body does: do not report the behaviour of such a symbol
+and do not call it undefined. An entry marked (full body) shows the whole short body.
 ```
-## Declarations of symbols called by the changed lines
-Each line is the declaration only — the body is NOT shown. A card proves the symbol exists
-and what its signature is. It proves NOTHING about what the body does: do not report the
-behaviour of a carded symbol.
-- `export function parseLimits(raw, { strict = false } = {})` — lib/config.mjs:L212–L248
+// lib/config.mjs:L212–L248
+export function parseLimits(raw, { strict = false } = {})
 ```
+````
 
-Последнее предложение в заголовке блока важно. Без него карточка `validate(input)` даёт
+Предложение «proves NOTHING about what the body does» в заголовке блока важно. Без него карточка `validate(input)` даёт
 модели повод написать «`validate` не проверяет null», то есть новое утверждение об
 отсутствии, теперь уже с видимым «основанием».
 
@@ -256,14 +354,21 @@ behaviour of a carded symbol.
 
 ```js
 // lib/symbol-cards.mjs — только JS, оркестрация, как lib/chunk-routing.mjs
-export function extractUsedIdentifiers(addedLines, lang)   // → string[]
-export function buildSymbolCards(files, { graphIndex, contentMap, windows, readLines, limits })
-  // → { byPath: Map<path, string[]>, metrics: { candidates, resolved, cards, chars, skip_reasons } }
+export function extractUsedIdentifiers(addedLines)          // → Map<имя, число строк-вызывателей>
+export function scanDeclaration(lines, startIdx, { maxLines }) // → { header, endIdx | null }
+export function buildSymbolCards(paths, { graphIndex, sections, windows, readLines, limits })
+  // → { byPath: Map<path, Card[]>, metrics: { candidates, resolved, cards, skip_reasons } }
+export function selectChunkCards(byPath, chunkPaths, { max, maxChars }) // → { cards: string[], dropped, chars }
+export function symbolCardsHashInput(cards)                 // → строка для хэша RFC 05, без номеров строк
 ```
 
-- `buildMessages` получает параметр `symbolCards: string[]`. `lib/prompt.mjs` и
-  `rust/src/prompt.rs` меняются вместе, в `prompt.parity.mjs` добавляется кейс с непустыми
-  карточками.
+- Карточки едут **полем чанка** `chunk.symbolCards: string[]`, как `windowedPaths` из RFC 07:
+  `buildMessages` уже получает чанк целиком, и правки engine не нужно. `lib/prompt.mjs` и
+  `rust/src/prompt.rs` меняются вместе, в `prompt.parity.mjs` — кейсы с непустыми карточками
+  (fence, кириллица, `(full body)`) и с пустым списком.
+- Индекс графа отдаёт `buildBlastRadius` полем `graphIndex` — `graph.json` второй раз не
+  читается. Строки файлов читает `deps.readLines` (по умолчанию `createLineReader()`),
+  в тестах — подмена.
 - **Инкрементальный прогон.** Хэш входа файла считается от `{ diff, context, cards }`, где
   в `cards` идут путь и текст объявления **без номеров строк**. Номера сдвигаются от любой
   правки выше объявления или внутри тела, и с ними в хэше каждая такая правка заставляла бы
@@ -272,9 +377,13 @@ export function buildSymbolCards(files, { graphIndex, contentMap, windows, readL
   того, на какой строке лежит неизменённое объявление. Если сигнатура изменилась, файл
   ревьюится заново; если нет — находки переносятся как сейчас. Короткое тело (ниже) входит в
   хэш целиком: там изменение текста — изменение входа по существу.
-- **Метрики.** Для каждого чанка — `plan.chunkPlan[].symbol_cards` и `.symbol_cards_chars`.
-  За прогон — `run_end.symbolCards = { candidates, resolved, cards, skip_reasons }`. По
-  `candidates` решается, нужен ли шаг 3.
+- **Отпечаток конфигурации** (`configFingerprint`) включает лимиты карточек, но только при
+  включённой фиче: выключенная не меняет отпечаток, и обновление движка не сбрасывает
+  инкрементальное состояние тем, кто её не включал.
+- **Метрики** — в событии `plan`, рядом с `blast_radius`: для каждого чанка
+  `chunkPlan[].symbol_cards` и `.symbol_cards_chars`; за прогон `plan.symbolCards = {
+  candidates, resolved, cards, skip_reasons, dropped, chunks_over_limit }` (`null` — фича
+  выключена). По `chunks_over_limit` решается, нужен ли шаг 3.
 - Verifier карточки не получает. Он вырезает окна из полного `contentMap` вокруг строки
   кандидата сам, и добавлять ему вход — отдельный замер.
 
@@ -293,8 +402,8 @@ verifier и жюри. Правило «по карточке о поведени
 
 ### Шаг 3 (условный). Дешёвая модель выбирает карточки
 
-**Когда нужен.** Только если `run_end.symbolCards.candidates` больше
-`REVIEW_SYMBOL_CARDS_MAX` больше чем в ~20 % чанков на gold и реальных PR. Иначе правила
+**Когда нужен.** Только если кандидатов больше `REVIEW_SYMBOL_CARDS_MAX`
+(`plan.symbolCards.chunks_over_limit`) больше чем в ~20 % чанков на gold и реальных PR. Иначе правила
 «чаще вызывается — выше» хватает, и стадия не нужна.
 
 **Что делает.** Получает дифф чанка и список кандидатов

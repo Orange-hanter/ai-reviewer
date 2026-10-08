@@ -853,6 +853,11 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             // НОЛЬ — «окна выключены» (откат), поэтому non_neg_env, а не num_env.
             "contextMargin": num_json(non_neg_env(env, "REVIEW_CONTEXT_MARGIN", 40.0)),
             "contextWindowMinChars": num_json(non_neg_env(env, "REVIEW_CONTEXT_WINDOW_MIN_CHARS", 8000.0)),
+            // Карточки символов (RFC 14, lib/symbol-cards.mjs): включено по gold A/B.
+            "symbolCards": env_flag(env, "REVIEW_SYMBOL_CARDS", true),
+            "symbolCardsMax": num_json(num_env(env, "REVIEW_SYMBOL_CARDS_MAX", 20.0)),
+            "symbolCardsMaxChars": num_json(num_env(env, "REVIEW_SYMBOL_CARDS_MAX_CHARS", 3000.0)),
+            "symbolCardsBodyMaxLines": num_json(non_neg_env(env, "REVIEW_SYMBOL_CARDS_BODY_MAX_LINES", 0.0)),
             "maxContextBytes": num_json(num_env(env, "REVIEW_MAX_CONTEXT_BYTES", 180_000.0)),
             "chunkBytes": num_json(num_env(env, "REVIEW_CHUNK_BYTES", 56_000.0)),
             "maxChunks": num_json(num_env(env, "REVIEW_MAX_CHUNKS", 40.0)),

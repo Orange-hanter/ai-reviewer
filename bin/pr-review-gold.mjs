@@ -12,6 +12,7 @@ import { createReviewPipeline } from '../pipeline.mjs';
 import { MARKERS } from '../lib/constants.mjs';
 import { scoreGoldCase } from '../lib/benchmark.mjs';
 import { ensureCaseDiff } from '../lib/gold-fetch.mjs';
+import { buildGraphIndex } from '../lib/graphify.mjs';
 
 const GOLD_DIR = process.env.REVIEW_GOLD_DIR
   ? resolve(process.cwd(), process.env.REVIEW_GOLD_DIR)
@@ -22,6 +23,20 @@ const onlyIdx = process.argv.indexOf('--case');
 const only = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
 const jsonlIdx = process.argv.indexOf('--jsonl');
 const jsonlPath = jsonlIdx >= 0 ? resolve(process.cwd(), process.argv[jsonlIdx + 1]) : null;
+
+let graphIndexCache;
+/** Индекс graph.json (REVIEW_GOLD_GRAPH или GRAPH) — один раз на прогон; нет файла → null. */
+async function goldGraphIndex(cfg) {
+  if (graphIndexCache !== undefined) return graphIndexCache;
+  const path = resolve(process.cwd(), process.env.REVIEW_GOLD_GRAPH || cfg.graphify.graph);
+  try {
+    graphIndexCache = buildGraphIndex(JSON.parse(await readFile(path, 'utf8')));
+  } catch (e) {
+    console.error(`[gold] карточки символов без графа (${path}: ${e.code || e.message})`);
+    graphIndexCache = null;
+  }
+  return graphIndexCache;
+}
 
 function footerFindings(text) {
   const m = MARKERS.dataRe.exec(text);
@@ -35,7 +50,11 @@ async function runCase(id) {
   const diff = await ensureCaseDiff(dir, meta, { cacheDir: CACHE_DIR });
   const env = {
     ...process.env,
-    REVIEW_OBSERVABILITY: '0',
+    // REVIEW_GOLD_OBSERVABILITY_DIR — JSONL прогона (токены, plan.symbolCards) для сравнения
+    // конфигураций; по умолчанию выключено, как и было.
+    ...(process.env.REVIEW_GOLD_OBSERVABILITY_DIR
+      ? { REVIEW_OBSERVABILITY: '1', REVIEW_OBSERVABILITY_DIR: resolve(process.cwd(), process.env.REVIEW_GOLD_OBSERVABILITY_DIR) }
+      : { REVIEW_OBSERVABILITY: '0' }),
     REVIEW_EXPORT: '0',
     REVIEW_AUTO_TRIAGE: '0',
   };
@@ -47,7 +66,9 @@ async function runCase(id) {
   let code;
   try {
     const pipeline = createReviewPipeline(cfg, {
-      graphify: { buildBlastRadius: async () => [] },
+      // Blast-radius заглушен, но при карточках символов (RFC 14) индекс графа нужен — без
+      // него сравнение REVIEW_SYMBOL_CARDS=0/1 дало бы два одинаковых прогона.
+      graphify: { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex: cfg.limits.symbolCards ? await goldGraphIndex(cfg) : null }) },
       die: (m) => { throw new Error(`die: ${m}`); },
     });
     code = await pipeline.run();

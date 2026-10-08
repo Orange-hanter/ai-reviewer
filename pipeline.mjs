@@ -15,6 +15,7 @@ import { BLAST_FINDING_SOURCE } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
 import { buildVerifierFileContents, windowChunkFileContents } from './lib/context-window.mjs';
+import { buildSymbolCards, createLineReader, selectChunkCards, symbolCardsHashInput } from './lib/symbol-cards.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
 import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
 import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath } from './lib/router.mjs';
@@ -104,6 +105,7 @@ function normalizeBlastRadius(result, symbols) {
   }
   return {
     blocks: Array.isArray(result?.blocks) ? result.blocks : [],
+    graphIndex: result?.graphIndex ?? null,
     metrics: result?.metrics ?? {
       symbols_total: symbols.length,
       symbols_resolved: null,
@@ -311,6 +313,8 @@ export function createReviewPipeline(cfg, deps = {}) {
   const prescan = deps.prescan ?? createPrescanRunner(cfg, { log });
   const telegramNotifier = deps.notifyTelegram ?? notifyTelegram;
   const repoFiles = deps.repoFiles ?? (() => listRepoFiles());
+  // Строки файла рабочего дерева для карточек символов (RFC 14); в тестах — подмена.
+  const readLines = deps.readLines ?? createLineReader();
 
   async function finishObs(obs, data) {
     if (!obs?.enabled) return;
@@ -472,7 +476,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       // Freshness измеряем даже если diff не содержит экспортов: иначе `graph_fresh`
       // был бы неизвестен именно в тех review-plans, где blast-radius пустой.
       const blastResult = await graphify.buildBlastRadius(symbols);
-      const { blocks: blastBlocks, metrics: blastMetrics } = normalizeBlastRadius(blastResult, symbols);
+      const { blocks: blastBlocks, metrics: blastMetrics, graphIndex } = normalizeBlastRadius(blastResult, symbols);
       log(`prep parallel: ${Date.now() - prepT0}мс (graphify+files+prior+prescan)`);
       // Fingerprint-инвалидация carry-over ДО LLM: устаревшие prior findings не подмешиваем.
       // Нормализуем форму: клиент github инжектируется (DI-тесты, кастомные провайдеры) и
@@ -512,7 +516,30 @@ export function createReviewPipeline(cfg, deps = {}) {
       // увидят остальные файлы как [ANOTHER PART], и запрет absence-claims сработает как
       // обычно. Планируем до buildChunks, чтобы нарезать только то, что действительно идёт в LLM.
       const diffSections = extractFileDiffSections(annotated);
-      const inputHashes = fileInputHashes(changedPaths, diffSections, ctxWindows.map);
+      // Карточки символов (RFC 14, шаг 2): объявления того, что вызывают добавленные строки,
+      // если модель их не видит. Место в потоке:
+      //   ПОСЛЕ blast-radius — оттуда индекс уже прочитанного графа;
+      //   ДО fileInputHashes — карточки входят в хэш входа файла (без номеров строк, см.
+      //     symbolCardsHashInput), иначе смена сигнатуры вызываемой функции в другом PR
+      //     не заставила бы пере-ревьюить вызывающий файл;
+      //   ДО buildChunks — чанк собирает их из своих файлов.
+      const symbolCardsOn = Boolean(limits.symbolCards);
+      const symbolCards = symbolCardsOn
+        ? buildSymbolCards(changedPaths, {
+          graphIndex,
+          sections: diffSections,
+          windows: ctxWindows.map,
+          readLines,
+          limits: { bodyMaxLines: limits.symbolCardsBodyMaxLines },
+        })
+        : null;
+      if (symbolCards) {
+        log(`карточки символов: ${symbolCards.metrics.cards} из ${symbolCards.metrics.candidates} вызванных имён`, symbolCards.metrics.skip_reasons);
+      }
+      const inputHashes = fileInputHashes(
+        changedPaths, diffSections, ctxWindows.map,
+        symbolCards ? new Map([...symbolCards.byPath].map(([p, cards]) => [p, symbolCardsHashInput(cards)])) : null,
+      );
       const configFp = configFingerprint({ ...cfg, version: cfg.profile?.version });
       const priorIncremental = cfg.incremental?.enabled
         ? await readIncrementalState(cfg.incremental.stateFile)
@@ -558,6 +585,19 @@ export function createReviewPipeline(cfg, deps = {}) {
       if (ctxWindows.windowed.size) {
         for (const c of chunks) c.windowedPaths = (c.paths || []).filter((p) => ctxWindows.windowed.has(p));
       }
+      // Карточки — тем же способом, что windowedPaths: поле чанка, его читает buildMessages.
+      let symbolCardsDropped = 0;
+      if (symbolCards?.byPath.size) {
+        for (const c of chunks) {
+          const sel = selectChunkCards(symbolCards.byPath, c.paths, {
+            max: limits.symbolCardsMax, maxChars: limits.symbolCardsMaxChars,
+          });
+          if (sel.cards.length) c.symbolCards = sel.cards;
+          c.symbolCardsChars = sel.chars;
+          c.symbolCardsDropped = sel.dropped;
+          symbolCardsDropped += sel.dropped;
+        }
+      }
       const note0 = [
         chunks.length > 1
           ? `PR большой — разбит на ${chunks.length} частей для полного охвата (каждая ревьюится отдельно).`
@@ -584,6 +624,13 @@ export function createReviewPipeline(cfg, deps = {}) {
         blast_radius: blastMetrics,
         // Окна контекста (RFC 07): без этих величин экономия неотличима от того, что файлов
         // в PR просто стало меньше — а решение имеет смысл ровно пока она видна отдельно.
+        // Карточки символов (RFC 14): candidates и чанки, упёршиеся в лимит, решают, нужен ли
+        // ранкер (шаг 3); null — фича выключена.
+        symbolCards: symbolCards ? {
+          ...symbolCards.metrics,
+          dropped: symbolCardsDropped,
+          chunks_over_limit: chunks.filter((c) => c.symbolCardsDropped > 0).length,
+        } : null,
         contextWindows: {
           margin: limits.contextMargin,
           minChars: limits.contextWindowMinChars,
@@ -599,6 +646,8 @@ export function createReviewPipeline(cfg, deps = {}) {
           diff_chars: c.annotated?.length ?? 0,
           context_chars: c.fileContents?.length ?? 0,
           windowed_paths: c.windowedPaths?.length ?? 0,
+          symbol_cards: c.symbolCards?.length ?? 0,
+          symbol_cards_chars: c.symbolCardsChars ?? 0,
           paths: c.paths?.length ?? 0,
           classes: chunkClasses(c),
         })),

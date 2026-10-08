@@ -575,6 +575,9 @@ pub fn build_verifier_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Valu
 }
 
 /// buildMessages — основной промпт ревью (чанк диффа + контекст).
+/// Заголовок блока карточек символов (RFC 14); зеркало SYMBOL_CARDS_HEADER в lib/prompt.mjs.
+const SYMBOL_CARDS_HEADER: &str = "## Declarations of symbols called by the changed lines (defined outside the context shown above)\nEach entry is the declaration only — the body is NOT shown. It proves the symbol EXISTS and what its signature is; it proves NOTHING about what the body does: do not report the behaviour of such a symbol and do not call it undefined. An entry marked (full body) shows the whole short body.";
+
 pub fn build_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
     let changed_paths: Option<Vec<Value>> = match args.get("changedPaths") {
         Some(Value::Array(a)) => Some(a.clone()),
@@ -648,6 +651,17 @@ pub fn build_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
         String::new()
     };
 
+    // Карточки символов (RFC 14): готовые строки из lib/symbol-cards.mjs в поле чанка.
+    let cards: Vec<String> = match chunk.get("symbolCards") {
+        Some(Value::Array(a)) => a.iter().map(js_to_string).collect(),
+        _ => Vec::new(),
+    };
+    let cards_section = if !cards.is_empty() {
+        format!("{SYMBOL_CARDS_HEADER}\n```\n{}\n```\n\n", fence_escape(&cards.join("\n")))
+    } else {
+        String::new()
+    };
+
     let prescan_section = str_arg(args, "prescanSection");
     let prescan_part = if !prescan_section.is_empty() {
         format!("## Deterministic pre-scan (eslint/ast-grep on changed files — already reported, do NOT duplicate)\n{prescan_section}\n\n")
@@ -661,7 +675,7 @@ pub fn build_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
     let files_map_or_empty = if files_map.is_empty() { String::new() } else { files_map };
 
     let user = format!(
-        "PR #{pr_number}: «{title}»\n\n{files_map_or_empty}{prescan_part}{blast}\n{prior_section}{files_section}## Diff (RIGHT-side line numbers in the prefix; take the inline line FROM HERE)\n```diff\n{annotated}\n```",
+        "PR #{pr_number}: «{title}»\n\n{files_map_or_empty}{prescan_part}{blast}\n{prior_section}{files_section}{cards_section}## Diff (RIGHT-side line numbers in the prefix; take the inline line FROM HERE)\n```diff\n{annotated}\n```",
         annotated = fence_escape(&str_arg(args, "annotated")),
     );
 
