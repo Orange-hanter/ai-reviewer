@@ -539,14 +539,22 @@ export function createReviewPipeline(cfg, deps = {}) {
       if (symbolCards) {
         log(`карточки символов: ${symbolCards.metrics.cards} из ${symbolCards.metrics.candidates} вызванных имён`, symbolCards.metrics.skip_reasons);
       }
-      const inputHashes = fileInputHashes(
-        changedPaths, diffSections, ctxWindows.map,
-        symbolCards ? new Map([...symbolCards.byPath].map(([p, cards]) => [p, symbolCardsHashInput(cards)])) : null,
-      );
-      const configFp = configFingerprint({ ...cfg, version: cfg.profile?.version });
       const priorIncremental = cfg.incremental?.enabled
         ? await readIncrementalState(cfg.incremental.stateFile)
         : null;
+      // Вход карточек в хэш. Граф недоступен (graphify упал в CI — шаг continue-on-error), а
+      // фича включена: карточек нет не потому, что код изменился, — берём вход карточек из
+      // прошлого прогона, иначе каждый такой сбой заново ревьюил бы все JS/TS-файлы PR
+      // (аудит RFC 14, п. 1.9). Перенесённые находки получены С карточками — это не хуже.
+      let cardsInput = symbolCards ? new Map([...symbolCards.byPath].map(([p, cards]) => [p, symbolCardsHashInput(cards)])) : null;
+      let cardsInputReused = 0;
+      if (symbolCards && !graphIndex && priorIncremental?.cardsInput) {
+        cardsInput = new Map(Object.entries(priorIncremental.cardsInput).filter(([p]) => changedPaths.includes(p)));
+        cardsInputReused = cardsInput.size;
+        if (cardsInputReused) log(`карточки: граф недоступен — вход карточек ${cardsInputReused} файл(ов) взят из прошлого прогона, хэши не пересчитываются из-за сбоя графа`);
+      }
+      const inputHashes = fileInputHashes(changedPaths, diffSections, ctxWindows.map, cardsInput);
+      const configFp = configFingerprint({ ...cfg, version: cfg.profile?.version });
       const incrementalPlan = cfg.incremental?.enabled
         ? planIncremental({
           state: priorIncremental,
@@ -564,6 +572,8 @@ export function createReviewPipeline(cfg, deps = {}) {
           reviewed: incrementalPlan.reviewPaths.size,
           unchanged: incrementalPlan.unchanged.length,
           carried: incrementalPlan.carried.length,
+          // сколько хэшей посчитано с входом карточек из прошлого прогона (граф недоступен)
+          symbolCardsReused: cardsInputReused,
         });
       }
       // Дифф для LLM сужаем до ревьюируемых файлов; `files`/`changedPaths` остаются полными —
@@ -633,6 +643,8 @@ export function createReviewPipeline(cfg, deps = {}) {
         symbolCards: symbolCards ? {
           ...symbolCards.metrics,
           dropped: symbolCardsDropped,
+          // граф недоступен: вход карточек для хэша взят из прошлого прогона (аудит, п. 1.9)
+          hash_input_reused: cardsInputReused,
           chunks_over_limit: chunks.filter((c) => c.symbolCardsDropped > 0).length,
         } : null,
         contextWindows: {
@@ -941,6 +953,8 @@ export function createReviewPipeline(cfg, deps = {}) {
           // Счётчик прогонов подряд без полного: страховка от накопления дрейфа.
           sinceFull: incrementalPlan.mode === 'incremental' ? Number(priorIncremental?.sinceFull || 0) + 1 : 0,
           hashes: inputHashes,
+          // Вход карточек по файлам — чтобы сбой графа в следующем прогоне не менял хэши.
+          ...(cardsInput?.size ? { cardsInput: Object.fromEntries(cardsInput) } : {}),
           findings: carryable,
         }, log);
       }

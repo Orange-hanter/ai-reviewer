@@ -272,7 +272,7 @@ const DIFF = `diff --git a/foo.ts b/foo.ts
 +const b = parseLimits(a, { strict: true });
 `;
 
-async function runWithCards(env) {
+async function runWithCards(env, { graph = GRAPH } = {}) {
   const tmp = join(tmpdir(), `symbol-cards-${process.pid}-${Math.random().toString(36).slice(2)}.patch`);
   await writeFile(tmp, DIFF);
   const seen = { chunks: null };
@@ -286,14 +286,14 @@ async function runWithCards(env) {
       die: (m) => { throw new Error(`die: ${m}`); },
       repoFiles: async () => null,
       readLines,
-      graphify: { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex: GRAPH }) },
+      graphify: { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex: graph }) },
       prescan: {
         run: async () => ({
           findings: [], scanned: 0, skipped: 0, truncated: false, lintableTotal: 0, byTool: null, error: null, promptSection: '',
         }),
       },
       engine: {
-        reviewAllModels: async (chunks) => { seen.chunks = chunks; return [{ model: 'm1', summary: 'ok', findings: [] }]; },
+        reviewAllModels: async (chunks) => { seen.chunks = chunks; seen.calls = (seen.calls || 0) + 1; return [{ model: 'm1', summary: 'ok', findings: [] }]; },
         verifyFindings: async () => [],
       },
       github: {
@@ -560,4 +560,22 @@ test('аудит 1.6: класс — с сигнатурой конструкт�
     header: 'export class Client extends Base { constructor(url: string, opts: Opts = {}) }',
     endIdx: 5,
   });
+});
+
+test('аудит 1.9: граф недоступен во втором прогоне — хэши с прошлым входом карточек, файл не пере-ревьюится', async () => {
+  const { mkdtemp, readFile: rf } = await import('node:fs/promises');
+  const dir = await mkdtemp(join(tmpdir(), 'cards-inc-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    const env = { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateFile };
+    await runWithCards(env);
+    const first = JSON.parse(await rf(stateFile, 'utf8'));
+    assert.ok(first.cardsInput?.['foo.ts'], 'вход карточек сохранён в состоянии');
+    const second = await runWithCards(env, { graph: null });
+    const after = JSON.parse(await rf(stateFile, 'utf8'));
+    assert.deepEqual(after.hashes, first.hashes, 'сбой графа не меняет хэши');
+    assert.equal(second.calls ?? 0, 0, 'неизменившийся файл не отправлен в LLM');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
