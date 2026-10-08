@@ -48,6 +48,7 @@ test('разбор текста автора PR не проваливается 
     'литерал из обратных слэшей': () => extractUsedIdentifiers([`"${'\\\\'.repeat(5000)}x(1)`]),
     'вызов и пробелы': () => extractUsedIdentifiers([`x${' '.repeat(1990)}`]),
     'точка и пробелы': () => extractUsedIdentifiers([`.${' '.repeat(1990)}a b c`]),
+    'пробелы по краям в обход предела длины': () => extractUsedIdentifiers([`${' '.repeat(n)}${'/*'.repeat(900)}${' '.repeat(n)}`]),
     'import и пробелы': () => packageImportedNames([`import a${' '.repeat(n)}x`]),
     'многострочный import без from': () => packageImportedNames(['import {', ...Array(n).fill(' '.repeat(50))]),
     'объявление: пустые строки': () => declarationRegex('foo').test('\n'.repeat(n)),
