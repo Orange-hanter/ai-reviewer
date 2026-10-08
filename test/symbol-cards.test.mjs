@@ -272,9 +272,9 @@ const DIFF = `diff --git a/foo.ts b/foo.ts
 +const b = parseLimits(a, { strict: true });
 `;
 
-async function runWithCards(env, { graph = GRAPH } = {}) {
+async function runWithCards(env, { graph = GRAPH, diff = DIFF } = {}) {
   const tmp = join(tmpdir(), `symbol-cards-${process.pid}-${Math.random().toString(36).slice(2)}.patch`);
-  await writeFile(tmp, DIFF);
+  await writeFile(tmp, diff);
   const seen = { chunks: null };
   try {
     const cfg = loadReviewConfig({
@@ -575,6 +575,42 @@ test('аудит 1.9: граф недоступен во втором прого
     const after = JSON.parse(await rf(stateFile, 'utf8'));
     assert.deepEqual(after.hashes, first.hashes, 'сбой графа не меняет хэши');
     assert.equal(second.calls ?? 0, 0, 'неизменившийся файл не отправлен в LLM');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('аудит 1.9 (безопасность): второй сбой графа подряд и карточка на файл PR — без переиспользования', async () => {
+  const { mkdtemp, readFile: rf } = await import('node:fs/promises');
+  const dir = await mkdtemp(join(tmpdir(), 'cards-inc2-'));
+  try {
+    // второй сбой подряд — хэши пересчитываются честно
+    const stateA = join(dir, 'a.json');
+    const envA = { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateA };
+    await runWithCards(envA);
+    const first = JSON.parse(await rf(stateA, 'utf8'));
+    await runWithCards(envA, { graph: null });
+    assert.equal(JSON.parse(await rf(stateA, 'utf8')).cardsInputReused, true);
+    const third = await runWithCards(envA, { graph: null });
+    assert.notDeepEqual(JSON.parse(await rf(stateA, 'utf8')).hashes, first.hashes);
+    assert.equal(third.calls, 1, 'файл отправлен в LLM заново');
+
+    // карточка указывает на файл, который сам входит в PR, — сигнатура могла измениться
+    const stateB = join(dir, 'b.json');
+    const envB = { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateB };
+    const diffWithTarget = `${DIFF}diff --git a/lib/config.mjs b/lib/config.mjs
+--- a/lib/config.mjs
++++ b/lib/config.mjs
+@@ -1,1 +1,1 @@
+-// old header
++// header
+`;
+    await runWithCards(envB, { diff: diffWithTarget });
+    const before = JSON.parse(await rf(stateB, 'utf8'));
+    assert.deepEqual(before.cardsTargets['foo.ts'], ['lib/config.mjs']);
+    const again = await runWithCards(envB, { diff: diffWithTarget, graph: null });
+    assert.notEqual(JSON.parse(await rf(stateB, 'utf8')).hashes['foo.ts'], before.hashes['foo.ts']);
+    assert.equal(again.calls, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

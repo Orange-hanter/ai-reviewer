@@ -547,11 +547,23 @@ export function createReviewPipeline(cfg, deps = {}) {
       // прошлого прогона, иначе каждый такой сбой заново ревьюил бы все JS/TS-файлы PR
       // (аудит RFC 14, п. 1.9). Перенесённые находки получены С карточками — это не хуже.
       let cardsInput = symbolCards ? new Map([...symbolCards.byPath].map(([p, cards]) => [p, symbolCardsHashInput(cards)])) : null;
+      let cardsTargets = symbolCards
+        ? Object.fromEntries([...symbolCards.byPath].map(([p, cards]) => [p, [...new Set(cards.map((c) => c.path))]]))
+        : null;
       let cardsInputReused = 0;
-      if (symbolCards && !graphIndex && priorIncremental?.cardsInput) {
-        cardsInput = new Map(Object.entries(priorIncremental.cardsInput).filter(([p]) => changedPaths.includes(p)));
+      // Переиспользование сужено, чтобы не перенести находку мимо реального изменения:
+      //   - вызывающий файл, чья карточка указывает на файл ЭТОГО PR, не переиспользуется —
+      //     сигнатура могла измениться в этом же пуше, а без графа мы этого не увидим;
+      //   - не больше одного прогона подряд: второй сбой графа подряд пересчитывает честно,
+      //     иначе на время сбоя вход карточек застыл бы на неопределённый срок.
+      if (symbolCards && !graphIndex && priorIncremental?.cardsInput && !priorIncremental.cardsInputReused) {
+        const inPr = new Set(changedPaths);
+        const targets = priorIncremental.cardsTargets || {};
+        cardsInput = new Map(Object.entries(priorIncremental.cardsInput).filter(([p]) => inPr.has(p)
+          && Array.isArray(targets[p]) && !targets[p].some((t) => inPr.has(t))));
+        cardsTargets = Object.fromEntries([...cardsInput.keys()].map((p) => [p, targets[p]]));
         cardsInputReused = cardsInput.size;
-        if (cardsInputReused) log(`карточки: граф недоступен — вход карточек ${cardsInputReused} файл(ов) взят из прошлого прогона, хэши не пересчитываются из-за сбоя графа`);
+        if (cardsInputReused) log(`карточки: граф недоступен — вход карточек ${cardsInputReused} файл(ов) взят из прошлого прогона (их карточки не указывают на файлы PR)`);
       }
       const inputHashes = fileInputHashes(changedPaths, diffSections, ctxWindows.map, cardsInput);
       const configFp = configFingerprint({ ...cfg, version: cfg.profile?.version });
@@ -954,7 +966,8 @@ export function createReviewPipeline(cfg, deps = {}) {
           sinceFull: incrementalPlan.mode === 'incremental' ? Number(priorIncremental?.sinceFull || 0) + 1 : 0,
           hashes: inputHashes,
           // Вход карточек по файлам — чтобы сбой графа в следующем прогоне не менял хэши.
-          ...(cardsInput?.size ? { cardsInput: Object.fromEntries(cardsInput) } : {}),
+          ...(cardsInput?.size ? { cardsInput: Object.fromEntries(cardsInput), cardsTargets } : {}),
+          ...(cardsInputReused ? { cardsInputReused: true } : {}),
           findings: carryable,
         }, log);
       }
