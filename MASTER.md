@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:ca7eab38e53e`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:3796ad7dec46`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:48d1319fb490`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:6951ddf818b3`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -132,7 +132,7 @@ graph TD
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:b3014d9b0bfc`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:72b3d0ddda47`
 - **Статус:** `🟢 VERIFIED`
 
 ### README

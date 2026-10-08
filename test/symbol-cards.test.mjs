@@ -307,11 +307,11 @@ async function runWithCards(env) {
   }
 }
 
-test('pipeline: REVIEW_SYMBOL_CARDS=1 — карточка доезжает до чанка; по умолчанию поля нет', async () => {
-  const on = await runWithCards({ REVIEW_SYMBOL_CARDS: '1' });
+test('pipeline: по умолчанию карточка доезжает до чанка; REVIEW_SYMBOL_CARDS=0 — поля нет', async () => {
+  const on = await runWithCards({});
   assert.deepEqual(on.chunks[0].symbolCards, [
     '// lib/config.mjs:L2–L4\nexport function parseLimits(raw, { strict = false } = {})',
   ]);
-  const off = await runWithCards({});
+  const off = await runWithCards({ REVIEW_SYMBOL_CARDS: '0' });
   assert.equal(off.chunks[0].symbolCards, undefined);
 });
