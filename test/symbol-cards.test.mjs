@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 const {
   extractUsedIdentifiers, scanDeclaration, findDeclarationEnd, buildSymbolCards, selectChunkCards,
-  symbolCardsHashInput, renderSymbolCard, addedLinesOfSection, declarationRegex,
+  symbolCardsHashInput, renderSymbolCard, addedLinesOfSection, declarationRegex, createLineReader,
 } = await import('../lib/symbol-cards.mjs');
 const { buildGraphIndex } = await import('../lib/graphify.mjs');
 const { fileInputHashes, configFingerprint } = await import('../lib/incremental.mjs');
@@ -26,6 +26,32 @@ test('extractUsedIdentifiers: вызовы, new и методы; без ключ
     '  // строка-комментарий: helper()',
   ]);
   assert.deepEqual([...used.entries()].sort(), [['ReviewEngine', 1], ['parseLimits', 2], ['run', 1]].sort());
+});
+
+test('extractUsedIdentifiers: незакрытая строка из обратных слэшей разбирается за линейное время (ReDoS)', () => {
+  const evil = `"${'\\\\'.repeat(5000)}x(1)`;
+  const t0 = performance.now();
+  extractUsedIdentifiers([evil]);
+  assert.ok(performance.now() - t0 < 500, 'экспоненциальный перебор в регулярке литералов');
+});
+
+test('createLineReader: symlink за пределы корня не читается, обычный файл — читается', async () => {
+  const { mkdtemp, mkdir, symlink, writeFile: wf } = await import('node:fs/promises');
+  const root = await mkdtemp(join(tmpdir(), 'cards-root-'));
+  const outside = await mkdtemp(join(tmpdir(), 'cards-out-'));
+  try {
+    await mkdir(join(root, 'lib'));
+    await wf(join(root, 'lib', 'ok.mjs'), 'export function ok() {}\n');
+    await wf(join(outside, 'secret.txt'), 'TOKEN=abc\n');
+    await symlink(join(outside, 'secret.txt'), join(root, 'lib', 'leak.mjs'));
+    const read = createLineReader(root);
+    assert.deepEqual(read('lib/ok.mjs'), ['export function ok() {}', '']);
+    assert.equal(read('lib/leak.mjs'), null, 'symlink наружу');
+    assert.equal(read('../' + outside.split('/').pop() + '/secret.txt'), null, 'выход через ..');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
 });
 
 test('addedLinesOfSection: только строки `N: +`', () => {
