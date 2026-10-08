@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Пробник моделей Ollama Cloud: latency/поведение reasoning_effort, JSON-mode.
 // Запуск: OLLAMA_API_KEY=... npx pr-review-probe-models [model1,model2,...]
-const MODELS = (process.argv[2] || 'kimi-k2.7-code,glm-5.2,deepseek-v4-pro,deepseek-v4-flash,minimax-m2.7,minimax-m3').split(',');
+const MODELS = (process.argv[2] || 'kimi-k2.7-code,glm-5.3,glm-5.3-flash,minimax-m3,deepseek-v4-pro,deepseek-v4-flash').split(',');
 const BASE = (process.env.OLLAMA_BASE_URL || 'https://ollama.com/v1').replace(/\/$/, '');
 const KEY = process.env.OLLAMA_API_KEY;
 
