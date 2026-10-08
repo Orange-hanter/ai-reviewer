@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:cea04f1aed8b`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:952c505926ce`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -102,7 +102,7 @@ graph TD
 
 ### RFC 14 — Карточки символов
 - **Описание:** строка объявления того, что вызывает изменённый код, во входе модели; семейство FP 8 («символа нет» по графу); шаг 0 — замер до кода.
-- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:b1a79c55ac6d`
+- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:be8e815982ba`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 15 — Наряды по косвенным признакам
@@ -127,7 +127,7 @@ graph TD
 
 ### Индекс RFC
 - **Описание:** таблица решений 01–13.
-- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:b34889d82645`
+- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:7c7508155f96`
 - **Статус:** `🟢 VERIFIED`
 
 ### Changelog
