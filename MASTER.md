@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:ec6b36a8d2a9`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:d5313017ae46`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -105,6 +105,16 @@ graph TD
 - **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:b1a79c55ac6d`
 - **Статус:** `🟢 VERIFIED`
 
+### RFC 15 — Наряды по косвенным признакам
+- **Описание:** детерминированный слой решает «куда смотреть», исполнитель получает адресную задачу; этап 0 (shadow-слой, офлайн-замер) реализован, гейт не тронут, этапы 1–3 на решении.
+- **Ссылка:** `📁 proposals/15-cue-driven-briefs.md | 🗃️ doc:proposals_15-cue-driven-briefs_md | 🔑 sha:b29bd1675fe7`
+- **Статус:** `🟢 VERIFIED`
+
+### Замер косвенных признаков
+- **Описание:** этап 0 RFC 15 без LLM: поднимаются ли размеченные дефектные строки в топ ранжирования спанов по форме изменения, лексикону и классу пути (`bin/pr-review-scout.mjs`, `gold-public/`).
+- **Ссылка:** `📁 docs/scent-measurement.md | 🗃️ doc:docs_scent-measurement_md | 🔑 sha:cbc2a73e7c94`
+- **Статус:** `🟢 VERIFIED`
+
 ### Cursor Plugin
 - **Описание:** local install, два MCP, skill, rule.
 - **Ссылка:** `📁 cursor-plugin/README.md | 🗃️ doc:cursor-plugin_README_md | 🔑 sha:2ff130c14ca9`
@@ -117,12 +127,12 @@ graph TD
 
 ### Индекс RFC
 - **Описание:** таблица решений 01–13.
-- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:a646a9c60cfe`
+- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:b34889d82645`
 - **Статус:** `🟢 VERIFIED`
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:a975f50f3989`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:43ba5aa93780`
 - **Статус:** `🟢 VERIFIED`
 
 ### README
@@ -132,7 +142,7 @@ graph TD
 
 ### Индекс документации
 - **Описание:** все документы `docs/` и соседние README; сюда — всё, чего нет в этом реестре.
-- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:e62555178e57`
+- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:bdf7704c58f7`
 - **Статус:** `🟢 VERIFIED`
 
 ### Бэклог
@@ -167,6 +177,12 @@ graph TD
     "missing_info": []
   },
   "changelog": [
+    {
+      "date": "2026-10-08",
+      "action": "Хэши реестра пересчитаны (configuration, proposals/README, CHANGELOG, docs/README); RFC 15 и замер косвенных признаков в реестре",
+      "author": "claude",
+      "scope": "master"
+    },
     {
       "date": "2026-10-08",
       "action": "RFC 14 принят, план symbol-cards (CARD-001…012)",
