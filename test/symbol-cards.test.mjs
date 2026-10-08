@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 const {
   extractUsedIdentifiers, scanDeclaration, findDeclarationEnd, buildSymbolCards, selectChunkCards,
-  symbolCardsHashInput, renderSymbolCard, addedLinesOfSection, declarationRegex, createLineReader,
+  symbolCardsHashInput, renderSymbolCard, addedLinesOfSection, declarationRegex, createLineReader, packageImportedNames,
 } = await import('../lib/symbol-cards.mjs');
 const { buildGraphIndex } = await import('../lib/graphify.mjs');
 const { fileInputHashes, configFingerprint } = await import('../lib/incremental.mjs');
@@ -17,15 +17,29 @@ const { createReviewPipeline, loadReviewConfig } = await import('../index.mjs');
 
 const lines = (s) => s.split('\n');
 
-test('extractUsedIdentifiers: вызовы, new и методы; без ключевых слов, глобалов, встроенных методов и литералов', () => {
+test('extractUsedIdentifiers: вызовы и new; без методов через точку, ключевых слов, глобалов и литералов', () => {
   const used = extractUsedIdentifiers([
     'const x = parseLimits(env.LIMITS, { strict: true });',
     'if (ok) return new ReviewEngine(cfg).run(items.map(fn));',
     'console.log("call fake(1) in string"); // comment(2)',
-    'const y = parseLimits(other) + JSON.stringify(z);',
+    'const y = parseLimits(other) + JSON.stringify(z); assert . ok(y);',
     '  // строка-комментарий: helper()',
+    'return compute(a);',
   ]);
-  assert.deepEqual([...used.entries()].sort(), [['ReviewEngine', 1], ['parseLimits', 2], ['run', 1]].sort());
+  assert.deepEqual([...used.entries()].sort(), [['ReviewEngine', 1], ['compute', 1], ['parseLimits', 2]].sort());
+});
+
+test('packageImportedNames: имена из пакетов, но не из файлов репозитория и алиасов', () => {
+  const names = packageImportedNames([
+    "import { ok, deepEqual as de } from 'node:assert';",
+    "import express from 'express';",
+    "import * as path from 'node:path';",
+    "import { local } from './local.mjs';",
+    "import { aliased } from '@/lib/x';",
+    "import { scoped } from '@scope/pkg';",
+    "const { readFile: rf, stat } = require('fs');",
+  ]);
+  assert.deepEqual([...names].sort(), ['de', 'express', 'ok', 'path', 'rf', 'scoped', 'stat']);
 });
 
 test('extractUsedIdentifiers: незакрытая строка из обратных слэшей разбирается за линейное время (ReDoS)', () => {
@@ -118,6 +132,8 @@ const GRAPH = buildGraphIndex({
     { id: 'py', label: 'pyThing()', source_file: 'tools/x.py', source_location: 'L1' },
     { id: 'own', label: 'localFar()', source_file: 'src/app.ts', source_location: 'L90' },
     { id: 'short', label: 'tiny()', source_file: 'lib/tiny.mjs', source_location: 'L1' },
+    // одноимённая с `ok` из node:assert функция репозитория — карточки быть не должно
+    { id: 'okn', label: 'ok()', source_file: 'lib/ok.mjs', source_location: 'L1' },
   ],
   links: [],
 });
@@ -125,8 +141,9 @@ const GRAPH = buildGraphIndex({
 const FILES = {
   'lib/config.mjs': lines('// header\nexport function parseLimits(raw, { strict = false } = {}) {\n  return raw;\n}'),
   'lib/stale.mjs': lines('export function renamed() {}'),
+  'lib/ok.mjs': lines('export function ok(x) {}'),
   'lib/tiny.mjs': lines('export function tiny(a) {\n  return a + 1;\n}'),
-  'src/app.ts': [...Array(89).fill('// filler'), 'function localFar(x: number): number {', '  return x;', '}'],
+  'src/app.ts': ["import { ok } from 'node:assert';", ...Array(88).fill('// filler'), 'function localFar(x: number): number {', '  return x;', '}'],
 };
 const readLines = (p) => FILES[p] ?? null;
 
@@ -143,6 +160,7 @@ test('buildSymbolCards: каждый фильтр отсекает свой сл
     'const e = visibleFn();',
     'const f = localFar(1);',
     'const g = unknownFn();',
+    'ok(g);',
   ])], ['README.md', section(['parseLimits()'])]]);
   const windows = new Map([['src/app.ts', 'function visibleFn() {\n  return 1;\n}']]);
   const { byPath, metrics } = buildSymbolCards(['src/app.ts', 'README.md'], {
@@ -160,8 +178,9 @@ test('buildSymbolCards: каждый фильтр отсекает свой сл
     stale_graph: 1,
     non_js_target: 1,
     visible: 1,
+    package_import: 1,
   });
-  assert.equal(metrics.candidates, 7);
+  assert.equal(metrics.candidates, 8);
   assert.equal(metrics.cards, 2);
 });
 
