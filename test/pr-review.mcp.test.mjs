@@ -47,7 +47,7 @@ const criticalReview = {
   findings: [criticalFinding()],
 };
 
-function pipelineDeps({ reviews = [criticalReview], engineHold } = {}) {
+function pipelineDeps({ reviews = [criticalReview], engineHold, onEngineEnter } = {}) {
   return {
     graphify: { buildBlastRadius: async () => [] },
     prescan: {
@@ -58,6 +58,7 @@ function pipelineDeps({ reviews = [criticalReview], engineHold } = {}) {
     },
     engine: {
       reviewAllModels: async () => {
+        onEngineEnter?.();
         if (engineHold) await engineHold;
         return reviews;
       },
@@ -237,15 +238,21 @@ test('review_run: тот же пин пока running — stub, другой п�
     await writeFile(join(root, 'other.patch'), CODE_DIFF);
     let release;
     const hold = new Promise((r) => { release = r; });
+    let entered;
+    const engineEntered = new Promise((r) => { entered = r; });
     const extra = {
       root,
       env: { ...ENV, REVIEW_MCP_ROOT: root },
-      pipelineDeps: pipelineDeps({ engineHold: hold }),
+      pipelineDeps: pipelineDeps({ engineHold: hold, onEngineEnter: () => entered() }),
     };
     const first = handleReviewMcpRequest(runCall({
       diffPath: join(root, 'changes.patch'),
       headSha: HEAD,
     }), extra);
+    // Слот занимает тот вызов, что первым дойдёт до захвата. Повторный шлём, когда первый
+    // уже в engine: иначе исполнителем может стать он и ждать release(), который идёт
+    // после его же ответа, — взаимная блокировка, зависящая от порядка I/O раннера.
+    await engineEntered;
     const same = await handleReviewMcpRequest(runCall({
       diffPath: join(root, 'changes.patch'),
       headSha: HEAD,
