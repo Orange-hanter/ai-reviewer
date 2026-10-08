@@ -272,7 +272,7 @@ const DIFF = `diff --git a/foo.ts b/foo.ts
 +const b = parseLimits(a, { strict: true });
 `;
 
-async function runWithCards(env, { graph = GRAPH, diff = DIFF } = {}) {
+async function runWithCards(env, { graph = GRAPH, diff = DIFF, findings = [] } = {}) {
   const tmp = join(tmpdir(), `symbol-cards-${process.pid}-${Math.random().toString(36).slice(2)}.patch`);
   await writeFile(tmp, diff);
   const seen = { chunks: null };
@@ -293,8 +293,8 @@ async function runWithCards(env, { graph = GRAPH, diff = DIFF } = {}) {
         }),
       },
       engine: {
-        reviewAllModels: async (chunks) => { seen.chunks = chunks; seen.calls = (seen.calls || 0) + 1; return [{ model: 'm1', summary: 'ok', findings: [] }]; },
-        verifyFindings: async () => [],
+        reviewAllModels: async (chunks) => { seen.chunks = chunks; seen.calls = (seen.calls || 0) + 1; return [{ model: 'm1', summary: 'ok', findings }]; },
+        verifyFindings: async (cands, ctx) => { seen.verifyCtx = ctx; return []; },
       },
       github: {
         readPriorStickyData: async () => ({ findings: [], runs: [], sha: '' }),
@@ -614,4 +614,14 @@ test('аудит 1.9 (безопасность): второй сбой граф�
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('решение 4: REVIEW_VERIFIER_SYMBOL_CARDS=1 — карточки файла кандидата доходят до verifier; по умолчанию нет', async () => {
+  const findings = [{ file: 'foo.ts', line: 2, severity: 'major', title: 'вызов `parseLimits` со strict', body: 'b', confidence: 0.9, model: 'm1' }];
+  const env = { REVIEW_VERIFIER: '1', REVIEW_MODE: 'consensus', OLLAMA_MODELS: 'm1' };
+  const on = await runWithCards({ ...env, REVIEW_VERIFIER_SYMBOL_CARDS: '1' }, { findings });
+  assert.deepEqual(on.verifyCtx?.symbolCards, ['// lib/config.mjs:L2–L4\nexport function parseLimits(raw, { strict = false } = {})']);
+  const off = await runWithCards(env, { findings });
+  assert.ok(off.verifyCtx, 'verifier вызван');
+  assert.equal(off.verifyCtx.symbolCards, undefined);
 });

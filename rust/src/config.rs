@@ -749,6 +749,8 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             // второй проход смотрит 1–2 строки на файл, целый файл он не окупает.
             "contextMargin": num_json(num_env(env, "REVIEW_VERIFIER_CONTEXT_MARGIN", 80.0)),
             "strictBlocks": env_flag(env, "REVIEW_VERIFIER_STRICT", true),
+            // Карточки символов verifier'у (RFC 14, решение 4): выключено до gold ×3.
+            "symbolCards": env_flag(env, "REVIEW_VERIFIER_SYMBOL_CARDS", false),
         }),
     );
     out.insert("router".into(), json!({ "enabled": router_enabled }));

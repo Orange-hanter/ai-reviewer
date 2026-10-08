@@ -141,7 +141,7 @@ async function persistExports(cfg, payload, log, obs) {
 /** Стадия verifier Pass B: кандидаты critical/major → второй проход. Fail-open при сбое LLM. */
 async function runVerifierStage(allFindings, {
   engine, gate, verifier, deadline, contentMap, annotated, blastBlocks, pr, changedFilesSection,
-  actionability, actionabilityCtx, files,
+  actionability, actionabilityCtx, files, symbolCardsByPath = null, limits = {},
 }, log, obs) {
   const empty = { findings: allFindings, stats: null };
   if (!verifier.enabled) return empty;
@@ -206,8 +206,17 @@ async function runVerifierStage(allFindings, {
       .map(([, s]) => s);
     const annotatedScoped = sections.length ? sections.join('\n') : annotated;
     log(`verifier ctx: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, контекст ${ctxWindow.before}→${ctxWindow.after} симв. (окна ±${verifier.contextMargin}), дифф ${annotatedScoped.length}/${annotated.length} симв.`);
+    // Карточки символов файлов-кандидатов (RFC 14, решение 4) — только под флагом: это вход
+    // судьи, чей вердикт решает блокировку.
+    const verifierCards = verifier.symbolCards && symbolCardsByPath?.size
+      ? selectChunkCards(symbolCardsByPath, [...candFiles], {
+        max: limits.symbolCardsMax, maxChars: limits.symbolCardsMaxChars, visibleText: `${annotatedScoped}\n${fileContents}`,
+      }).cards
+      : [];
+    if (verifierCards.length) log(`verifier: карточек символов ${verifierCards.length}`);
     const verdicts = await engine.verifyFindings(candidates, {
       annotated: annotatedScoped, fileContents, blastBlocks, pr, changedFilesSection,
+      ...(verifierCards.length ? { symbolCards: verifierCards } : {}),
     });
     const applied = applyVerifierVerdicts(allFindings, candidates, verdicts, log, {
       strictUnverified: verifier.strictBlocks,
@@ -876,6 +885,8 @@ export function createReviewPipeline(cfg, deps = {}) {
                 actionability: cfg.actionability,
                 actionabilityCtx,
                 files,
+                symbolCardsByPath: symbolCards?.byPath ?? null,
+                limits,
               }, log, obs)
             : { findings: currentFindings, stats: null };
           currentFindings = verifierStage.findings;

@@ -201,6 +201,21 @@ for (const [profileName, activate] of Object.entries(PROFILES)) {
     changedFilesSection: '## All changed files in the PR (4)\n- `src/a.ts`\n',
   }));
 
+  // RFC 14, решение 4: карточки символов verifier'у
+  check(`${profileName}: buildVerifierMessages symbol cards`, () => buildVerifierMessages({
+    candidates: [{ severity: 'major', file: 'src/a.ts', line: 3, title: 'сигнатура', body: '`parseLimits` без strict', confidence: 0.8 }],
+    annotated: ANNOTATED,
+    fileContents: '### src/a.ts\n```\nconst x = 1;\n```',
+    blastBlocks: [],
+    pr: PR,
+    changedFilesSection: '',
+    symbolCards: ['// lib/config.mjs:L212–L248\nexport function parseLimits(raw, { strict = false } = {})', '// x.ts:L1 (full body)\nconst t = `${a}` + "```";'],
+  }));
+  check(`${profileName}: buildVerifierMessages symbol cards empty`, () => buildVerifierMessages({
+    candidates: [{ severity: 'major', file: 'src/a.ts', line: 3, title: 't', body: 'b', confidence: 0.8 }],
+    annotated: ANNOTATED, fileContents: '', blastBlocks: [], pr: PR, changedFilesSection: '', symbolCards: [],
+  }));
+
   check(`${profileName}: buildVerifierMessages empty ctx`, () => buildVerifierMessages({
     candidates: [{ severity: 'major', file: 'a.ts', line: 1, title: 't', body: '' }],
     annotated: '', fileContents: '', blastBlocks: [], pr: { number: 1, title: 't' },
