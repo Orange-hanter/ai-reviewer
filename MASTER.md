@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 ---
 
 # 🧭 Project Navigator: ai-reviewer
@@ -47,12 +47,12 @@ graph TD
 
 ### Как вести лог
 - **Описание:** куда писать journal / execution-log / CHANGELOG / RFC; sync в cod-doc.
-- **Ссылка:** `📁 docs/dev/README.md | 🗃️ doc:docs_dev_README_md | 🔑 sha:4ed5f72ce9ed`
+- **Ссылка:** `📁 docs/dev/README.md | 🗃️ doc:docs_dev_README_md | 🔑 sha:8fbfd2b08b90`
 - **Статус:** `🟢 VERIFIED`
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:3796ad7dec46`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:01989b8dac8b`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -102,12 +102,17 @@ graph TD
 
 ### RFC 14 — Карточки символов
 - **Описание:** строка объявления того, что вызывает изменённый код, во входе модели; семейство FP 8 («символа нет» по графу); шаг 0 — замер до кода.
-- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:0263374caf12`
+- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:95bbcc0269ba`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 15 — Наряды по косвенным признакам
 - **Описание:** детерминированный слой решает «куда смотреть», исполнитель получает адресную задачу; этап 0 (shadow-слой, офлайн-замер) реализован, гейт не тронут, этапы 1–3 на решении.
 - **Ссылка:** `📁 proposals/15-cue-driven-briefs.md | 🗃️ doc:proposals_15-cue-driven-briefs_md | 🔑 sha:b29bd1675fe7`
+- **Статус:** `🟢 VERIFIED`
+
+### Аудит RFC 14
+- **Описание:** независимый разбор карточек символов после включения по умолчанию: находки со статусами, методология решений, вектор развития.
+- **Ссылка:** `📁 docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md | 🗃️ doc:docs_dev_audit_2026-10-09-rfc-14-symbol-cards_md | 🔑 sha:d77b55df7ee9`
 - **Статус:** `🟢 VERIFIED`
 
 ### Замер косвенных признаков
@@ -132,7 +137,7 @@ graph TD
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:72b3d0ddda47`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:770a143d6adc`
 - **Статус:** `🟢 VERIFIED`
 
 ### README
@@ -177,6 +182,12 @@ graph TD
     "missing_info": []
   },
   "changelog": [
+    {
+      "date": "2026-10-09",
+      "action": "Аудит RFC 14 в реестре; исправления точности и наблюдаемости карточек",
+      "author": "claude",
+      "scope": "master"
+    },
     {
       "date": "2026-10-08",
       "action": "Хэши реестра пересчитаны (configuration, proposals/README, CHANGELOG, docs/README); RFC 15 и замер косвенных признаков в реестре",

@@ -15,7 +15,9 @@ import { BLAST_FINDING_SOURCE } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
 import { buildVerifierFileContents, windowChunkFileContents } from './lib/context-window.mjs';
-import { buildSymbolCards, createLineReader, selectChunkCards, symbolCardsHashInput } from './lib/symbol-cards.mjs';
+import {
+  buildSymbolCards, createLineReader, selectChunkCards, symbolCardsHashInput, symbolCardsOutcome, isAbsenceClaim,
+} from './lib/symbol-cards.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
 import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
 import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath } from './lib/router.mjs';
@@ -531,6 +533,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           windows: ctxWindows.map,
           readLines,
           limits: { bodyMaxLines: limits.symbolCardsBodyMaxLines },
+          appDir: cfg.profile?.layout?.appDir || '',
         })
         : null;
       if (symbolCards) {
@@ -591,8 +594,9 @@ export function createReviewPipeline(cfg, deps = {}) {
         for (const c of chunks) {
           const sel = selectChunkCards(symbolCards.byPath, c.paths, {
             max: limits.symbolCardsMax, maxChars: limits.symbolCardsMaxChars,
+            visibleText: `${c.annotated || ''}\n${c.fileContents || ''}`,
           });
-          if (sel.cards.length) c.symbolCards = sel.cards;
+          if (sel.cards.length) { c.symbolCards = sel.cards; c.symbolCardNames = sel.names; }
           c.symbolCardsChars = sel.chars;
           c.symbolCardsDropped = sel.dropped;
           symbolCardsDropped += sel.dropped;
@@ -648,6 +652,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           windowed_paths: c.windowedPaths?.length ?? 0,
           symbol_cards: c.symbolCards?.length ?? 0,
           symbol_cards_chars: c.symbolCardsChars ?? 0,
+          symbol_card_names: c.symbolCardNames ?? [],
           paths: c.paths?.length ?? 0,
           classes: chunkClasses(c),
         })),
@@ -887,6 +892,11 @@ export function createReviewPipeline(cfg, deps = {}) {
       logFindingsStage(obs, 'after_gate', allFindings);
 
       const { inline, outside } = findingsFmt.classify(allFindings, files, actionabilityCtx);
+      // Карточки → находки (аудит RFC 14, п. 1.5) и датчик «символ не определён» по телам —
+      // пишется и при выключенных карточках: это база для сравнения.
+      obs.logEvent('symbol_cards_outcome', symbolCards
+        ? { enabled: true, ...symbolCardsOutcome({ chunks, llmFindings, finalFindings: allFindings, inline }) }
+        : { enabled: false, llm: { findings: llmFindings.length, absenceClaims: llmFindings.filter(isAbsenceClaim).length } });
       logActionabilityDistribution(obs, {
         findings: allFindings,
         inlineCount: inline.length,

@@ -10,8 +10,10 @@ import { join } from 'node:path';
 const {
   extractUsedIdentifiers, scanDeclaration, findDeclarationEnd, buildSymbolCards, selectChunkCards,
   symbolCardsHashInput, renderSymbolCard, addedLinesOfSection, declarationRegex, createLineReader, packageImportedNames,
+  resolveCardNode, hasLocalBinding, symbolCardsOutcome, isAbsenceClaim,
 } = await import('../lib/symbol-cards.mjs');
 const { buildGraphIndex } = await import('../lib/graphify.mjs');
+const { backfillMissing } = await import('../lib/config.mjs');
 const { fileInputHashes, configFingerprint } = await import('../lib/incremental.mjs');
 const { createReviewPipeline, loadReviewConfig } = await import('../index.mjs');
 
@@ -186,7 +188,8 @@ test('buildSymbolCards: каждый фильтр отсекает свой сл
   ]);
   assert.equal(cards.find((c) => c.name === 'parseLimits').declaration, 'export function parseLimits(raw, { strict = false } = {})');
   assert.deepEqual(metrics.skip_reasons, {
-    unresolved_or_ambiguous: 2, // helper (два узла) и unknownFn (нет узла)
+    ambiguous: 1, // helper — два узла
+    unresolved: 1, // unknownFn — нет узла
     stale_graph: 1,
     non_js_target: 1,
     visible: 1,
@@ -314,4 +317,120 @@ test('pipeline: по умолчанию карточка доезжает до �
   ]);
   const off = await runWithCards({ REVIEW_SYMBOL_CARDS: '0' });
   assert.equal(off.chunks[0].symbolCards, undefined);
+});
+
+// ── Аудит RFC 14 (docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md) ──
+
+test('аудит 0.1: backfillMissing дописывает только отсутствующие ключи, вложенно', () => {
+  const rust = { limits: { chunkBytes: 1, contextMargin: 0 }, other: 'x' };
+  const js = { limits: { chunkBytes: 9, contextMargin: 40, symbolCards: true }, other: 'y', added: { a: 1 } };
+  assert.deepEqual(backfillMissing(rust, js).sort(), ['added', 'limits.symbolCards']);
+  assert.deepEqual(rust, { limits: { chunkBytes: 1, contextMargin: 0, symbolCards: true }, other: 'x', added: { a: 1 } });
+});
+
+const AUDIT_GRAPH = buildGraphIndex({
+  nodes: [
+    { id: 'call', label: 'run()', source_file: 'lib/uses-run.mjs', source_location: 'L1' },
+    { id: 'prop', label: 'getId()', source_file: 'lib/widget.mjs', source_location: 'L1' },
+    { id: 'mock', label: 'listTypes()', source_file: 'src/svc.spec.ts', source_location: 'L2' },
+    { id: 'log', label: 'log()', source_file: 'lib/logger.mjs', source_location: 'L1' },
+    { id: 'var', label: 'dup', source_file: 'lib/a.mjs', source_location: 'L1' },
+    { id: 'fn', label: 'dup()', source_file: 'lib/b.mjs', source_location: 'L1' },
+    { id: 'P', label: 'Parser', source_file: 'lib/parser.mjs', source_location: 'L1' },
+    { id: 'p', label: 'parser()', source_file: 'lib/parse.mjs', source_location: 'L1' },
+    { id: 'm', label: '.method()', source_file: 'lib/m.mjs', source_location: 'L1' },
+    { id: 'app', label: 'inApp()', source_file: 'server/x.ts', source_location: 'L1' },
+  ],
+  links: [],
+});
+const AUDIT_FILES = {
+  'lib/uses-run.mjs': lines('const r = run(a, b);'),
+  'lib/widget.mjs': lines('const widget = { getId: () => 1 };'),
+  'src/svc.spec.ts': lines('// spec\nconst listTypes = jest.fn();'),
+  'lib/logger.mjs': lines('export function log(msg) {}'),
+  'src/caller.ts': lines('function work(log) {\n  log("x");\n}'),
+  'app/server/x.ts': lines('export function inApp(a: number) {\n  return a;\n}'),
+};
+const auditRead = (p) => AUDIT_FILES[p] ?? null;
+const auditCards = (added, { path = 'src/caller.ts', appDir = '' } = {}) => buildSymbolCards([path], {
+  graphIndex: AUDIT_GRAPH, sections: new Map([[path, section(added)]]), windows: new Map(), readLines: auditRead, appDir,
+});
+
+test('аудит 0.2: узел на строке вызова или свойства объекта — не объявление, карточки нет', () => {
+  const r = auditCards(['go(run(1));', 'show(getId());']);
+  assert.equal(r.byPath.size, 0);
+  assert.equal(r.metrics.skip_reasons.stale_graph, 1, 'run: строка — вызов');
+  assert.equal(r.metrics.skip_reasons.not_a_declaration, 1, 'getId: заголовок `const widget =` без имени');
+});
+
+test('аудит 1.1: объявление метода в добавленной строке — не вызов; mock из spec — не источник', () => {
+  assert.deepEqual([...extractUsedIdentifiers([
+    '  listTypes(filter: Filter): Promise<Item[]>;',
+    '  async run(a, b) {',
+    '  private build<T>(x: T): void {',
+  ]).keys()], []);
+  assert.deepEqual([...extractUsedIdentifiers(['run(a);', 'build(x).then(done);']).keys()].sort(), ['build', 'run'], 'вызов-оператор остаётся вызовом');
+  const r = auditCards(['const t = listTypes(f);']);
+  assert.equal(r.metrics.skip_reasons.test_source, 1);
+  const fromTest = auditCards(['const t = listTypes(f);'], { path: 'src/other.spec.ts' });
+  assert.equal(fromTest.metrics.skip_reasons.test_source, undefined, 'тест может опираться на тестовый хелпер');
+});
+
+test('аудит 1.2: имя-параметр или деструктуризация в вызывающем файле — чужая карточка не выдаётся', () => {
+  const r = auditCards(['  log("y");']);
+  assert.equal(r.byPath.size, 0);
+  assert.equal(r.metrics.skip_reasons.local_shadow, 1);
+  assert.ok(hasLocalBinding(['const { log, warn: w } = deps;'], 'log'));
+  assert.ok(hasLocalBinding(['items.forEach((item, log) => {'], 'log'));
+  assert.ok(hasLocalBinding(['} catch (log) {'], 'log'));
+  assert.ok(hasLocalBinding(['const f = log => log + 1;'], 'log'));
+  assert.ok(!hasLocalBinding(['logger.info(dialog);', 'import { log } from "./logger.mjs";'], 'log'), 'импорт — не тень');
+});
+
+test('аудит 1.3: resolveCardNode — неоднозначность name/name() и регистр', () => {
+  assert.deepEqual(resolveCardNode(AUDIT_GRAPH, 'dup'), { node: null, reason: 'ambiguous' });
+  assert.equal(resolveCardNode(AUDIT_GRAPH, 'Parser').node?.id, 'P');
+  assert.equal(resolveCardNode(AUDIT_GRAPH, 'parser').node?.id, 'p');
+  assert.deepEqual(resolveCardNode(AUDIT_GRAPH, 'method'), { node: null, reason: 'unresolved' }, 'метка метода `.method()` по голому имени не совпадает');
+});
+
+test('аудит 1.7: interface/type/enum/namespace считаются объявлением', () => {
+  for (const d of ['interface Foo {', 'export type Foo = {', 'enum Foo {', 'namespace Foo {']) {
+    assert.ok(declarationRegex('Foo').test(d), d);
+  }
+});
+
+test('аудит 1.11: граф от layout.appDir — путь узла дополняется префиксом', () => {
+  const r = auditCards(['const v = inApp(1);'], { path: 'app/client/y.ts', appDir: 'app' });
+  assert.deepEqual(r.byPath.get('app/client/y.ts').map((c) => [c.path, c.line, c.endLine]), [['app/server/x.ts', 1, 3]]);
+  const noDir = auditCards(['const v = inApp(1);'], { path: 'app/client/y.ts' });
+  assert.equal(noDir.metrics.skip_reasons.unreadable, 1);
+});
+
+test('аудит 1.8: карточка, чьё объявление видно в окне другого файла чанка, не дублируется', () => {
+  const byPath = new Map([['a.ts', [{ name: 'shared', path: 'lib/s.mjs', line: 1, endLine: 2, declaration: 'function shared()', count: 1 }]]]);
+  const sel = selectChunkCards(byPath, ['a.ts', 'b.ts'], { visibleText: '### b.ts\nexport function shared() {\n}' });
+  assert.deepEqual(sel.cards, []);
+  assert.equal(sel.visible, 1);
+});
+
+test('аудит 1.5: isAbsenceClaim — утверждение об отсутствии рядом с идентификатором, не рантайм', () => {
+  assert.ok(isAbsenceClaim({ title: 'Функция `parseLimits` не определена' }));
+  assert.ok(isAbsenceClaim({ body: 'В модуле `x.ts` экспорт `foo` is not exported' }));
+  assert.ok(!isAbsenceClaim({ title: '`isCurrentUser` не защищён от null' }));
+  assert.ok(!isAbsenceClaim({ body: 'Отсутствует обработка случая отсутствия OrganizationMapping' }));
+});
+
+test('аудит 1.5: symbolCardsOutcome связывает находки с карточками чанка их файла', () => {
+  const chunks = [{ paths: ['a.ts'], symbolCardNames: ['parseLimits'] }, { paths: ['b.ts'] }];
+  const onCard = { file: 'a.ts', severity: 'major', title: 'вызов `parseLimits` без strict', verifierStatus: 'verified' };
+  const otherFile = { file: 'b.ts', severity: 'minor', title: 'parseLimits где-то ещё' };
+  const substring = { file: 'a.ts', severity: 'minor', title: 'parseLimitsX — другое имя' };
+  const absent = { file: 'a.ts', severity: 'minor', title: '`helper` не определён' };
+  const out = symbolCardsOutcome({
+    chunks, llmFindings: [onCard, otherFile, substring, absent], finalFindings: [onCard, otherFile], inline: [onCard],
+  });
+  assert.deepEqual(out.names, ['parseLimits']);
+  assert.deepEqual(out.llm, { findings: 4, mentioning: 1, absenceClaims: 1 });
+  assert.deepEqual(out.final, { findings: 2, mentioning: 1, inline: 1, bySeverity: { major: 1 }, byVerifier: { verified: 1 } });
 });

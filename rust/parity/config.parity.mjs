@@ -35,6 +35,8 @@ if (!existsSync(BIN)) {
 }
 
 process.env.AI_REVIEWER_CONFIG_FORCE_JS = '1';
+// Сырой ответ Rust: дополнение недостающих ключей из JS скрыло бы отставание порта.
+process.env.AI_REVIEWER_CONFIG_NO_BACKFILL = '1';
 const { loadReviewConfig } = await import('../../lib/config.mjs');
 const P = await import('../../lib/profile.mjs');
 
