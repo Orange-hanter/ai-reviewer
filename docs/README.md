@@ -22,6 +22,7 @@ last_updated: 2026-09-29
 | [false-positives.md](false-positives.md) | Семейства ложных срабатываний, защиты, петля обучения |
 | [model-tuning.md](model-tuning.md) | Роли моделей, температуры, размер чанка, reasoning effort |
 | [review-quality.md](review-quality.md) | Разбор низкого сигнала ревью: замер, причины по коду, план |
+| [scent-measurement.md](scent-measurement.md) | Замер слоя косвенных признаков без LLM: несут ли поверхностные признаки адрес дефекта ([RFC 15](../proposals/15-cue-driven-briefs.md)) |
 | [structure.md](structure.md) | Structure-контур: facts/assessment/obligations, провайдеры, MCP; вне гейта |
 | [benchmark-public.md](benchmark-public.md) | Замер на публичных диффах (`gold-public/`): precision/recall и разбор промахов |
 | [backlog.md](backlog.md) | Открытые направления и долг слияний вне планов cod-doc |
