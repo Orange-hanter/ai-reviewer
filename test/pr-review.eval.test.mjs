@@ -108,12 +108,12 @@ test('applyVerifierVerdicts: downgrade critical → minor, не блок', () =>
 
 test('eval harness: все fixtures green', async () => {
   const { ok, metrics, results } = await runEvalHarness();
-  assert.equal(metrics.total, 16, 'ожидаем 16 seed fixtures');
+  assert.equal(metrics.total, 17, 'ожидаем 17 seed fixtures');
   if (!ok) {
     const failed = results.filter((r) => !r.pass).map((r) => `${r.id}: ${r.errors.join('; ')}`);
     assert.fail(`eval fixtures failed:\n${failed.join('\n')}`);
   }
-  assert.equal(metrics.passed, 16);
+  assert.equal(metrics.passed, 17);
 });
 
 test('loadReviewConfig: REVIEW_VERIFIER off', () => {
@@ -252,7 +252,7 @@ test('parseInlineReviewTitle: nested bold markers in title', () => {
 test('loadReviewConfig: MoA defaults', () => {
   const cfg = loadReviewConfig({ OLLAMA_API_KEY: 'x' });
   assert.equal(cfg.reviewMode, 'moa');
-  assert.deepEqual([...cfg.moa.references], ['kimi-k2.7-code', 'glm-5.2', 'deepseek-v4-flash']);
+  assert.deepEqual([...cfg.moa.references], ['kimi-k2.7-code', 'glm-5.3', 'glm-5.3-flash']);
   assert.equal(cfg.moa.aggregator, 'minimax-m3');
   assert.equal(cfg.verifier.model, 'deepseek-v4-pro');
   assert.equal(cfg.gate.consensusMin, 1);
@@ -747,9 +747,9 @@ test('parseSpecialistAssignments: semantic defaults (not positional MOA_REFERENC
   const a = parseSpecialistAssignments({}, ['m1', 'm2', 'm3']);
   assert.equal(a.length, 3);
   assert.equal(a[0].role, 'security');
-  assert.equal(a[0].model, 'deepseek-v4-flash');
+  assert.equal(a[0].model, 'glm-5.3-flash');
   assert.equal(a[1].model, 'kimi-k2.7-code');
-  assert.equal(a[2].model, 'glm-5.2');
+  assert.equal(a[2].model, 'glm-5.3');
 });
 
 test('loadReviewConfig: specialist model mapping + independent aggregator/verifier', () => {
@@ -757,9 +757,9 @@ test('loadReviewConfig: specialist model mapping + independent aggregator/verifi
   assert.equal(cfg.specialists.enabled, true);
   const map = Object.fromEntries(cfg.specialists.assignments.map((x) => [x.role, x.model]));
   assert.deepEqual(map, {
-    security: 'deepseek-v4-flash',
+    security: 'glm-5.3-flash',
     correctness: 'kimi-k2.7-code',
-    architecture: 'glm-5.2',
+    architecture: 'glm-5.3',
   });
   assert.equal(cfg.moa.aggregator, 'minimax-m3');
   assert.equal(cfg.verifier.model, 'deepseek-v4-pro');

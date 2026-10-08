@@ -16,9 +16,9 @@
 use serde_json::{json, Map, Value};
 
 // Дефолты движка (lib/constants.mjs + lib/config.mjs).
-pub const DEFAULT_MOA_REFERENCES: &str = "kimi-k2.7-code,glm-5.2,deepseek-v4-flash";
+pub const DEFAULT_MOA_REFERENCES: &str = "kimi-k2.7-code,glm-5.3,glm-5.3-flash";
 pub const DEFAULT_MOA_SPECIALIST_MODELS: &str =
-    "security:deepseek-v4-flash,correctness:kimi-k2.7-code,architecture:glm-5.2";
+    "security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3";
 pub const DEFAULT_MOA_AGGREGATOR: &str = "minimax-m3";
 pub const DEFAULT_REVIEW_VERIFIER_MODEL: &str = "deepseek-v4-pro";
 pub const DEFAULT_OLLAMA_MODELS_FALLBACK: &str = "deepseek-v4-flash";
@@ -238,9 +238,9 @@ fn num_json(n: f64) -> Value {
 /// fallback на moaReferences (как в JS) недостижим, но цепочка сохранена.
 fn role_default_model(role: &str) -> &'static str {
     match role {
-        "security" => "deepseek-v4-flash",
+        "security" => "glm-5.3-flash",
         "correctness" => "kimi-k2.7-code",
-        "architecture" => "glm-5.2",
+        "architecture" => "glm-5.3",
         _ => "",
     }
 }

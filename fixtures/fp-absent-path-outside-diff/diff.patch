@@ -1,0 +1,17 @@
+diff --git a/app/server/routes/orders.ts b/app/server/routes/orders.ts
+--- a/app/server/routes/orders.ts
++++ b/app/server/routes/orders.ts
+@@ -1,6 +1,9 @@
+ import { Router } from 'express';
+ import { db } from '../db';
++import { calcDiscount } from '../services/pricing';
++import { audit } from '../services/audit-log';
++import { loadTemplate } from './templates';
+
+ export const orders = Router();
+
+@@ -20,4 +23,5 @@ orders.post('/', async (req, res) => {
+   const order = await db.orders.create(req.body);
++  order.total = calcDiscount(order.total, req.body.code);
+   res.json(order);
+ });

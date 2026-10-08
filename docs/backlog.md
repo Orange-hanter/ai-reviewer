@@ -1,3 +1,11 @@
+---
+type: plan
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-29
+---
+
 # Бэклог: фичи и идеи из анализа рынка AI-ревью (2026-08-27)
 
 Источник — сравнительное исследование открытых (PR-Agent, Kodus, Red Hat ai-code-review,
@@ -23,7 +31,7 @@ FP-learning-loop» пуста — конкурентов в ней нет; ри�
    близости. `pr-review-gold` — уже пол-инфраструктуры. Двойная отдача: доказательство
    «precision выше CodeRabbit» (готовый питч) + калибровка эвристических весов actionability.
    Отдельным срезом — оценка severity-ranking (постобработка отдельно от recall, как в arXiv).
-   → **замер проведён** (Unreleased), см. [benchmark-public.md](benchmark-public.md).
+   → **замер проведён** (вышел в 0.3.0), см. [benchmark-public.md](benchmark-public.md).
    Набор `gold-public/` — 13 tp + 5 clean из grafana / sentry / discourse, разметка выведена
    по SZZ-lite из фиксов самих проектов (`pr-review-gold-harvest`, `--validate`), скоринг по
    локации (`mustFindLocations`), прогон командой `npm run benchmark:public`. Решения — в
@@ -51,8 +59,8 @@ FP-learning-loop» пуста — конкурентов в ней нет; ри�
 ## A. Устойчивость и операционка
 
 4. Расширить contract-тесты на все CLI-команды (сейчас — workflow-шаблоны).
-5. **RFC-процесс** как в cod-doc: actionability-веса, смена namespace, strict-режим —
-   фиксировать решения до реализации.
+5. ✅ **RFC-процесс** как в cod-doc: actionability-веса, смена namespace, strict-режим —
+   фиксировать решения до реализации. Работает: [proposals/](../proposals/README.md), RFC 01–12.
 6. Политика ретраев `effort=none` вынести в конфиг (замер: −50–75% latency на reasoning-моделях);
    качество режима не подтверждено → прогнать как эксперимент через gold-набор.
    → **частично**: `REVIEW_REASONING_EFFORT` в конфиге, каскад ретраев в пайплайне;
@@ -153,7 +161,7 @@ JS-копию как fallback. После слияния правка окаже
 
 Что сделать (по возрастанию стоимости):
 
-1. перенести список расширений в `rust/src/router.rs` и разбор `FNF/FNH` в
+1. ✅ перенести список расширений в `rust/src/router.rs` и разбор `FNF/FNH` в
    `rust/src/structure_lcov.rs`, с теми же тестами, что добавлены в JS;
 2. ✅ **parity-прогоны включены в гейт**: `npm run check:parity` (все `rust/parity/*.parity.mjs`)
    входит в `check:rust` после `cargo build` и отдельным шагом CI после сборки — раньше

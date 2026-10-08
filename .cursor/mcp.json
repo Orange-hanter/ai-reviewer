@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "ai-reviewer": {
+      "type": "stdio",
+      "command": "/bin/sh",
+      "args": ["${workspaceFolder}/cursor-plugin/bin/review-mcp.sh"],
+      "env": {
+        "AI_REVIEWER_ROOT": "${workspaceFolder}",
+        "REVIEW_MCP_ROOT": "${workspaceFolder}"
+      }
+    },
+    "ai-reviewer-structure": {
+      "type": "stdio",
+      "command": "/bin/sh",
+      "args": ["${workspaceFolder}/cursor-plugin/bin/structure-mcp.sh"],
+      "env": {
+        "AI_REVIEWER_ROOT": "${workspaceFolder}",
+        "REVIEW_MCP_ROOT": "${workspaceFolder}",
+        "STRUCTURE_MCP_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}

@@ -5,9 +5,16 @@ node_modules/
 # локальные прогоны движка в его же репозитории
 .ai-review/
 
+# локальная БД cod-doc (навигатор MASTER.md — в git)
+.cod-doc/
+
 # git-worktrees фоновых сессий Claude Code
 .claude/worktrees/
 
 # Rust build artifacts
 rust/target/
 rust/Cargo.lock
+
+# COD-DOC
+__pycache__/
+*.pyc

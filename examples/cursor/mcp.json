@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "ai-reviewer": {
+      "type": "stdio",
+      "command": "/bin/sh",
+      "args": ["${env:AI_REVIEWER_ROOT}/cursor-plugin/bin/review-mcp.sh"],
+      "env": {
+        "AI_REVIEWER_ROOT": "${env:AI_REVIEWER_ROOT}",
+        "REVIEW_MCP_ROOT": "${workspaceFolder}",
+        "OLLAMA_API_KEY": "${env:OLLAMA_API_KEY}"
+      }
+    },
+    "ai-reviewer-structure": {
+      "type": "stdio",
+      "command": "/bin/sh",
+      "args": ["${env:AI_REVIEWER_ROOT}/cursor-plugin/bin/structure-mcp.sh"],
+      "env": {
+        "AI_REVIEWER_ROOT": "${env:AI_REVIEWER_ROOT}",
+        "REVIEW_MCP_ROOT": "${workspaceFolder}",
+        "STRUCTURE_MCP_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}

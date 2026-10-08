@@ -1,3 +1,11 @@
+---
+type: analysis
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Низкий сигнал ревью: разбор прогона и план лечения
 
 Документ описывает конкретный замер (два прогона движка на Claude Sonnet, 2026-09-02),
@@ -46,6 +54,9 @@
 `inline=1 · outside=33`, и единственный инлайн — блокер по severity, а не по доказуемости.
 
 ### 2.2 Курица и яйцо: verifier ↔ actionability
+
+> Исправлено (P1): порог допуска к verifier теперь свой — `actionability.verifyMin`
+> (`pipeline.mjs`, `verifyThreshold`). Ниже — разбор состояния до правки, номера строк того времени.
 
 `pipeline.mjs:98-110` набирает advisory-кандидатов для verifier через тот же `routeFindings`
 с тем же `threshold`, отбирая `.filter((s) => s.promoted)`. Значит:
@@ -111,7 +122,7 @@ Verifier для advisory работает только «на понижение
 1. **Дать prescan работать.** В окружении ревью — `npm ci` в целевом репозитории и
    установленный `ast-grep`. Это возвращает сигнал весом 3 и независимую проверку строк.
    Проверка: в логе `prescan R6: N issue(s)` вместо `недоступен`/`ENOENT`.
-2. **Собирать code graph** перед прогоном (`pr-review-graphify`), чтобы `blastCaller` (+2)
+2. **Собирать code graph** перед прогоном (шаг graphify в [`examples/ci/pr-review.yml`](../examples/ci/pr-review.yml)), чтобы `blastCaller` (+2)
    и soft-gate по blast-radius перестали быть нулями.
 3. **Завести `.ai-reviewer.json`** для этого репозитория: `layout.sensitive` с `lib/`,
    правила про канонические примитивы и осознанные усечения, список доменных инвариантов.
@@ -140,7 +151,7 @@ verifier'у 12 находок группы «без claims» — включая 
 `juryDowngraded` −2 применять только когда severity **не** была уже понижена refutation'ом
 (`f.refutationStatus === 'downgraded'` — признак уже применённого штрафа), либо считать jury
 пропорционально: `+2` при всех verified, `0` при смеси, `−2` только когда понижены все
-claims. Сейчас единственная понижённая претензия из пяти обнуляет находку целиком.
+claims. До RFC 06 единственная понижённая претензия из пяти обнуляла находку целиком.
 
 ### P3 — измерять, а не верить
 

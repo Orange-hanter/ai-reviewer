@@ -10,6 +10,7 @@ import { createGraphifyClient } from './lib/graphify.mjs';
 import { createGithubClient } from './lib/github.mjs';
 import { createReviewEngine } from './lib/engine.mjs';
 import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings, attachFingerprints } from './lib/findings.mjs';
+import { buildRepoPathIndex, listRepoFiles } from './lib/absent-path.mjs';
 import { BLAST_FINDING_SOURCE } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
@@ -26,6 +27,14 @@ import {
   fileInputHashes, configFingerprint, readIncrementalState, writeIncrementalState,
   planIncremental, markCarried, formatIncrementalNote,
 } from './lib/incremental.mjs';
+
+/** Soft-fail пайплайна без process.exit — для долгоживущих потребителей (MCP). */
+export class PipelineSoftFail extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'PipelineSoftFail';
+  }
+}
 
 function logFindingsStage(obs, stage, findings) {
   if (!obs?.enabled) return;
@@ -274,10 +283,10 @@ async function notifyTelegram(cfg, log, { pr, counts, total, htmlUrl, reason }) 
  * FP-фильтр → beforeResolve → resolveBlockers: единый путь для fail-closed и основного pipeline.
  * Возвращает findings, clusters, blockers, список снятых FP-паттернами находок и результат beforeResolve.
  */
-export async function runGateResolution({ findings: inputFindings, changedPaths, gate, prescanCfg, patternsFile, log, beforeResolve }) {
+export async function runGateResolution({ findings: inputFindings, changedPaths, gate, prescanCfg, patternsFile, repoIndex, log, beforeResolve }) {
   const beforeFp = inputFindings;
   const beforeFpCount = beforeFp.length;
-  const afterFp = filterFalsePositiveFindings(beforeFp, changedPaths, log, { patternsFile });
+  const afterFp = filterFalsePositiveFindings(beforeFp, changedPaths, log, { patternsFile, repoIndex });
   const afterFpCount = afterFp.length;
   const afterFpSet = new Set(afterFp);
   const fpRemoved = beforeFp.filter((f) => !afterFpSet.has(f));
@@ -301,6 +310,7 @@ export function createReviewPipeline(cfg, deps = {}) {
   const findingsFmt = deps.findingsFmt ?? createFindingsFormatter(cfg);
   const prescan = deps.prescan ?? createPrescanRunner(cfg, { log });
   const telegramNotifier = deps.notifyTelegram ?? notifyTelegram;
+  const repoFiles = deps.repoFiles ?? (() => listRepoFiles());
 
   async function finishObs(obs, data) {
     if (!obs?.enabled) return;
@@ -313,19 +323,51 @@ export function createReviewPipeline(cfg, deps = {}) {
 
   /** @returns {Promise<number>} exit code */
   async function run() {
+    const detailed = await runDetailed();
+    return detailed.exitCode;
+  }
+
+  /**
+   * Тот же прогон, но с артефактом в памяти — MCP и тесты не зависят от записи на диск
+   * (dry-run без REVIEW_EXPORT_DRY_RUN файл не пишет).
+   * @returns {Promise<{exitCode: number, artifact: object|null, exportResult: object|null, wouldBlock: boolean, degraded: boolean, reason?: string}>}
+   */
+  async function runDetailed() {
     const { cli, reviewMode, ollama: oCfg, moa, models, gate, limits, verifier, specialists } = cfg;
     const { dryRun, diffFile } = cli;
     const postCreds = cfg.github.repo && cfg.github.prNumber && cfg.github.token;
+    let lastArtifact = null;
+    let lastExport = null;
 
-    if (!oCfg.key) die('нет LLM API key (задайте LLM_API_KEY или OLLAMA_API_KEY)');
-    if (reviewMode === 'moa' && !moa.references.length) die('MOA_REFERENCE_MODELS пуст — задай хотя бы один advisor');
-    if (!diffFile && !postCreds) die('нет REPO/PR_NUMBER/GITHUB_TOKEN для загрузки диффа');
-    if (!dryRun && !postCreds) die('постинг требует REPO/PR_NUMBER/GITHUB_TOKEN — для локального прогона добавь --dry-run');
+    async function persistAndCapture(payload) {
+      lastArtifact = payload;
+      lastExport = await persistExports(cfg, payload, log, obs);
+      return lastExport;
+    }
+
+    function detailedResult(exitCode, extra = {}) {
+      const wouldBlock = extra.wouldBlock !== undefined
+        ? extra.wouldBlock
+        : (lastArtifact ? Boolean(lastArtifact.wouldBlock) : exitCode === 1);
+      return {
+        exitCode,
+        artifact: lastArtifact,
+        exportResult: lastExport,
+        wouldBlock,
+        degraded: Boolean(extra.degraded),
+        reason: extra.reason,
+      };
+    }
 
     const obs = createObservability(cfg, { log });
     let finalObs = { exitCode: 0 };
 
     try {
+      if (!oCfg.key) die('нет LLM API key (задайте LLM_API_KEY или OLLAMA_API_KEY)');
+      if (reviewMode === 'moa' && !moa.references.length) die('MOA_REFERENCE_MODELS пуст — задай хотя бы один advisor');
+      if (!diffFile && !postCreds) die('нет REPO/PR_NUMBER/GITHUB_TOKEN для загрузки диффа');
+      if (!dryRun && !postCreds) die('постинг требует REPO/PR_NUMBER/GITHUB_TOKEN — для локального прогона добавь --dry-run');
+
       const engine = deps.engine ?? createReviewEngine(cfg, { ollama, prompt, log, observability: obs });
 
       let pr = { number: cfg.github.prNumber, title: '(local diff)', html_url: '' };
@@ -334,7 +376,8 @@ export function createReviewPipeline(cfg, deps = {}) {
 
       if (diffFile) {
         diff = await readFile(diffFile, 'utf8');
-        log(`дифф из файла ${diffFile} (${diff.length} байт)`);
+        headSha = String(deps.headSha || cli.headSha || '').trim();
+        log(`дифф из файла ${diffFile} (${diff.length} байт)${headSha ? ` · head ${headSha.slice(0, 7)}` : ''}`);
       } else {
         const loaded = await github.loadDiff();
         if (!loaded) die('не удалось загрузить дифф PR (нет REPO/PR/token или сбой GitHub API)');
@@ -365,23 +408,25 @@ export function createReviewPipeline(cfg, deps = {}) {
       if (route.route === 'skip' || route.route === 'light') {
         const md = buildRouterSummary(cfg, { route, pr, headSha, changedPaths });
         finalObs = { exitCode: 0, route: route.route, wouldBlock: false };
-        await persistExports(cfg, buildReviewJson({
+        await persistAndCapture(buildReviewJson({
           pr, headSha, reviewMode, route, wouldBlock: false,
           counts: { critical: 0, major: 0, minor: 0, nit: 0 },
           total: 0, findings: [], blockers: [], reviews: [],
           changedPaths,
-        }), log, obs);
+        }));
         if (dryRun) {
           log(`=== DRY-RUN: router ${route.route} — LLM пропущен ===`);
-          console.log('\n--- SUMMARY MARKDOWN ---\n' + md);
-          return 0;
+          log('\n--- SUMMARY MARKDOWN ---\n' + md);
+          finalObs = { exitCode: 0, route: route.route, wouldBlock: false, degraded: true };
+          return detailedResult(0, { wouldBlock: false, degraded: true, reason: `router ${route.route}` });
         }
         if (postCreds) {
           await github.deleteStaleInline().catch(() => {});
           await github.upsertSticky(md);
           log(`router ${route.route}: sticky обновлён, LLM не вызывался`);
         }
-        return 0;
+        finalObs = { exitCode: 0, route: route.route, wouldBlock: false, degraded: true };
+        return detailedResult(0, { wouldBlock: false, degraded: true, reason: `router ${route.route}` });
       }
 
       const prepT0 = Date.now();
@@ -609,6 +654,14 @@ export function createReviewPipeline(cfg, deps = {}) {
         ...dedupeAgainstPrescan(llmFindings, prescanResult.findings),
       ];
       logFindingsStage(obs, 'after_llm_merge', allFindings);
+      // Дерево репозитория для FP-семейства 7 («файла нет» о файле вне PR). null — дерево
+      // не читается или чужое (см. buildRepoPathIndex): фильтр тогда — только паттерны.
+      const repoIndex = allFindings.length
+        ? buildRepoPathIndex(await Promise.resolve().then(repoFiles).catch(() => null), changedPaths)
+        : null;
+      // Выключенный фильтр не должен быть невидимым: иначе «защита не работала» не отличить
+      // от «ложных находок не было».
+      if (allFindings.length && !repoIndex) log('FP-семейство 7 выключено: дерево репозитория не прочитано или чужое');
 
       if (!ok.length && !nothingToReview && (gate.llmRequired || !allFindings.length)) {
         const why = reviews.map((r) => `${r.model}: ${r.error}`).join('; ');
@@ -619,7 +672,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         // refutation/verifier — LLM-стадии, при полном аутедже недоступны по определению.
         const gateResolution = await runGateResolution({
           findings: allFindings, changedPaths, gate, prescanCfg: cfg.prescan,
-          patternsFile: cfg.feedback?.patternsFile, log,
+          patternsFile: cfg.feedback?.patternsFile, repoIndex, log,
         });
         allFindings = gateResolution.findings;
         // Отпечатки до экспорта: артефакт этой ветки (LLM-аутедж, находки только от prescan)
@@ -645,7 +698,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           sample: slimFindings(prescanBlockers),
         });
         logFindingsStage(obs, 'after_gate', allFindings);
-        await persistExports(cfg, buildReviewJson({
+        await persistAndCapture(buildReviewJson({
           pr, headSha, reviewMode, route,
           wouldBlock: gateBlocked,
           counts, total: allFindings.length, findings: allFindings,
@@ -653,7 +706,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           llmFailed: true,
           llmErrors: reviews.map((r) => ({ model: r.model, error: String(r.error || '').slice(0, 200) })),
           blastMetrics, changedPaths,
-        }), log, obs);
+        }));
         if (dryRun) {
           finalObs = {
             exitCode: gateBlocked ? 1 : 0,
@@ -663,8 +716,13 @@ export function createReviewPipeline(cfg, deps = {}) {
             blockers: prescanBlockers.length,
             total: allFindings.length,
             counts,
+            degraded: true,
           };
-          return finalObs.exitCode;
+          return detailedResult(finalObs.exitCode, {
+            wouldBlock: gateBlocked,
+            degraded: true,
+            reason: 'llm unavailable',
+          });
         }
         const prescanBlockerSet = new Set(prescanBlockers);
         const prescanAdvisoryFindings = allFindings.filter((f) => f.prescan && !prescanBlockerSet.has(f));
@@ -701,8 +759,13 @@ export function createReviewPipeline(cfg, deps = {}) {
           blockers: prescanBlockers.length,
           total: allFindings.length,
           counts,
+          degraded: true,
         };
-        return finalObs.exitCode;
+        return detailedResult(finalObs.exitCode, {
+          wouldBlock: gateBlocked,
+          degraded: true,
+          reason: 'llm unavailable',
+        });
       }
       if (!ok.length && allFindings.length) {
         log('LLM недоступен — продолжаем с prescan-only findings (R6), REVIEW_LLM_REQUIRED=0');
@@ -713,7 +776,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       // на известные ложные находки, а refutation может понизить severity уже отфильтрованного.
       const gateResolution = await runGateResolution({
         findings: allFindings, changedPaths, gate, prescanCfg: cfg.prescan,
-        patternsFile: cfg.feedback?.patternsFile, log,
+        patternsFile: cfg.feedback?.patternsFile, repoIndex, log,
         beforeResolve: async (fpFilteredFindings) => {
           let currentFindings = fpFilteredFindings;
 
@@ -799,12 +862,12 @@ export function createReviewPipeline(cfg, deps = {}) {
       // недетерминирован, замер #533: блокер в 4 прогонах из 6 при неизменном диффе).
       obs.logEvent('verdict', verdict);
 
-      await persistExports(cfg, buildReviewJson({
+      await persistAndCapture(buildReviewJson({
         pr, headSha, reviewMode, route, wouldBlock: blockers.length > 0, verdict,
         counts, total, findings: allFindings, blockers, reviews,
         verifierStats, refutationStats, prescanResult,
         blastMetrics, changedPaths,
-      }), log, obs);
+      }));
 
       // Состояние для следующего прогона. Пишем итоговый набор — тот, что виден человеку
       // (после FP-фильтра, refutation, verifier и гейта), потому что именно его придётся
@@ -829,12 +892,12 @@ export function createReviewPipeline(cfg, deps = {}) {
         log(blockers.length
           ? `⛔ WOULD BLOCK merge: ${blockers.length} кластер(ов) × ${gate.blockOn.join('/')}`
           : `✅ не блокирует (${reviewMode === 'moa' ? 'MoA-aggregator' : `консенсус ≥${gate.consensusMin}`})`);
-        console.log('\n--- INLINE COMMENTS ---');
-        for (const c of inline) console.log(`${c.path}:${c.line}\n  ${c.body.split('\n').slice(0, 2).join(' / ')}`);
-        console.log('\n--- SUMMARY MARKDOWN ---\n' + md);
+        log('\n--- INLINE COMMENTS ---');
+        for (const c of inline) log(`${c.path}:${c.line}\n  ${c.body.split('\n').slice(0, 2).join(' / ')}`);
+        log('\n--- SUMMARY MARKDOWN ---\n' + md);
         const exitCode = blockers.length ? 1 : 0;
         finalObs = { exitCode, dryRun: true, wouldBlock: blockers.length > 0, blockers: blockers.length, total, counts, inline: inline.length };
-        return exitCode;
+        return detailedResult(exitCode, { wouldBlock: blockers.length > 0 });
       }
 
       const pub = await publishReview(github, { inline, md, headSha, maxInline: limits.maxInline }, log);
@@ -865,12 +928,20 @@ export function createReviewPipeline(cfg, deps = {}) {
       if (blockers.length) {
         log(`⛔ merge ЗАБЛОКИРОВАН: ${blockers.length} кластер(ов) уровня ${gate.blockOn.join('/')}`);
         finalObs = { exitCode: 1, wouldBlock: true, blockers: blockers.length, total, counts, inline: inline.length };
-        return 1;
+        return detailedResult(1, { wouldBlock: true });
       }
       log(`готово — блокеров нет (${reviewMode}).`);
       finalObs = { exitCode: 0, wouldBlock: false, blockers: 0, total, counts, inline: inline.length };
-      return 0;
+      return detailedResult(0, { wouldBlock: false });
     } catch (e) {
+      if (e?.name === 'PipelineSoftFail') {
+        finalObs = {
+          exitCode: 0,
+          degraded: true,
+          error: String(e.message || e).slice(0, 200),
+        };
+        return detailedResult(0, { wouldBlock: false, degraded: true, reason: e.message });
+      }
       finalObs = {
         exitCode: 0,
         crashed: true,
@@ -882,7 +953,7 @@ export function createReviewPipeline(cfg, deps = {}) {
     }
   }
 
-  return { run };
+  return { run, runDetailed };
 }
 
 /** CLI: загрузка конфига и запуск. */

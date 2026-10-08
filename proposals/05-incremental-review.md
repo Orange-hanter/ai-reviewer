@@ -1,3 +1,11 @@
+---
+type: design
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # 05 — Инкрементальный прогон: не ревьюить заново то, что не менялось
 
 > Категория: 🔵 Архитектура · Риск: средний · Зависимости: [RFC 04](04-token-economy.md)

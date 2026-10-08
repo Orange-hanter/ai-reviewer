@@ -21,7 +21,8 @@
     "pr-review-gold-harvest": "./bin/pr-review-gold-harvest.mjs",
     "pr-review-scout": "./bin/pr-review-scout.mjs",
     "pr-review-structure": "./bin/pr-review-structure.mjs",
-    "pr-review-structure-mcp": "./bin/pr-review-structure-mcp.mjs"
+    "pr-review-structure-mcp": "./bin/pr-review-structure-mcp.mjs",
+    "pr-review-mcp": "./bin/pr-review-mcp.mjs"
   },
   "exports": {
     ".": "./index.mjs",

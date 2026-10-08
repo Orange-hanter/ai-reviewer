@@ -12,6 +12,7 @@ Golden PR-кейсы для регрессии post-processing + gate **без L
 | `diff.patch` | unified diff (для `changedPaths` и FP-filter) |
 | `findings.json` | `{ "findings": [...] }` — mock-вывод «модели» |
 | `verifier.json` | опц. `{ "verdicts": [...] }` — mock Pass B (R3) |
+| `repo-files.txt` | опц. дерево репозитория, путь на строку — для FP-семейства 7 («файла нет» о файле вне PR) |
 | `findings[].advisorClaims` | опц. refutation R5 |
 | `findings[].prescan` | опц. eslint-prescan finding (R6) |
 
@@ -37,7 +38,7 @@ npx pr-review-eval --json   # machine-readable
 node --test test/pr-review.eval.test.mjs
 ```
 
-CI: step в [pr-review.yml](../../../.github/workflows/pr-review.yml).
+CI: шаг «Eval harness fixtures» в [ci.yml](../.github/workflows/ci.yml).
 
 ## Добавить кейс вручную
 

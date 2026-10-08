@@ -1,3 +1,12 @@
+---
+type: standard
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-29
+last_reviewed: 2026-09-29
+---
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -17,7 +26,8 @@ conventional (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `release:`).
 ```bash
 npm test          # node --test test/*.test.mjs — юнит + контракты (в т.ч. шаблоны examples/ci/)
 npm run eval      # golden fixtures без LLM — гейт post-processing
-npm run check     # то и другое; ровно это гоняет CI (.github/workflows/ci.yml)
+npm run check     # test + eval + check:rust (cargo build/test + check:parity); нужен cargo;
+                  # ровно это гоняет CI (.github/workflows/ci.yml)
 
 node --test test/pr-review.test.mjs                                # один файл
 node --test --test-name-pattern="parseDiff: validLines" test/…     # один тест
@@ -40,7 +50,8 @@ node bin/pr-review-structure.mjs --graph .graphify/graphify-out/graph.json \
 ## Архитектура: что не видно из одного файла
 
 **Поток прогона** (`pipeline.mjs`, `createReviewPipeline(cfg, deps)` → `run()`):
-router (skip / light / full) → `parseDiff` + чанки → контекст (файлы целиком + blast-radius
+router (skip / light / full) → `parseDiff` + чанки → контекст (окна ±`REVIEW_CONTEXT_MARGIN`,
+по умолчанию 40 строк, вокруг изменённых строк, короткий файл целиком — RFC 07; + blast-radius
 через Graphify) → prescan (eslint + ast-grep, детерминированно, до LLM) → engine (MoA:
 specialist-advisors → жюри-агрегатор с refutation) → verifier Pass B (отдельная модель) →
 FP-фильтр, кластеризация, гейт (`resolveBlockers`) → actionability (inline или свод) →
@@ -106,11 +117,26 @@ majors (`source === BLAST_FINDING_SOURCE`) — soft: без verifier не бло
 поэтому потребитель обязан сверять «версия известна», а не равенство. Поля описаны в
 `docs/configuration.md`.
 
+## Rust-ядро
+
+`rust/` — порт части `lib/*.mjs` (diff, router, findings, engine, llm, prompt, specialists,
+verifier, report, github, export, actionability, metrics, config/profile, json, structure-*).
+JS-модуль остаётся обёрткой с тем же API: зовёт бинарь из `rust/target/debug/` (JSON на stdin),
+а без бинаря работает эталонный JS. `AI_REVIEWER_<MOD>_BIN` — путь к бинарю,
+`AI_REVIEWER_<MOD>_FORCE_JS=1` — чистый JS. Оркестрация (`pipeline.mjs`, chunk-routing,
+specialist-merge, incremental) — только JS. Меняешь логику портированного модуля — меняй обе
+стороны: `rust/parity/*.parity.mjs` (`npm run check:parity`) сверяют собранный бинарь с JS и
+без `cargo build` сходятся тривиально.
+
 ## Structure-контур
 
 `lib/structure*.mjs`, `bin/pr-review-structure*.mjs`, `schemas/` — отдельный доказательный
 контур: facts/assessment/obligations, EvidenceReceipt, провайдеры Graphify/SCIP/LCOV,
 mutation/property evidence, MCP-сервер с пином по SHA. Разбор — `docs/structure.md`.
+
+Отдельно от него — ревью-MCP `bin/pr-review-mcp.mjs` (дешёвые стадии + `review_run` как pinned
+dry-run MoA, `wait: false` + поллинг по `jobId`, RFC 08–12) и `cursor-plugin/`, который
+подключает оба MCP в Cursor. Оба — не гейт.
 
 **Граница, которую нельзя размывать:**
 
@@ -155,7 +181,11 @@ mutation/property evidence, MCP-сервер с пином по SHA. Разбо�
 
 ## Документация
 
+L0-навигатор — `MASTER.md`. Журнал разработки — `docs/dev/journal.md` (как вести —
+`docs/dev/README.md`). Реестр RFC — `proposals/README.md`.
+
 `docs/architecture.md` (поток и решения) · `docs/configuration.md` (все env и поля артефакта) ·
 `docs/profiles.md` (схема профиля) · `docs/false-positives.md` (семейства FP и защиты) ·
 `docs/review-quality.md` (почему находки не доезжают до строки) · `docs/model-tuning.md` ·
-`docs/structure.md` · `docs/swarm.md` · `docs/integration.md`.
+`docs/structure.md` · `docs/swarm.md` · `docs/integration.md` · `docs/benchmark.md` ·
+`docs/benchmark-public.md` · `docs/backlog.md` · `cursor-plugin/README.md`. Индекс — `docs/README.md`.

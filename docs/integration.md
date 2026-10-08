@@ -1,3 +1,11 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-29
+---
+
 # Интеграция в репозиторий-потребитель
 
 Движок живёт в отдельном репозитории и **никогда не берётся из кода PR**: CI выкачивает его
@@ -82,13 +90,15 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
 
 | Компонент | Для чего | Если нет |
 |-----------|----------|----------|
-| `OLLAMA_API_KEY` | LLM-слой | ревью не запускается (`REVIEW_LLM_REQUIRED=1` → блок) |
+| `OLLAMA_API_KEY` (или `LLM_API_KEY`) | LLM-слой | ревью не запускается: soft-fail, exit `0` при любом `REVIEW_LLM_REQUIRED` |
 | `node_modules` c eslint в `layout.appDir` | eslint prescan | prescan пропускается |
 | `@ast-grep/cli` | ast-grep prescan | пропускается |
 | Граф graphify | blast-radius | пустой blast-radius |
 | Метка `ai-review-fp` | ручная разметка FP | harvest берёт только реакции |
 
-Всё, кроме ключа LLM, — fail-open: ревью деградирует, но не падает.
+Всё перечисленное fail-open: ревью деградирует или пропускается, merge не блокируется.
+`REVIEW_LLM_REQUIRED=1` действует, только когда ключ задан, но все модели прогона упали:
+тогда гейт fail-closed. Отсутствие ключа — конфигурация, а не аутедж, и блоком не считается.
 
 ## 6. Локальный прогон
 
@@ -112,7 +122,8 @@ OLLAMA_API_KEY=… REVIEW_PROFILE=ops/ai-review/profile.json \
 
 ## 8. Обновление версии
 
-1. В движке: зелёные `npm test` и `npm run eval`, тег `vX.Y.Z`.
+1. В движке: зелёный `npm run check` (`npm test` + `npm run eval` + `check:rust`: `cargo build`,
+   `cargo test`, паритет JS ↔ Rust), тег `vX.Y.Z`.
 2. У потребителя: правка `ops/ai-reviewer-ref` → PR → ревью нового движка идёт **старым**
    (пин читается из базовой ветки) → merge.
 3. Первый прогон после bump сравнить с предыдущим: Δ-блок в sticky показывает, что изменилось

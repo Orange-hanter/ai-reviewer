@@ -43,6 +43,8 @@ function mkDeps({ reviews, graphify = { buildBlastRadius: async () => [] }, veri
   const deps = {
     log: () => {},
     die: (m) => { throw new Error(`die: ${m}`); },
+    // Дерево репозитория не читаем: иначе тест зависел бы от `git ls-files` каталога запуска.
+    repoFiles: async () => null,
     graphify,
     prescan: {
       run: async () => ({
@@ -108,6 +110,28 @@ test('pipeline: critical с confidence≥0.8 → блок (exit 1), inline + sti
   assert.equal(calls.postReview[0].inline[0].path, 'foo.ts');
   assert.equal(calls.postReview[0].inline[0].line, 3);
   assert.ok(calls.upsertSticky[0].includes('Merge заблокирован'));
+});
+
+test('pipeline: «модуля нет» о файле из дерева репозитория вне PR → снят как FP, merge не блокирует', async () => {
+  const absent = {
+    ...criticalReview,
+    findings: [{ ...criticalReview.findings[0], title: 'импорт несуществующего модуля', body: "Cannot find module './bar'" }],
+  };
+  const withTree = await runPipeline({
+    diff: CODE_DIFF, reviews: [absent],
+    mutateDeps: (deps) => { deps.repoFiles = async () => ['foo.ts', 'bar.ts']; },
+  });
+  assert.equal(withTree.code, 0, 'bar.ts есть в дереве — блокер ложный');
+  assert.ok(withTree.calls.upsertSticky[0].includes('Отфильтровано как известные FP (1)'));
+
+  const noTree = await runPipeline({ diff: CODE_DIFF, reviews: [absent] });
+  assert.equal(noTree.code, 1, 'дерево не прочитано — фильтр выключен, гейт как раньше');
+
+  const broken = await runPipeline({
+    diff: CODE_DIFF, reviews: [absent],
+    mutateDeps: (deps) => { deps.repoFiles = async () => { throw new Error('git сломан'); }; },
+  });
+  assert.equal(broken.code, 1, 'сбой чтения дерева — fail-open: фильтр выключен, прогон не падает');
 });
 
 test('pipeline: post-then-delete — старые инлайны чистятся ПОСЛЕ постинга, новые исключены', async () => {
@@ -694,5 +718,25 @@ test('observability: событие actionability несёт гистограм�
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('pipeline: runDetailed отдаёт артефакт с cli.headSha на file-diff, без GitHub', async () => {
+  const tmp = join(tmpdir(), `pr-review-headsha-${process.pid}-${Math.random().toString(36).slice(2)}.patch`);
+  await writeFile(tmp, CODE_DIFF);
+  try {
+    const cfg = loadReviewConfig({
+      ...ENV,
+      REVIEW_EXPORT: '0',
+    }, { dryRun: true, diffFile: tmp, repo: '', prNumber: 0, headSha: 'abc1234deadbeef' });
+    const { deps, calls } = mkDeps({ reviews: [criticalReview] });
+    const detailed = await createReviewPipeline(cfg, deps).runDetailed();
+    assert.equal(detailed.artifact.headSha, 'abc1234deadbeef');
+    assert.equal(detailed.exitCode, 1);
+    assert.equal(detailed.wouldBlock, true);
+    assert.equal(calls.postReview.length, 0, 'dry-run не постит review');
+    assert.equal(calls.upsertSticky.length, 0);
+  } finally {
+    await rm(tmp, { force: true });
   }
 });

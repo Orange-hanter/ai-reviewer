@@ -1,8 +1,16 @@
+---
+type: journal
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-10
+---
+
 # Changelog
 
 ## Unreleased
 
-### Добавлено — слой косвенных признаков и наряды, shadow ([RFC 08](proposals/08-cue-driven-briefs.md))
+### Добавлено — слой косвенных признаков и наряды, shadow ([RFC 15](proposals/15-cue-driven-briefs.md))
 
 `lib/cues.mjs` и `lib/brief.mjs` — детерминированный слой, который по одному лишь диффу
 ранжирует спаны изменений и выписывает **наряды**: где смотреть, какая гипотеза, сколько
@@ -27,7 +35,62 @@
 
 Новая команда `npm run scout` (в `npm run check` не входит: первый прогон тянет диффы по сети).
 
+### Добавлено — Rust-порт `export`/`metrics` (фаза 3.6)
+
+Сборка артефакта экспорта (JSON/SARIF/swarm) и метрик прогона портирована в Rust
+(`rust/src/export.rs`, `rust/src/metrics.rs`) под parity-тестами; `lib/export.mjs` и
+`lib/metrics.mjs` — обёртки с откатом на JS, как у остальных модулей. Коммит `413273d` вошёл
+в `main` мержем после тега v0.3.0, хотя раньше был записан в секцию 0.3.0.
+
+### Добавлено — долгий MoA в IDE ([RFC 12](proposals/12-mcp-long-run.md))
+
+`review_run` принимает `wait` (default `true`). `wait: false` сразу отдаёт stub с `jobId`;
+sidecar пишется до LLM. `review_findings` / `review_artifact` принимают `jobId`; пока
+`status: running` — пустые findings, не ошибка. Git-шаблон плагина больше не использует
+`./bin` от cwd окна.
+
+### Добавлено — холодный старт MCP ([RFC 10](proposals/10-mcp-cold-start.md))
+
+Лаунчер плагина сам находит клон (`.engine-root` / cwd / `AI_REVIEWER_ROOT`). `install-local.sh`
+копирует плагин, пишет якорь и **абсолютный** путь лаунчера (cwd plugin MCP у Cursor — чужое
+окно, не каталог плагина). Handshake (`initialize` / `tools/list`) не импортирует пайплайн.
+`variables.required` пустой — Cursor не показывает Authenticate на stdio.
+
+### Добавлено — Cursor Plugin и агентные стадии ревью-MCP ([RFC 09](proposals/09-cursor-plugin-mcp.md))
+
+Дешёвый контур без LLM: `review_route`, `review_prescan`, `fp_check`, `fingerprint_check`,
+`review_artifact`. `review_findings` читает sidecar на диске. Живой дифф сверяет `headSha`
+с `git rev-parse HEAD` (грязное дерево — `uncommitted: true`). За `REVIEW_MCP_EXTRA=1` —
+`blast_scope`, `actionability_explain`, `review_metrics`.
+
+Cursor Plugin: каталог `cursor-plugin/` (два MCP, slash-команды, skill, rule). Не гейт;
+движок в плагин не входит. Local install: `cursor-plugin/README.md`.
+
+### Добавлено — MCP полного прогона для агента ([RFC 08](proposals/08-review-mcp.md))
+
+Отдельный stdio-сервер `pr-review-mcp`: тулзы `review_run` (полный MoA, пин `headSha`) и
+`review_findings` (страница того же прогона). GitHub не пишется. В ответе `previewWouldBlock`,
+не `wouldBlock` сворма — merge по-прежнему только `exit 1` в CI. Корень чтения —
+`REVIEW_MCP_ROOT` (не `STRUCTURE_MCP_ROOT`). Транспорт `Content-Length` вынесен в
+`lib/mcp-stdio.mjs` и общий с structure MCP.
+
+Пайплайн: `runDetailed()` отдаёт артефакт из памяти; `--head-sha` / `cli.headSha` заполняет
+пин на file-diff; dry-run summary больше не идёт в сырой `console.log` (иначе ломает кадры MCP).
+
+### Исправлено
+
+- **«Файла/модуля нет» о файле, который есть в репозитории, но не в PR.** Модель видела
+  импорт файла вне диффа и заявляла, что его не существует; защиты семейств 1/6 знают только
+  изменённые пути и такой случай пропускали. FP-фильтр теперь сверяет утверждение об
+  отсутствии с деревом репозитория (`git ls-files` рабочего каталога, `deps.repoFiles`) и
+  снимает находку, если путь в дереве есть ([lib/absent-path.mjs](lib/absent-path.mjs),
+  семейство 7 в [docs/false-positives.md](docs/false-positives.md)). Отсутствие как условие
+  рантайма («если файл не существует…») и отсутствие символа в существующем файле не
+  снимаются. Дерево не читается или явно чужое (меньше половины путей PR в нём нет) —
+  фильтр выключен, гейт ведёт себя как раньше.
+
 ## 0.3.0 — нативное ядро (Rust) + экономия токенов (RFC 04–07) — 2026-09-05
+
 
 ### Добавлено — окна контекста для advisors и жюри ([RFC 07](proposals/07-windowed-file-context.md))
 
@@ -68,11 +131,11 @@
 
 ### Добавлено — Rust-ядро под тем же публичным API
 
-Горячие и чистые части движка портированы в Rust (`rust/`, фазы 0–3.6, 25 шагов):
+Горячие и чистые части движка портированы в Rust (`rust/`, фазы 0–3.5):
 `diff`, `json` (толерантный ремонт JSON от модели), `findings`, `router`, `actionability`,
 `config`/`profile`, весь structure-контур (`scip`, `lcov`, `graphify`, `tests`, `mutation`,
 `evidence`, `assessments`, `protocol`, `mcp`), `llm` (HTTP + SSE + ретраи), чистые части
-`engine`, `specialists`, `prompt`, `verifier`, `github`, `report`, `export`/`metrics`.
+`engine`, `specialists`, `prompt`, `verifier`, `github`, `report`.
 
 Контракт для потребителя не изменился: `lib/*.mjs` — тонкие обёртки с прежними экспортами и
 прежней синхронностью. Правила деградации:
