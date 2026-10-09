@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "kind": "property_drafts",
+  "factsFingerprint": "ff01",
+  "obligationsRevision": "7",
+  "properties": [
+    {
+      "id": "p1",
+      "nested": {
+        "a": [],
+        "b": {}
+      }
+    }
+  ]
+}
