@@ -1,0 +1,3708 @@
+{
+  "generatedBy": "rust/parity/gen-structure-t18-golden.mjs",
+  "payloads": {
+    "base": [
+      {
+        "schemaRef": "code-structure/structure-facts.v1",
+        "version": 1,
+        "kind": "structure_facts",
+        "generatedAt": "2026-09-02T00:00:00.000Z",
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "provenance": {
+          "headSha": "abcdef1",
+          "branchRef": "main",
+          "prNumber": null,
+          "isDefaultBranch": true,
+          "toolVersion": "1.0.0",
+          "configHash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "scope": "src",
+          "graphStatus": "fresh",
+          "providerCapabilities": {
+            "symbols": "inferred",
+            "topology": true
+          },
+          "warnings": [],
+          "truncated": false
+        },
+        "facts": {
+          "boundaries": [
+            {
+              "id": "boundary:repository",
+              "kind": "repository",
+              "name": "repository",
+              "paths": [
+                "."
+              ],
+              "source": "path",
+              "confidence": "exact",
+              "evidence": [
+                "repository-root"
+              ]
+            }
+          ],
+          "entities": [],
+          "contracts": [],
+          "dependencies": [],
+          "testCases": []
+        },
+        "identityEvents": [],
+        "views": {
+          "boundaryTree": [],
+          "objectTree": [],
+          "functionTree": [],
+          "dependencyGraph": []
+        },
+        "receipts": []
+      },
+      {
+        "schemaRef": "code-structure/structure-assessment.v1",
+        "version": 1,
+        "kind": "structure_assessment",
+        "generatedAt": "2026-09-02T00:00:00.000Z",
+        "fingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+        "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "obligationsRevision": "docs-1",
+        "obligationContentHashes": {
+          "obl:demo#error": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "coverageHash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "thresholdsHash": "5555555555555555555555555555555555555555555555555555555555555555",
+        "testRun": {
+          "id": "run-1",
+          "headSha": "abcdef1",
+          "producedAt": "2026-09-02T00:00:00.000Z"
+        },
+        "temporalAlignment": "aligned",
+        "coverageObservations": [],
+        "assessments": {
+          "codeCoverage": {
+            "totals": null,
+            "files": 0
+          },
+          "dependencyRisk": {
+            "highFanIn": [],
+            "crossBoundaryEdges": 0,
+            "godNodes": []
+          },
+          "contractScenarios": [],
+          "dataQuality": {
+            "graphStatus": "unknown",
+            "truncated": false,
+            "testInventoryComplete": false,
+            "functionObservations": 0,
+            "unresolvedFunctionJoins": 0,
+            "unresolvedJoinRate": 0,
+            "missingAllowed": false,
+            "entityCount": 0,
+            "edgeCount": 0
+          }
+        },
+        "hints": [],
+        "receipts": []
+      }
+    ],
+    "rich": [
+      {
+        "schemaRef": "code-structure/structure-facts.v1",
+        "version": 1,
+        "kind": "structure_facts",
+        "generatedAt": "2026-09-02T00:00:00.000Z",
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "provenance": {
+          "headSha": "abcdef1",
+          "branchRef": "main",
+          "prNumber": null,
+          "isDefaultBranch": true,
+          "toolVersion": "1.0.0",
+          "configHash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "scope": "src",
+          "graphStatus": "fresh",
+          "providerCapabilities": {
+            "symbols": "inferred",
+            "topology": true
+          },
+          "warnings": [],
+          "truncated": false
+        },
+        "facts": {
+          "boundaries": [
+            {
+              "id": "boundary:repository",
+              "kind": "repository",
+              "name": "repository",
+              "paths": [
+                "."
+              ],
+              "source": "path",
+              "confidence": "exact",
+              "evidence": [
+                "repository-root"
+              ]
+            },
+            {
+              "id": "boundary:src/api",
+              "kind": "module",
+              "name": "api",
+              "paths": [
+                "src/api"
+              ],
+              "source": "path",
+              "confidence": "exact",
+              "evidence": []
+            }
+          ],
+          "entities": [
+            {
+              "observedId": "e:a",
+              "lineageId": "e:a",
+              "path": "src/api/a.ts",
+              "label": "a",
+              "qualifiedName": "pkg/a",
+              "kind": "function",
+              "signature": "a()",
+              "boundaryId": "boundary:src/api"
+            },
+            {
+              "observedId": "e:b",
+              "lineageId": "e:b",
+              "path": "src/api/b.ts",
+              "label": "b",
+              "qualifiedName": "pkg/b",
+              "kind": "function",
+              "signature": "b()",
+              "boundaryId": "boundary:src/api"
+            },
+            {
+              "observedId": "e:c",
+              "lineageId": "e:c",
+              "path": "src/core/c.ts",
+              "label": "c",
+              "qualifiedName": "pkg/c",
+              "kind": "function",
+              "signature": "c()",
+              "boundaryId": "boundary:repository"
+            },
+            {
+              "observedId": "e:d",
+              "lineageId": "e:d",
+              "path": "src/core/d.ts",
+              "label": "d",
+              "qualifiedName": "pkg/d",
+              "kind": "function",
+              "signature": "d()",
+              "boundaryId": "boundary:repository"
+            },
+            {
+              "observedId": "e:é",
+              "lineageId": "e:é",
+              "path": "src/ünï/é.ts",
+              "label": "é",
+              "qualifiedName": "pkg/é",
+              "kind": "function",
+              "signature": "é()",
+              "boundaryId": "boundary:repository"
+            },
+            {
+              "observedId": "e:z",
+              "lineageId": "e:z",
+              "path": "src/zz.ts",
+              "label": "z",
+              "qualifiedName": "pkg/z",
+              "kind": "function",
+              "signature": "z()",
+              "boundaryId": "boundary:repository"
+            }
+          ],
+          "contracts": [
+            {
+              "id": "c:a",
+              "entityRef": "e:a",
+              "kind": "entrypoint"
+            },
+            {
+              "id": "c:d",
+              "entityRef": "e:d",
+              "kind": "entrypoint"
+            },
+            {
+              "id": "c:z",
+              "entityRef": "e:z",
+              "kind": "entrypoint"
+            }
+          ],
+          "dependencies": [
+            {
+              "id": "d1",
+              "from": "e:a",
+              "to": "e:b",
+              "relation": "calls"
+            },
+            {
+              "id": "d1",
+              "from": "e:a",
+              "to": "e:b",
+              "relation": "calls"
+            },
+            {
+              "from": "e:b",
+              "to": "e:c",
+              "relation": "calls"
+            },
+            {
+              "from": "e:c",
+              "to": "e:d",
+              "relation": "imports"
+            },
+            {
+              "id": "d4",
+              "from": "e:é",
+              "to": "e:a",
+              "relation": "calls"
+            },
+            {
+              "id": "d5",
+              "from": "e:d",
+              "to": "e:z",
+              "relation": "calls"
+            }
+          ],
+          "testCases": [
+            {
+              "id": "t1",
+              "path": "test/a.test.ts",
+              "targetContractRefs": [
+                "c:a"
+              ]
+            },
+            {
+              "id": "t2",
+              "path": "test/d.test.ts",
+              "targetContractRefs": [
+                "c:d"
+              ]
+            },
+            {
+              "id": "t3",
+              "path": "test/Ä.test.ts",
+              "targetContractRefs": [
+                "c:a",
+                "c:z"
+              ]
+            }
+          ]
+        },
+        "identityEvents": [],
+        "views": {
+          "boundaryTree": [],
+          "objectTree": [],
+          "functionTree": [],
+          "dependencyGraph": []
+        },
+        "receipts": []
+      },
+      {
+        "schemaRef": "code-structure/structure-assessment.v1",
+        "version": 1,
+        "kind": "structure_assessment",
+        "generatedAt": "2026-09-02T00:00:00.000Z",
+        "fingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+        "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "obligationsRevision": "docs-1",
+        "obligationContentHashes": {
+          "obl:demo#error": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "coverageHash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "thresholdsHash": "5555555555555555555555555555555555555555555555555555555555555555",
+        "testRun": {
+          "id": "run-1",
+          "headSha": "abcdef1",
+          "producedAt": "2026-09-02T00:00:00.000Z"
+        },
+        "temporalAlignment": "aligned",
+        "coverageObservations": [],
+        "assessments": {
+          "codeCoverage": {
+            "totals": null,
+            "files": 0
+          },
+          "dependencyRisk": {
+            "highFanIn": [],
+            "crossBoundaryEdges": 0,
+            "godNodes": []
+          },
+          "contractScenarios": [
+            {
+              "contractRefs": [
+                "c:a"
+              ],
+              "obligationRef": "obl:1",
+              "status": "missing"
+            },
+            {
+              "contractRefs": [
+                "c:d"
+              ],
+              "obligationRef": "obl:2",
+              "status": "partial"
+            },
+            {
+              "contractRefs": [
+                "c:z",
+                "c:a"
+              ],
+              "obligationRef": "obl:3",
+              "status": "covered"
+            }
+          ],
+          "dataQuality": {
+            "graphStatus": "unknown",
+            "truncated": false,
+            "testInventoryComplete": false,
+            "functionObservations": 0,
+            "unresolvedFunctionJoins": 0,
+            "unresolvedJoinRate": 0,
+            "missingAllowed": false,
+            "entityCount": 0,
+            "edgeCount": 0
+          }
+        },
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h2",
+            "subjectRefs": [
+              "c:d"
+            ],
+            "text": "y"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h4",
+            "subjectRefs": [
+              "e:nope"
+            ],
+            "text": "w"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "receipts": []
+      }
+    ],
+    "foreign": [
+      {
+        "schemaRef": "code-structure/structure-facts.v1",
+        "version": 1,
+        "kind": "structure_facts",
+        "generatedAt": "2026-09-02T00:00:00.000Z",
+        "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "provenance": {
+          "headSha": "abcdef1",
+          "branchRef": "main",
+          "prNumber": null,
+          "isDefaultBranch": true,
+          "toolVersion": "1.0.0",
+          "configHash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "scope": "src",
+          "graphStatus": "fresh",
+          "providerCapabilities": {
+            "symbols": "inferred",
+            "topology": true
+          },
+          "warnings": [],
+          "truncated": false
+        },
+        "facts": {
+          "boundaries": [
+            {
+              "id": "boundary:repository",
+              "kind": "repository",
+              "name": "repository",
+              "paths": [
+                "."
+              ],
+              "source": "path",
+              "confidence": "exact",
+              "evidence": [
+                "repository-root"
+              ]
+            }
+          ],
+          "entities": [],
+          "contracts": [],
+          "dependencies": [],
+          "testCases": []
+        },
+        "identityEvents": [],
+        "views": {
+          "boundaryTree": [],
+          "objectTree": [],
+          "functionTree": [],
+          "dependencyGraph": []
+        },
+        "receipts": []
+      },
+      {
+        "schemaRef": "code-structure/structure-assessment.v1",
+        "version": 1,
+        "kind": "structure_assessment",
+        "generatedAt": "2026-09-02T00:00:00.000Z",
+        "fingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+        "factsFingerprint": "9999999999999999999999999999999999999999999999999999999999999999",
+        "obligationsRevision": "docs-1",
+        "obligationContentHashes": {
+          "obl:demo#error": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "coverageHash": "4444444444444444444444444444444444444444444444444444444444444444",
+        "thresholdsHash": "5555555555555555555555555555555555555555555555555555555555555555",
+        "testRun": {
+          "id": "run-1",
+          "headSha": "abcdef1",
+          "producedAt": "2026-09-02T00:00:00.000Z"
+        },
+        "temporalAlignment": "aligned",
+        "coverageObservations": [],
+        "assessments": {
+          "codeCoverage": {
+            "totals": null,
+            "files": 0
+          },
+          "dependencyRisk": {
+            "highFanIn": [],
+            "crossBoundaryEdges": 0,
+            "godNodes": []
+          },
+          "contractScenarios": [],
+          "dataQuality": {
+            "graphStatus": "unknown",
+            "truncated": false,
+            "testInventoryComplete": false,
+            "functionObservations": 0,
+            "unresolvedFunctionJoins": 0,
+            "unresolvedJoinRate": 0,
+            "missingAllowed": false,
+            "entityCount": 0,
+            "edgeCount": 0
+          }
+        },
+        "hints": [],
+        "receipts": []
+      }
+    ]
+  },
+  "context": [
+    {
+      "name": "fixture-head-pin",
+      "payload": "base",
+      "args": {
+        "headSha": "abcdef1"
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [],
+        "boundaries": [],
+        "entities": [],
+        "contracts": [],
+        "dependencies": [],
+        "scenarios": [],
+        "hints": [],
+        "suggestedFiles": [],
+        "truncated": false,
+        "tokenEstimate": 117
+      }
+    },
+    {
+      "name": "fixture-fingerprint-pin",
+      "payload": "base",
+      "args": {
+        "snapshotFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "scopeRefs": [
+          "src"
+        ]
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "src"
+        ],
+        "boundaries": [],
+        "entities": [],
+        "contracts": [],
+        "dependencies": [],
+        "scenarios": [],
+        "hints": [],
+        "suggestedFiles": [],
+        "truncated": false,
+        "tokenEstimate": 118
+      }
+    },
+    {
+      "name": "no-pin",
+      "payload": "base",
+      "args": {},
+      "error": "structure_context requires pinned headSha or snapshotFingerprint"
+    },
+    {
+      "name": "head-mismatch",
+      "payload": "base",
+      "args": {
+        "headSha": "fffffff"
+      },
+      "error": "pinned headSha fffffff does not match facts abcdef1"
+    },
+    {
+      "name": "fingerprint-mismatch",
+      "payload": "base",
+      "args": {
+        "snapshotFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "error": "snapshot fingerprint ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff does not match facts"
+    },
+    {
+      "name": "assessment-mismatch",
+      "payload": "foreign",
+      "args": {
+        "headSha": "abcdef1"
+      },
+      "error": "assessment does not reference the supplied facts snapshot"
+    },
+    {
+      "name": "scope-entity-depth1",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "e:a"
+        ],
+        "taskRef": "T-1"
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": "T-1",
+        "scopeRefs": [
+          "e:a"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d1",
+            "from": "e:a",
+            "to": "e:b",
+            "relation": "calls"
+          },
+          {
+            "id": "d4",
+            "from": "e:é",
+            "to": "e:a",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": false,
+        "tokenEstimate": 442
+      }
+    },
+    {
+      "name": "scope-prefix-depth3-capped",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "src/api/"
+        ],
+        "dependencyDepth": 3
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "src/api/"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:c",
+            "lineageId": "e:c",
+            "path": "src/core/c.ts",
+            "label": "c",
+            "qualifiedName": "pkg/c",
+            "kind": "function",
+            "signature": "c()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d1",
+            "from": "e:a",
+            "to": "e:b",
+            "relation": "calls"
+          },
+          {
+            "id": "d4",
+            "from": "e:é",
+            "to": "e:a",
+            "relation": "calls"
+          },
+          {
+            "from": "e:b",
+            "to": "e:c",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/core/c.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": false,
+        "tokenEstimate": 500
+      }
+    },
+    {
+      "name": "scope-prefix-raised-depth",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "src/api"
+        ],
+        "dependencyDepth": 3,
+        "limits": {
+          "maxDepth": 3
+        }
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "src/api"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:c",
+            "lineageId": "e:c",
+            "path": "src/core/c.ts",
+            "label": "c",
+            "qualifiedName": "pkg/c",
+            "kind": "function",
+            "signature": "c()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:d",
+            "lineageId": "e:d",
+            "path": "src/core/d.ts",
+            "label": "d",
+            "qualifiedName": "pkg/d",
+            "kind": "function",
+            "signature": "d()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:z",
+            "lineageId": "e:z",
+            "path": "src/zz.ts",
+            "label": "z",
+            "qualifiedName": "pkg/z",
+            "kind": "function",
+            "signature": "z()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          },
+          {
+            "id": "c:d",
+            "entityRef": "e:d",
+            "kind": "entrypoint"
+          },
+          {
+            "id": "c:z",
+            "entityRef": "e:z",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d1",
+            "from": "e:a",
+            "to": "e:b",
+            "relation": "calls"
+          },
+          {
+            "id": "d4",
+            "from": "e:é",
+            "to": "e:a",
+            "relation": "calls"
+          },
+          {
+            "from": "e:b",
+            "to": "e:c",
+            "relation": "calls"
+          },
+          {
+            "from": "e:c",
+            "to": "e:d",
+            "relation": "imports"
+          },
+          {
+            "id": "d5",
+            "from": "e:d",
+            "to": "e:z",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:d"
+            ],
+            "obligationRef": "obl:2",
+            "status": "partial"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h2",
+            "subjectRefs": [
+              "c:d"
+            ],
+            "text": "y"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/core/c.ts",
+          "src/core/d.ts",
+          "src/zz.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/d.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": false,
+        "tokenEstimate": 674
+      }
+    },
+    {
+      "name": "scope-boundary",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "boundary:src/api"
+        ]
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "boundary:src/api"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:c",
+            "lineageId": "e:c",
+            "path": "src/core/c.ts",
+            "label": "c",
+            "qualifiedName": "pkg/c",
+            "kind": "function",
+            "signature": "c()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d1",
+            "from": "e:a",
+            "to": "e:b",
+            "relation": "calls"
+          },
+          {
+            "id": "d4",
+            "from": "e:é",
+            "to": "e:a",
+            "relation": "calls"
+          },
+          {
+            "from": "e:b",
+            "to": "e:c",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/core/c.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": false,
+        "tokenEstimate": 502
+      }
+    },
+    {
+      "name": "contract-refs",
+      "payload": "rich",
+      "args": {
+        "snapshotFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+        "contractRefs": [
+          "c:d",
+          "c:missing"
+        ]
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:d",
+            "lineageId": "e:d",
+            "path": "src/core/d.ts",
+            "label": "d",
+            "qualifiedName": "pkg/d",
+            "kind": "function",
+            "signature": "d()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:c",
+            "lineageId": "e:c",
+            "path": "src/core/c.ts",
+            "label": "c",
+            "qualifiedName": "pkg/c",
+            "kind": "function",
+            "signature": "c()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:z",
+            "lineageId": "e:z",
+            "path": "src/zz.ts",
+            "label": "z",
+            "qualifiedName": "pkg/z",
+            "kind": "function",
+            "signature": "z()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:d",
+            "entityRef": "e:d",
+            "kind": "entrypoint"
+          },
+          {
+            "id": "c:z",
+            "entityRef": "e:z",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "from": "e:c",
+            "to": "e:d",
+            "relation": "imports"
+          },
+          {
+            "id": "d5",
+            "from": "e:d",
+            "to": "e:z",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:d"
+            ],
+            "obligationRef": "obl:2",
+            "status": "partial"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h2",
+            "subjectRefs": [
+              "c:d"
+            ],
+            "text": "y"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/core/c.ts",
+          "src/core/d.ts",
+          "src/zz.ts",
+          "test/d.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": false,
+        "tokenEstimate": 420
+      }
+    },
+    {
+      "name": "depth-zero",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "src"
+        ],
+        "dependencyDepth": 0
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "src"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:c",
+            "lineageId": "e:c",
+            "path": "src/core/c.ts",
+            "label": "c",
+            "qualifiedName": "pkg/c",
+            "kind": "function",
+            "signature": "c()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:d",
+            "lineageId": "e:d",
+            "path": "src/core/d.ts",
+            "label": "d",
+            "qualifiedName": "pkg/d",
+            "kind": "function",
+            "signature": "d()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:z",
+            "lineageId": "e:z",
+            "path": "src/zz.ts",
+            "label": "z",
+            "qualifiedName": "pkg/z",
+            "kind": "function",
+            "signature": "z()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          },
+          {
+            "id": "c:d",
+            "entityRef": "e:d",
+            "kind": "entrypoint"
+          },
+          {
+            "id": "c:z",
+            "entityRef": "e:z",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:d"
+            ],
+            "obligationRef": "obl:2",
+            "status": "partial"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h2",
+            "subjectRefs": [
+              "c:d"
+            ],
+            "text": "y"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/core/c.ts",
+          "src/core/d.ts",
+          "src/zz.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/d.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": false,
+        "tokenEstimate": 609
+      }
+    },
+    {
+      "name": "max-edges-truncated",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "src"
+        ],
+        "limits": {
+          "maxEdges": 2
+        }
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "src"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:c",
+            "lineageId": "e:c",
+            "path": "src/core/c.ts",
+            "label": "c",
+            "qualifiedName": "pkg/c",
+            "kind": "function",
+            "signature": "c()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:d",
+            "lineageId": "e:d",
+            "path": "src/core/d.ts",
+            "label": "d",
+            "qualifiedName": "pkg/d",
+            "kind": "function",
+            "signature": "d()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:z",
+            "lineageId": "e:z",
+            "path": "src/zz.ts",
+            "label": "z",
+            "qualifiedName": "pkg/z",
+            "kind": "function",
+            "signature": "z()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          },
+          {
+            "id": "c:d",
+            "entityRef": "e:d",
+            "kind": "entrypoint"
+          },
+          {
+            "id": "c:z",
+            "entityRef": "e:z",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d1",
+            "from": "e:a",
+            "to": "e:b",
+            "relation": "calls"
+          },
+          {
+            "id": "d4",
+            "from": "e:é",
+            "to": "e:a",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:d"
+            ],
+            "obligationRef": "obl:2",
+            "status": "partial"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h2",
+            "subjectRefs": [
+              "c:d"
+            ],
+            "text": "y"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/core/c.ts",
+          "src/core/d.ts",
+          "src/zz.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/d.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": true,
+        "tokenEstimate": 636
+      }
+    },
+    {
+      "name": "max-seeds-truncated",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "src"
+        ],
+        "limits": {
+          "maxSeeds": 2
+        }
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "src"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:c",
+            "lineageId": "e:c",
+            "path": "src/core/c.ts",
+            "label": "c",
+            "qualifiedName": "pkg/c",
+            "kind": "function",
+            "signature": "c()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d1",
+            "from": "e:a",
+            "to": "e:b",
+            "relation": "calls"
+          },
+          {
+            "id": "d4",
+            "from": "e:é",
+            "to": "e:a",
+            "relation": "calls"
+          },
+          {
+            "from": "e:b",
+            "to": "e:c",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/core/c.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": true,
+        "tokenEstimate": 499
+      }
+    },
+    {
+      "name": "secondary-truncation",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "e:a"
+        ],
+        "dependencyDepth": 2,
+        "limits": {
+          "maxBytes": 1,
+          "maxSeeds": 1,
+          "maxDepth": 2
+        }
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "e:a"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/core/c.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": true,
+        "tokenEstimate": 289
+      }
+    },
+    {
+      "name": "token-budget-truncation",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "src"
+        ],
+        "tokenBudget": 300,
+        "limits": {
+          "maxGaps": 3
+        }
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "src"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:c",
+            "lineageId": "e:c",
+            "path": "src/core/c.ts",
+            "label": "c",
+            "qualifiedName": "pkg/c",
+            "kind": "function",
+            "signature": "c()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:d",
+            "lineageId": "e:d",
+            "path": "src/core/d.ts",
+            "label": "d",
+            "qualifiedName": "pkg/d",
+            "kind": "function",
+            "signature": "d()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:z",
+            "lineageId": "e:z",
+            "path": "src/zz.ts",
+            "label": "z",
+            "qualifiedName": "pkg/z",
+            "kind": "function",
+            "signature": "z()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          },
+          {
+            "id": "c:d",
+            "entityRef": "e:d",
+            "kind": "entrypoint"
+          },
+          {
+            "id": "c:z",
+            "entityRef": "e:z",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d1",
+            "from": "e:a",
+            "to": "e:b",
+            "relation": "calls"
+          },
+          {
+            "id": "d4",
+            "from": "e:é",
+            "to": "e:a",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:d"
+            ],
+            "obligationRef": "obl:2",
+            "status": "partial"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/core/c.ts",
+          "src/core/d.ts",
+          "src/zz.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/d.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": true,
+        "tokenEstimate": 605
+      }
+    },
+    {
+      "name": "token-budget-boundary",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "e:a"
+        ],
+        "taskRef": "T-1",
+        "tokenBudget": 442
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": "T-1",
+        "scopeRefs": [
+          "e:a"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d1",
+            "from": "e:a",
+            "to": "e:b",
+            "relation": "calls"
+          },
+          {
+            "id": "d4",
+            "from": "e:é",
+            "to": "e:a",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": false,
+        "tokenEstimate": 442
+      }
+    },
+    {
+      "name": "token-budget-boundary-minus-one",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "e:a"
+        ],
+        "taskRef": "T-1",
+        "tokenBudget": 441
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": "T-1",
+        "scopeRefs": [
+          "e:a"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:b",
+            "lineageId": "e:b",
+            "path": "src/api/b.ts",
+            "label": "b",
+            "qualifiedName": "pkg/b",
+            "kind": "function",
+            "signature": "b()",
+            "boundaryId": "boundary:src/api"
+          },
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d1",
+            "from": "e:a",
+            "to": "e:b",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          },
+          {
+            "id": "h5",
+            "subjectRefs": [
+              "e:b",
+              "e:c"
+            ],
+            "text": "v"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/api/b.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": true,
+        "tokenEstimate": 433
+      }
+    },
+    {
+      "name": "unicode-scope",
+      "payload": "rich",
+      "args": {
+        "headSha": "abcdef1",
+        "scopeRefs": [
+          "src/ünï"
+        ]
+      },
+      "expected": {
+        "version": 1,
+        "kind": "structure_context",
+        "pinned": {
+          "headSha": "abcdef1",
+          "factsFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+          "assessmentFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "obligationsRevision": "docs-1"
+        },
+        "temporalAlignment": "aligned",
+        "taskRef": null,
+        "scopeRefs": [
+          "src/ünï"
+        ],
+        "boundaries": [
+          {
+            "id": "boundary:repository",
+            "kind": "repository",
+            "name": "repository",
+            "paths": [
+              "."
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": [
+              "repository-root"
+            ]
+          },
+          {
+            "id": "boundary:src/api",
+            "kind": "module",
+            "name": "api",
+            "paths": [
+              "src/api"
+            ],
+            "source": "path",
+            "confidence": "exact",
+            "evidence": []
+          }
+        ],
+        "entities": [
+          {
+            "observedId": "e:é",
+            "lineageId": "e:é",
+            "path": "src/ünï/é.ts",
+            "label": "é",
+            "qualifiedName": "pkg/é",
+            "kind": "function",
+            "signature": "é()",
+            "boundaryId": "boundary:repository"
+          },
+          {
+            "observedId": "e:a",
+            "lineageId": "e:a",
+            "path": "src/api/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "a()",
+            "boundaryId": "boundary:src/api"
+          }
+        ],
+        "contracts": [
+          {
+            "id": "c:a",
+            "entityRef": "e:a",
+            "kind": "entrypoint"
+          }
+        ],
+        "dependencies": [
+          {
+            "id": "d4",
+            "from": "e:é",
+            "to": "e:a",
+            "relation": "calls"
+          }
+        ],
+        "scenarios": [
+          {
+            "contractRefs": [
+              "c:a"
+            ],
+            "obligationRef": "obl:1",
+            "status": "missing"
+          },
+          {
+            "contractRefs": [
+              "c:z",
+              "c:a"
+            ],
+            "obligationRef": "obl:3",
+            "status": "covered"
+          }
+        ],
+        "hints": [
+          {
+            "id": "h1",
+            "subjectRefs": [
+              "e:a"
+            ],
+            "text": "x"
+          },
+          {
+            "id": "h3",
+            "subjectRefs": [
+              "obl:3"
+            ],
+            "text": "z"
+          }
+        ],
+        "suggestedFiles": [
+          "src/api/a.ts",
+          "src/ünï/é.ts",
+          "test/a.test.ts",
+          "test/Ä.test.ts"
+        ],
+        "truncated": false,
+        "tokenEstimate": 371
+      }
+    }
+  ],
+  "identity": [
+    {
+      "name": "fixture-empty",
+      "current": [],
+      "previous": [],
+      "expected": {
+        "entities": [],
+        "events": []
+      }
+    },
+    {
+      "name": "exact-keeps-lineage",
+      "current": [
+        {
+          "observedId": "a",
+          "lineageId": "a-new",
+          "path": "src/a.ts",
+          "label": "a",
+          "qualifiedName": "pkg/a",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "a",
+          "lineageId": "L",
+          "path": "src/a.ts",
+          "label": "a",
+          "qualifiedName": "pkg/a",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "a",
+            "lineageId": "L",
+            "path": "src/a.ts",
+            "label": "a",
+            "qualifiedName": "pkg/a",
+            "kind": "function",
+            "signature": "s"
+          }
+        ],
+        "events": []
+      }
+    },
+    {
+      "name": "exact-without-lineage",
+      "current": [
+        {
+          "observedId": "a",
+          "path": "p",
+          "label": "a",
+          "kind": "function"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "a",
+          "path": "p",
+          "label": "a",
+          "kind": "function"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "a",
+            "path": "p",
+            "label": "a",
+            "kind": "function",
+            "lineageId": "a"
+          }
+        ],
+        "events": []
+      }
+    },
+    {
+      "name": "moved",
+      "current": [
+        {
+          "observedId": "new",
+          "lineageId": "new",
+          "path": "src/new.ts",
+          "label": "run",
+          "qualifiedName": "pkg/run",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "old",
+          "lineageId": "lineage",
+          "path": "src/old.ts",
+          "label": "run",
+          "qualifiedName": "pkg/run",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "new",
+            "lineageId": "lineage",
+            "path": "src/new.ts",
+            "label": "run",
+            "qualifiedName": "pkg/run",
+            "kind": "function",
+            "signature": "s"
+          }
+        ],
+        "events": [
+          {
+            "kind": "moved",
+            "from": "old",
+            "to": "new",
+            "confidence": "extracted",
+            "evidence": [
+              "identity:src/old.ts:run->src/new.ts:run"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "renamed-by-qualified",
+      "current": [
+        {
+          "observedId": "n",
+          "lineageId": "n",
+          "path": "src/a.ts",
+          "label": "execute",
+          "qualifiedName": "pkg/run",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "o",
+          "lineageId": "o",
+          "path": "src/a.ts",
+          "label": "run",
+          "qualifiedName": "pkg/run",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "n",
+            "lineageId": "o",
+            "path": "src/a.ts",
+            "label": "execute",
+            "qualifiedName": "pkg/run",
+            "kind": "function",
+            "signature": "s"
+          }
+        ],
+        "events": [
+          {
+            "kind": "renamed",
+            "from": "o",
+            "to": "n",
+            "confidence": "extracted",
+            "evidence": [
+              "identity:src/a.ts:run->src/a.ts:execute"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "moved-renamed",
+      "current": [
+        {
+          "observedId": "n",
+          "lineageId": "n",
+          "path": "src/b.ts",
+          "label": "execute",
+          "qualifiedName": "pkg/run",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "o",
+          "lineageId": "o",
+          "path": "src/a.ts",
+          "label": "run",
+          "qualifiedName": "pkg/run",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "n",
+            "lineageId": "o",
+            "path": "src/b.ts",
+            "label": "execute",
+            "qualifiedName": "pkg/run",
+            "kind": "function",
+            "signature": "s"
+          }
+        ],
+        "events": [
+          {
+            "kind": "moved_renamed",
+            "from": "o",
+            "to": "n",
+            "confidence": "extracted",
+            "evidence": [
+              "identity:src/a.ts:run->src/b.ts:execute"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "label-fallback-no-signature",
+      "current": [
+        {
+          "observedId": "n",
+          "path": "x",
+          "label": "L",
+          "kind": "class"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "o",
+          "path": "y",
+          "label": "L",
+          "kind": "class",
+          "signature": ""
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "n",
+            "path": "x",
+            "label": "L",
+            "kind": "class",
+            "lineageId": "o"
+          }
+        ],
+        "events": [
+          {
+            "kind": "moved",
+            "from": "o",
+            "to": "n",
+            "confidence": "extracted",
+            "evidence": [
+              "identity:y:L->x:L"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "ambiguous",
+      "current": [
+        {
+          "observedId": "n",
+          "lineageId": "n",
+          "path": "src/c.ts",
+          "label": "run",
+          "qualifiedName": "pkg/run",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "o2",
+          "lineageId": "o2",
+          "path": "src/b.ts",
+          "label": "run",
+          "qualifiedName": "pkg/run",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "o1",
+          "lineageId": "o1",
+          "path": "src/a.ts",
+          "label": "run",
+          "qualifiedName": "pkg/run",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "n",
+            "lineageId": null,
+            "path": "src/c.ts",
+            "label": "run",
+            "qualifiedName": "pkg/run",
+            "kind": "function",
+            "signature": "s"
+          }
+        ],
+        "events": [
+          {
+            "kind": "identity_unresolved",
+            "from": null,
+            "to": "n",
+            "confidence": "ambiguous",
+            "evidence": [
+              "identity-candidate:o1",
+              "identity-candidate:o2"
+            ]
+          },
+          {
+            "kind": "removed",
+            "from": "o1",
+            "to": null,
+            "confidence": "extracted",
+            "evidence": [
+              "identity:absent:o1"
+            ]
+          },
+          {
+            "kind": "removed",
+            "from": "o2",
+            "to": null,
+            "confidence": "extracted",
+            "evidence": [
+              "identity:absent:o2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "created-and-removed",
+      "current": [
+        {
+          "observedId": "fresh",
+          "lineageId": "fresh",
+          "path": "src/f.ts",
+          "label": "f",
+          "qualifiedName": "pkg/f",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "gone",
+          "lineageId": "gone",
+          "path": "src/g.ts",
+          "label": "g",
+          "qualifiedName": "pkg/g",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "fresh",
+            "lineageId": "fresh",
+            "path": "src/f.ts",
+            "label": "f",
+            "qualifiedName": "pkg/f",
+            "kind": "function",
+            "signature": "s"
+          }
+        ],
+        "events": [
+          {
+            "kind": "created",
+            "from": null,
+            "to": "fresh",
+            "confidence": "exact",
+            "evidence": [
+              "identity:new:fresh"
+            ]
+          },
+          {
+            "kind": "removed",
+            "from": "gone",
+            "to": null,
+            "confidence": "extracted",
+            "evidence": [
+              "identity:absent:gone"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "colon-ids",
+      "current": [
+        {
+          "observedId": "p",
+          "lineageId": "p",
+          "path": "src/one.ts",
+          "label": "oneRenamed",
+          "qualifiedName": "pkg/one",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "y:p",
+          "lineageId": "y:p",
+          "path": "src/two.ts",
+          "label": "twoRenamed",
+          "qualifiedName": "pkg/two",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "x:y",
+          "lineageId": "x:y",
+          "path": "src/one.ts",
+          "label": "one",
+          "qualifiedName": "pkg/one",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "x",
+          "lineageId": "x",
+          "path": "src/two.ts",
+          "label": "two",
+          "qualifiedName": "pkg/two",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "p",
+            "lineageId": "x:y",
+            "path": "src/one.ts",
+            "label": "oneRenamed",
+            "qualifiedName": "pkg/one",
+            "kind": "function",
+            "signature": "s"
+          },
+          {
+            "observedId": "y:p",
+            "lineageId": "x",
+            "path": "src/two.ts",
+            "label": "twoRenamed",
+            "qualifiedName": "pkg/two",
+            "kind": "function",
+            "signature": "s"
+          }
+        ],
+        "events": [
+          {
+            "kind": "renamed",
+            "from": "x:y",
+            "to": "p",
+            "confidence": "extracted",
+            "evidence": [
+              "identity:src/one.ts:one->src/one.ts:oneRenamed"
+            ]
+          },
+          {
+            "kind": "renamed",
+            "from": "x",
+            "to": "y:p",
+            "confidence": "extracted",
+            "evidence": [
+              "identity:src/two.ts:two->src/two.ts:twoRenamed"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "punctuation-order",
+      "current": [
+        {
+          "observedId": "A-1",
+          "lineageId": "A-1",
+          "path": "a",
+          "label": "q1",
+          "qualifiedName": "pkg/q1",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "a_1",
+          "lineageId": "a_1",
+          "path": "a",
+          "label": "q2",
+          "qualifiedName": "pkg/q2",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "a.1",
+          "lineageId": "a.1",
+          "path": "a",
+          "label": "q3",
+          "qualifiedName": "pkg/q3",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "a1",
+          "lineageId": "a1",
+          "path": "a",
+          "label": "q4",
+          "qualifiedName": "pkg/q4",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "B",
+          "lineageId": "B",
+          "path": "a",
+          "label": "q5",
+          "qualifiedName": "pkg/q5",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "a,1",
+          "lineageId": "a,1",
+          "path": "a",
+          "label": "q6",
+          "qualifiedName": "pkg/q6",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "a 1",
+          "lineageId": "a 1",
+          "path": "b",
+          "label": "gone1",
+          "qualifiedName": "pkg/gone1",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "a$",
+          "lineageId": "a$",
+          "path": "b",
+          "label": "gone2",
+          "qualifiedName": "pkg/gone2",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "Ab",
+          "lineageId": "Ab",
+          "path": "b",
+          "label": "gone3",
+          "qualifiedName": "pkg/gone3",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "A-1",
+            "lineageId": "A-1",
+            "path": "a",
+            "label": "q1",
+            "qualifiedName": "pkg/q1",
+            "kind": "function",
+            "signature": "s"
+          },
+          {
+            "observedId": "a_1",
+            "lineageId": "a_1",
+            "path": "a",
+            "label": "q2",
+            "qualifiedName": "pkg/q2",
+            "kind": "function",
+            "signature": "s"
+          },
+          {
+            "observedId": "a.1",
+            "lineageId": "a.1",
+            "path": "a",
+            "label": "q3",
+            "qualifiedName": "pkg/q3",
+            "kind": "function",
+            "signature": "s"
+          },
+          {
+            "observedId": "a1",
+            "lineageId": "a1",
+            "path": "a",
+            "label": "q4",
+            "qualifiedName": "pkg/q4",
+            "kind": "function",
+            "signature": "s"
+          },
+          {
+            "observedId": "B",
+            "lineageId": "B",
+            "path": "a",
+            "label": "q5",
+            "qualifiedName": "pkg/q5",
+            "kind": "function",
+            "signature": "s"
+          },
+          {
+            "observedId": "a,1",
+            "lineageId": "a,1",
+            "path": "a",
+            "label": "q6",
+            "qualifiedName": "pkg/q6",
+            "kind": "function",
+            "signature": "s"
+          }
+        ],
+        "events": [
+          {
+            "kind": "created",
+            "from": null,
+            "to": "a_1",
+            "confidence": "exact",
+            "evidence": [
+              "identity:new:a_1"
+            ]
+          },
+          {
+            "kind": "created",
+            "from": null,
+            "to": "A-1",
+            "confidence": "exact",
+            "evidence": [
+              "identity:new:A-1"
+            ]
+          },
+          {
+            "kind": "created",
+            "from": null,
+            "to": "a,1",
+            "confidence": "exact",
+            "evidence": [
+              "identity:new:a,1"
+            ]
+          },
+          {
+            "kind": "created",
+            "from": null,
+            "to": "a.1",
+            "confidence": "exact",
+            "evidence": [
+              "identity:new:a.1"
+            ]
+          },
+          {
+            "kind": "created",
+            "from": null,
+            "to": "a1",
+            "confidence": "exact",
+            "evidence": [
+              "identity:new:a1"
+            ]
+          },
+          {
+            "kind": "created",
+            "from": null,
+            "to": "B",
+            "confidence": "exact",
+            "evidence": [
+              "identity:new:B"
+            ]
+          },
+          {
+            "kind": "removed",
+            "from": "a 1",
+            "to": null,
+            "confidence": "extracted",
+            "evidence": [
+              "identity:absent:a 1"
+            ]
+          },
+          {
+            "kind": "removed",
+            "from": "a$",
+            "to": null,
+            "confidence": "extracted",
+            "evidence": [
+              "identity:absent:a$"
+            ]
+          },
+          {
+            "kind": "removed",
+            "from": "Ab",
+            "to": null,
+            "confidence": "extracted",
+            "evidence": [
+              "identity:absent:Ab"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "mixed",
+      "current": [
+        {
+          "observedId": "same",
+          "lineageId": "same",
+          "path": "src/s.ts",
+          "label": "s",
+          "qualifiedName": "pkg/s",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "mv",
+          "lineageId": "mv",
+          "path": "src/m2.ts",
+          "label": "m",
+          "qualifiedName": "pkg/m",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "amb",
+          "lineageId": "amb",
+          "path": "src/x.ts",
+          "label": "dup",
+          "qualifiedName": "pkg/dup",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "new1",
+          "lineageId": "new1",
+          "path": "src/n.ts",
+          "label": "n",
+          "qualifiedName": "pkg/n",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "previous": [
+        {
+          "observedId": "same",
+          "lineageId": "",
+          "path": "src/s.ts",
+          "label": "s",
+          "qualifiedName": "pkg/s",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "mv-old",
+          "lineageId": "mv-old",
+          "path": "src/m1.ts",
+          "label": "m",
+          "qualifiedName": "pkg/m",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "d1",
+          "lineageId": "d1",
+          "path": "src/d1.ts",
+          "label": "dup",
+          "qualifiedName": "pkg/dup",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "d2",
+          "lineageId": "d2",
+          "path": "src/d2.ts",
+          "label": "dup",
+          "qualifiedName": "pkg/dup",
+          "kind": "function",
+          "signature": "s"
+        },
+        {
+          "observedId": "rm",
+          "lineageId": "rm",
+          "path": "src/r.ts",
+          "label": "r",
+          "qualifiedName": "pkg/r",
+          "kind": "function",
+          "signature": "s"
+        }
+      ],
+      "expected": {
+        "entities": [
+          {
+            "observedId": "same",
+            "lineageId": "same",
+            "path": "src/s.ts",
+            "label": "s",
+            "qualifiedName": "pkg/s",
+            "kind": "function",
+            "signature": "s"
+          },
+          {
+            "observedId": "mv",
+            "lineageId": "mv-old",
+            "path": "src/m2.ts",
+            "label": "m",
+            "qualifiedName": "pkg/m",
+            "kind": "function",
+            "signature": "s"
+          },
+          {
+            "observedId": "amb",
+            "lineageId": null,
+            "path": "src/x.ts",
+            "label": "dup",
+            "qualifiedName": "pkg/dup",
+            "kind": "function",
+            "signature": "s"
+          },
+          {
+            "observedId": "new1",
+            "lineageId": "new1",
+            "path": "src/n.ts",
+            "label": "n",
+            "qualifiedName": "pkg/n",
+            "kind": "function",
+            "signature": "s"
+          }
+        ],
+        "events": [
+          {
+            "kind": "created",
+            "from": null,
+            "to": "new1",
+            "confidence": "exact",
+            "evidence": [
+              "identity:new:new1"
+            ]
+          },
+          {
+            "kind": "identity_unresolved",
+            "from": null,
+            "to": "amb",
+            "confidence": "ambiguous",
+            "evidence": [
+              "identity-candidate:d1",
+              "identity-candidate:d2"
+            ]
+          },
+          {
+            "kind": "moved",
+            "from": "mv-old",
+            "to": "mv",
+            "confidence": "extracted",
+            "evidence": [
+              "identity:src/m1.ts:m->src/m2.ts:m"
+            ]
+          },
+          {
+            "kind": "removed",
+            "from": "d1",
+            "to": null,
+            "confidence": "extracted",
+            "evidence": [
+              "identity:absent:d1"
+            ]
+          },
+          {
+            "kind": "removed",
+            "from": "d2",
+            "to": null,
+            "confidence": "extracted",
+            "evidence": [
+              "identity:absent:d2"
+            ]
+          },
+          {
+            "kind": "removed",
+            "from": "rm",
+            "to": null,
+            "confidence": "extracted",
+            "evidence": [
+              "identity:absent:rm"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
