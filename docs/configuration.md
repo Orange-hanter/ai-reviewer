@@ -377,6 +377,12 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_AUTO_TRIAGE` | `1` | Авто-ответ и resolve на своих тредах с известным FP |
 
+## Оформление комментариев
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_ICON_BASE_URL` | — | База URL пиктограмм: задана — sticky и inline показывают SVG вместо эмодзи (🤖 ⛔ ✅ 🔴 🟠 🟡 🔵 🔄 🔎 ⚖️ 🔧), эмодзи остаётся в `alt`. Пусто — эмодзи, как раньше. Набор — публичный [Orange-hanter/ai-reviewer-icons](https://github.com/Orange-hanter/ai-reviewer-icons); база с пином на тег: `https://raw.githubusercontent.com/Orange-hanter/ai-reviewer-icons/v1.0.0/icons`. HTML-комментарии (футер), код и ответы auto-triage не меняются; логи, dry-run и Telegram — с эмодзи |
+
 ## Уведомления
 
 | Переменная | Default | Описание |

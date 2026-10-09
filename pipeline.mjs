@@ -8,6 +8,7 @@ import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
 import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs';
 import { createGraphifyClient } from './lib/graphify.mjs';
 import { createGithubClient } from './lib/github.mjs';
+import { withIcons } from './lib/icons.mjs';
 import { createReviewEngine } from './lib/engine.mjs';
 import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings, attachFingerprints } from './lib/findings.mjs';
 import { buildRepoPathIndex, listRepoFiles } from './lib/absent-path.mjs';
@@ -319,7 +320,8 @@ export function createReviewPipeline(cfg, deps = {}) {
   const ollama = deps.ollama ?? createLlmClient(cfg, log, { costTracker });
   const prompt = deps.prompt ?? createPromptBuilder();
   const graphify = deps.graphify ?? createGraphifyClient(cfg);
-  const github = deps.github ?? createGithubClient(cfg, log);
+  // Пиктограммы — на границе публикации: рендер и логи остаются с эмодзи (lib/icons.mjs).
+  const github = withIcons(deps.github ?? createGithubClient(cfg, log), cfg.render?.iconBaseUrl);
   const findingsFmt = deps.findingsFmt ?? createFindingsFormatter(cfg);
   const prescan = deps.prescan ?? createPrescanRunner(cfg, { log });
   const telegramNotifier = deps.notifyTelegram ?? notifyTelegram;
