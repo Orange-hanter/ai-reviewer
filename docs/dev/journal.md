@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 audience: [next-session-agent, maintainers]
 ---
 
@@ -12,6 +12,16 @@ audience: [next-session-agent, maintainers]
 
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
+
+## 2026-10-09 — fp-noise: «ложная блокировка» оказалась настоящей находкой
+
+**Разобрано.** Gold-кейс `fp-noise-no-real-blockers` блокировал в 8 из 9 прогонов. Блокировали не старые FP PR #477, а: выбор sticky по маркеру без проверки автора (7 раз), «утечка таймеров AbortController» (2), Markdown-инъекция (1); каждую подтверждал verifier. Первая — настоящая и была в текущем коде; таймеры — FP (семейство 8 в [false-positives](../false-positives.md)); Markdown — косметика. Гейт работал правильно, устарела разметка.
+
+**Сделано.** Свой sticky/inline = маркер + автор из `REVIEW_TRUSTED_AUTHORS`; `readChangedFiles` — containment через realpath (тот же класс, что был закрыт в карточках символов); экранирование текста модели в секциях «вне строк диффа» и «FP». Кейс переразмечен в `tp`: `wouldBlock: true`, локация `github.mjs:81–91`, старые FP — в `mustNotFindTitles`.
+
+**Уточнение.** Поддельный sticky не блокирует merge сам: carry-over находок идёт из state-файла инкрементального режима, а футер sticky питает промпт агрегатора, Δ-блок и `priorKeys` actionability.
+
+**Открыто.** Gold ×3 по кейсу после мержа; auto-triage сверяет GraphQL `author.login` (без суффикса `[bot]`) с дефолтом `github-actions[bot]` — вероятно, никогда не совпадает ([backlog](../backlog.md)).
 
 ## 2026-10-09 — gold ×3 по карточкам: все 27 прогонов
 
