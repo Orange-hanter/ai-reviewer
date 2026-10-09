@@ -4,7 +4,7 @@
 по флагу, в PR-комментариях бота.
 
 **PR-комментарии.** По умолчанию движок печатает эмодзи: текст работает в письмах и логах
-без внешних URL. С `REVIEW_ICON_BASE_URL` sticky и inline получают эти SVG (`lib/icons.mjs`).
+без внешних URL. С `REVIEW_ICON_BASE_URL` sticky, шапка review-сводки и inline получают эти SVG (`lib/icons.mjs`).
 Репозиторий движка приватный, а GitHub грузит картинки комментариев через прокси без
 авторизации, поэтому копия набора опубликована в публичном
 [Orange-hanter/ai-reviewer-icons](https://github.com/Orange-hanter/ai-reviewer-icons) и

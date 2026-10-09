@@ -22,7 +22,7 @@ last_updated: 2026-09-10
 
 ### Добавлено — пиктограммы в PR-комментариях
 
-`REVIEW_ICON_BASE_URL` (по умолчанию пусто — эмодзи, как раньше): sticky и inline показывают
+`REVIEW_ICON_BASE_URL` (по умолчанию пусто — эмодзи, как раньше): sticky, шапка review-сводки и inline показывают
 SVG-набор из `.github/icons/` вместо эмодзи. Набор опубликован в публичном
 [Orange-hanter/ai-reviewer-icons](https://github.com/Orange-hanter/ai-reviewer-icons) — движок
 приватный, а GitHub грузит картинки комментариев через прокси без авторизации. Подмена —

@@ -52,7 +52,7 @@ test('ICON_FILES: каждому знаку есть SVG в .github/icons', asyn
   }
 });
 
-test('withIcons: sticky и inline — с картинками, остальные методы и аргументы — как были', async () => {
+test('withIcons: sticky, шапка review и inline — с картинками, остальные методы и аргументы — как были', async () => {
   const calls = [];
   const gh = {
     upsertSticky: async (body) => calls.push(['sticky', body]),
@@ -66,7 +66,11 @@ test('withIcons: sticky и inline — с картинками, остальны�
   await wrapped.replyToThread('<sub>🤖 auto-triage</sub>');
   assert.deepEqual(calls, [
     ['sticky', `${img('delta', '🔄')} delta`],
-    ['review', { headSha: 'abc', inline: [{ path: 'a.js', line: 3, body: `${img('sev-major', '🟠')} **major: y**` }] }],
+    ['review', {
+      headSha: 'abc',
+      body: `${img('bot', '🤖')} Авто-ревью: инлайн-замечания ниже, общий вывод — в закреплённом комментарии.`,
+      inline: [{ path: 'a.js', line: 3, body: `${img('sev-major', '🟠')} **major: y**` }],
+    }],
     ['reply', '<sub>🤖 auto-triage</sub>'],
   ]);
 });
