@@ -26,7 +26,41 @@ prebuilt-бинарь по пину вместо чекаута репозито
 ## Текущее состояние
 
 Сверено по коду в worktree `worktree-rfc-04-standalone-rust` (= `main` b905ec3), не по
-описанию плана. Расхождения с планом отмечены явно.
+описанию плана. Расхождения с планом отмечены явно. Подразделы ниже — снимок на момент
+написания RFC; что изменилось с тех пор — в первом подразделе.
+
+### Состояние ветки после слияния `main` (98753e8)
+
+**Сделано** (закоммичено в ветке): T01–T13, T15, T16. T09 — golden-harness: генератор
+`rust/parity/pipeline-golden-generate.mjs` и 29 эталонных кейсов в
+`rust/parity/golden-fixtures/` (28 исходных + `fixture-fp-absent-path-outside-diff` из
+`main`), перегенерированы от JS после слияния. Тест `rust/tests/pipeline_golden.rs`
+по-прежнему под `#[ignore]` до T25.
+
+**Дрейф JS → Rust после слияния.** `main` после b905ec3 менял и сами портированные модули.
+Часть правок пришла в `main` уже с Rust-стороной (`config`, `prompt`, `report`, `export`,
+`metrics`, `actionability` RFC 06, `specialists` — ростер GLM 5.3). Остальное перенесено
+коммитом SYNC:
+
+| Модуль | Что поменялось в JS | Rust |
+|---|---|---|
+| `constants` | дефолтные модели `glm-5.3`/`glm-5.3-flash`, fallback `deepseek-v4.1-flash`; `VERDICT_RANK` удалён | тест сверки дефолтов, `VERDICT_RANK` удалён |
+| `llm` | таймаут запроса 420 с; effort первой попытки `chatJson` из `aggregatorEffort`; `onUsage` у `chatText`; `refMaxTokens` 6000 | `LlmConfig::aggregator_effort`, `ChatTextOpts::on_usage` (`UsageCallback`) |
+| `engine` | агрегат без `verdict`; `prompt_chars` в `llm_call`; токены prose-вызовов через `onUsage` | `ModelReview::verdict` удалён, `messages_chars`/`prompt_meta`, usage в `track_text` |
+| `verifier` | `prompt_chars` и usage в событии; `symbolCards` во входе | события — да; `symbolCards` — T38 |
+| `cost` | `efficiencyMetrics` | `efficiency_metrics` |
+| `util` | `nonNegEnv` | `non_neg_env` |
+| `profile` | `paths.incrementalState` | `ProfilePaths::incremental_state` (дефолт — в `config.rs`) |
+| `diff` | `collectAddedPaths`, `readChangedFiles({addedPaths})` | `collect_added_paths`; чтение файлов — T35 |
+| `graphify` | `graphIndex` в результате blast | `BlastRadius::graph_index` (`#[serde(skip)]`) |
+| `findings`/`eval` | FP-семейство 7 (`repoIndex`), `repo-files.txt` фикстур | T34 |
+| `engine` | маршрутизация чанков, слияние ролей, раскладка shared-prefix, summary из кодового чанка (RFC 04) | T36, T37 |
+
+**Новые JS-модули `main`, которых RFC не покрывал**, — задачи T34–T42 в «Оценке».
+Оркестрационные (`incremental`, стадии `pipeline.mjs`) — волна 4 рядом с T26.
+RFC 13 (судья гейта) в `lib/` ещё не реализован (только план `gate-judge`) — задачи на
+порт нет, пока нет JS-эталона. `bin/pr-review-scout.mjs`, `bin/pr-review-probe-cache.mjs`,
+`bin/pr-review-symbol-cards-probe.mjs` — dev-тулы, под non-goal «не переносим dev-тулы».
 
 ### Паттерн обёртки един для всех портированных модулей
 
@@ -312,11 +346,11 @@ triple → сверить с `SHA256SUMS` → `chmod +x` → `./pr-review review
 |---|---|---|---|
 | 0 | T01 RFC, T02 перенос незакоммиченного, T03 скелет | T01 ‖ T02 → T03 | `[[bin]] pr-review`, 9 заглушек подкоманд, пре-сеянные `pub mod` |
 | 1 | T04 util, T05 profile+constants, T06 concurrency, T07 fp_patterns/findings, T08 traits+testutil, T09 golden-скаффолд | все ‖ | фундамент: `Profile`, `AdaptiveSemaphore`, `fancy-regex`, замороженные сигнатуры трейтов, golden-фикстуры |
-| 2 | T10 llm, T11 github, T12 engine, T13 graphify_client, T14 astgrep+prescan, T15 blast/cost/swarm, T16 observability, T17 feedback | ‖ (T12 после T10) | все реализации трейтов и детерминированный prescan |
-| 3 | T18 structure_identity+context, T19 structure_drift, T20 structure_export, T21 structure glue, T22 cli structure, T23 cli structure-mcp | T18‖T19‖T20‖T23 → T21 → T22 | structure-контур целиком; **независим от волн 1–2** |
-| 4 | T24 triage, T26 pipeline, T28 eval, T29 metrics | T24‖T28‖T29 → T26 | 26 стадий прогона, `PipelineOutcome` вместо `die`/`exit` |
-| 5 | T25 golden финал, T27 cli review, T30 cli feedback-семейство | T27‖T30 → T25 | все 9 подкоманд работают |
-| 6 | T31 шаблоны CI+docs+package.json, T32 release.yml, T33 cutover | T31‖T32 → T33 | удаление JS-ядра |
+| 2 | T10 llm, T11 github, T12 engine, T13 graphify_client, T14 astgrep+prescan, T15 blast/cost/swarm, T16 observability, T17 feedback, T34 absent_path, T35 context_window, T36 chunk_routing+specialist_merge+prompt_layout, T37 engine RFC 04, T38 symbol_cards | ‖ (T12 после T10; T37 после T36; T38 после T13) | все реализации трейтов, детерминированный prescan, экономия токенов RFC 04/07/14 |
+| 3 | T18 structure_identity+context, T19 structure_drift, T20 structure_export, T21 structure glue, T22 cli structure, T40 mcp_stdio, T23 cli structure-mcp | T18‖T19‖T20‖T40 → T23; → T21 → T22 | structure-контур целиком; **независим от волн 1–2** |
+| 4 | T24 triage, T39 incremental, T26 pipeline, T28 eval, T29 metrics | T24‖T28‖T29‖T39 → T26 | стадии прогона, `PipelineOutcome` вместо `die`/`exit` |
+| 5 | T25 golden финал, T27 cli review, T30 cli feedback-семейство, T41 cli review-mcp | T27‖T30‖T41 → T25 | все подкоманды работают (9 + `review-mcp`) |
+| 6 | T31 шаблоны CI+docs+package.json, T32 release.yml, T42 dev-тулы RFC 15, T33 cutover | T31‖T32‖T42 → T33 | удаление JS-ядра |
 
 **Порядок cutover нарушать нельзя:**
 
@@ -378,39 +412,45 @@ T08 замораживает сигнатуры трейтов до того, к
 
 ## Оценка
 
-33 задачи. DoD каждой — команда, а не суждение.
+42 задачи (T34–T42 добавлены после слияния `main` 98753e8). DoD каждой — команда, а не
+суждение. ✅ — закоммичено в ветке.
 
 **Волна 0**
 
 | # | Суть | DoD |
 |---|---|---|
-| T01 | RFC 16 + строка в `proposals/README.md` | чек-лист «Готов к декомпозиции» закрыт |
-| T02 | перенос незакоммиченных `export`/`metrics`/`triage` из основного чекаута | `cargo build && cargo test`; `node rust/parity/{export,metrics}.parity.mjs`; `npm test` |
-| T03 | `[[bin]] pr-review`, deps (`fancy-regex`, `include_dir`, `tempfile`, `assert_cmd`, `reqwest`+rustls), 9 заглушек `src/cli/*.rs`, пре-сев `pub mod` | `cargo build`; `pr-review --help` показывает 9 подкоманд; `cargo test` |
+| ✅ T01 | RFC 16 + строка в `proposals/README.md` | чек-лист «Готов к декомпозиции» закрыт |
+| ✅ T02 | перенос незакоммиченных `export`/`metrics`/`triage` из основного чекаута | `cargo build && cargo test`; `node rust/parity/{export,metrics}.parity.mjs`; `npm test` |
+| ✅ T03 | `[[bin]] pr-review`, deps (`fancy-regex`, `include_dir`, `tempfile`, `assert_cmd`, `reqwest`+rustls), 9 заглушек `src/cli/*.rs`, пре-сев `pub mod` | `cargo build`; `pr-review --help` показывает 9 подкоманд; `cargo test` |
 
 **Волна 1**
 
 | # | Суть | DoD |
 |---|---|---|
-| T04 | `util.rs` ← `lib/util.mjs` (13 функций, `redact_secrets_for_log` вручную) | `cargo test util::` |
-| T05 | `profile.rs` + `constants.rs`: `Profile::resolve/markers`, поверх готового `config.rs` | `cargo test profile:: constants::` + тест независимости двух профилей в процессе |
-| T06 | `concurrency.rs`: `AdaptiveSemaphore`, `run_limited` на `std::thread::scope` | `cargo test concurrency::` |
-| T07 | `fp_patterns.rs` на `fancy_regex` + FP-фильтр в `findings.rs`, снятие soft-mode | `cargo test fp_patterns:: findings::`; все 51 паттерн компилируются; корпус-сравнение с JS на `fixtures/*/diff.patch` |
-| T08 | `traits.rs` (4 трейта) + `testutil.rs` (4 фейка с журналом) | `cargo build`; `cargo doc --no-deps` без warnings |
-| T09 | генератор golden-фикстур на JS + `rust/tests/pipeline_golden.rs` под `#[ignore]` | ≥ 3 фикстуры сгенерированы; тест компилируется |
+| ✅ T04 | `util.rs` ← `lib/util.mjs` (13 функций, `redact_secrets_for_log` вручную) | `cargo test util::` |
+| ✅ T05 | `profile.rs` + `constants.rs`: `Profile::resolve/markers`, поверх готового `config.rs` | `cargo test profile:: constants::` + тест независимости двух профилей в процессе |
+| ✅ T06 | `concurrency.rs`: `AdaptiveSemaphore`, `run_limited` на `std::thread::scope` | `cargo test concurrency::` |
+| ✅ T07 | `fp_patterns.rs` на `fancy_regex` + FP-фильтр в `findings.rs`, снятие soft-mode | `cargo test fp_patterns:: findings::`; все 51 паттерн компилируются; корпус-сравнение с JS на `fixtures/*/diff.patch` |
+| ✅ T08 | `traits.rs` (4 трейта) + `testutil.rs` (4 фейка с журналом) | `cargo build`; `cargo doc --no-deps` без warnings |
+| ✅ T09 | генератор golden-фикстур на JS + `rust/tests/pipeline_golden.rs` под `#[ignore]` | ≥ 3 фикстуры сгенерированы; тест компилируется |
 
 **Волна 2**
 
 | # | Суть | DoD |
 |---|---|---|
-| T10 | `llm.rs`: `RealLlmClient` — семафоры, retry-каскад `chatJson`/`chatText` | `cargo test llm::` |
-| T11 | `github.rs`: `RealGithubClient: GithubApi` (14 методов) | `cargo test github::`, кейсы `test/github.test.mjs` |
-| T12 | `engine.rs`: `RealEngine: EngineApi` + `verify_findings` | `cargo test engine::`, кейсы `test/pr-review.engine.test.mjs` |
-| T13 | `graphify_client.rs`: индекс, blast-форматирование, спавн git+graphify | `cargo test graphify_client::` |
+| ✅ T10 | `llm.rs`: `RealLlmClient` — семафоры, retry-каскад `chatJson`/`chatText` | `cargo test llm::` |
+| ✅ T11 | `github.rs`: `RealGithubClient: GithubApi` (14 методов) | `cargo test github::`, кейсы `test/github.test.mjs` |
+| ✅ T12 | `engine.rs`: `RealEngine: EngineApi` + `verify_findings` | `cargo test engine::`, кейсы `test/pr-review.engine.test.mjs` |
+| ✅ T13 | `graphify_client.rs`: индекс, blast-форматирование, спавн git+graphify | `cargo test graphify_client::` |
 | T14 | `astgrep.rs` + `prescan.rs`, embedded ruleset → `temp_dir()`, fail-open | `cargo test astgrep:: prescan::`; фикстуры `prescan-astgrep-xff`, `prescan-eslint-layer-block`; интеграционный тест с реальным `ast-grep` |
-| T15 | `blast_findings.rs`, `cost.rs`, `swarm.rs` — чистые порты | `cargo test blast_findings:: cost:: swarm::` |
-| T16 | `observability.rs` ← `lib/observability.mjs` | `cargo test observability::` |
+| ✅ T15 | `blast_findings.rs`, `cost.rs`, `swarm.rs` — чистые порты | `cargo test blast_findings:: cost:: swarm::` |
+| ✅ T16 | `observability.rs` ← `lib/observability.mjs` | `cargo test observability::` |
 | T17 | `feedback.rs` ← `feedback-schema` + `feedback` (harvest через `GithubApi`) | `cargo test feedback::` |
+| T34 | `absent_path.rs` ← `lib/absent-path.mjs` (`buildRepoPathIndex`, `findAbsentButExistingPath`, `listRepoFiles` спавном `git ls-files`, fail-open) + FP-семейство 7 в `findings::filter_false_positive_findings` (`repoIndex`, только LLM-находки). Зависит от T07 | `cargo test absent_path:: findings::`; кейсы `test/absent-path.test.mjs`; фикстура `fp-absent-path-outside-diff` |
+| T35 | `context_window.rs` ← `lib/context-window.mjs` (окна ±`contextMargin` RFC 07: `windowChunkFileContents`, `buildVerifierFileContents`) + `read_changed_files` с маркером добавленного файла (`collect_added_paths` уже в `diff.rs`). Зависит от T04 | `cargo test context_window:: diff::`; `REVIEW_CONTEXT_MARGIN=0` — откат на целые файлы |
+| T36 | `chunk_routing.rs`, `specialist_merge.rs`, `prompt_layout.rs` и `build_merged_specialist_system` в `prompt.rs` — чистые порты RFC 04 (решения 2, 4, 5). Зависит от T12 | `cargo test chunk_routing:: specialist_merge:: prompt_layout::`; сорванный формат секций не раздаёт один текст трём ролям |
+| T37 | `engine.rs`: интеграция RFC 04 — чанк без кода идёт одним агрегатором без жюри, слитые специалисты на одной модели, раскладка `shared-prefix` (`cache_prefix_chars`), summary агрегата из кодового чанка (`pickAggregateSummary`), событие `chunk_routing`. Зависит от T36 | `cargo test engine::`; кейсы RFC 04 из `test/pr-review.engine.test.mjs`; `rust/parity/engine.parity.mjs` |
+| T38 | `symbol_cards.rs` ← `lib/symbol-cards.mjs` (RFC 14): карточки advisors/жюри и verifier'у по флагу, граф — `BlastRadius::graph_index`, строки рабочего дерева — инъекцией `readLines`, линейный разбор без ReDoS. Зависит от T13 | `cargo test symbol_cards::`; кейсы `test/symbol-cards.test.mjs` |
 
 **Волна 3**
 
@@ -421,14 +461,16 @@ T08 замораживает сигнатуры трейтов до того, к
 | T20 | `structure_export.rs` | `cargo test structure_export::` |
 | T21 | `structure.rs` — glue `analyze_structure`, git exec; без импорта pipeline/engine/github/llm | `cargo test structure::` |
 | T22 | подкоманда `structure` ← `bin/pr-review-structure.mjs` | `assert_cmd`-тест: `facts.json` совпадает с JS на фикстуре |
-| T23 | подкоманда `structure-mcp` (Content-Length framing, 8 МБ, batch, сигналы) | `cargo test --test structure_mcp_stdio` |
+| T40 | `mcp_stdio.rs` ← `lib/mcp-stdio.mjs`: общий stdio-транспорт MCP (Content-Length-кадры, частичные чтения, batch, oversized 8 МБ, notifications) + handshake-модули `structure-mcp-handshake`/`structure-mcp-tools` (RFC 10: handshake без домена) | `cargo test mcp_stdio::` |
+| T23 | подкоманда `structure-mcp` поверх T40 (Content-Length framing, 8 МБ, batch, сигналы) | `cargo test --test structure_mcp_stdio` |
 
 **Волна 4**
 
 | # | Суть | DoD |
 |---|---|---|
 | T24 | `triage.rs`: `build_triage_context`, `run_auto_triage` | `cargo test triage::` |
-| T26 | `pipeline.rs` ← `pipeline.mjs:245-666`, `PipelineOutcome` вместо `die`/`exit` | `cargo build`; `cargo test pipeline::` |
+| T39 | `incremental.rs` ← `lib/incremental.mjs` (RFC 05): хэш входа модели по файлу, состояние в `paths.incrementalState`, `fullEvery`; перенос находок **после** refutation и verifier. Зависит от T04, T05 | `cargo test incremental::`; кейсы `test/incremental.test.mjs` |
+| T26 | `pipeline.rs` ← `pipeline.mjs` (`createReviewPipeline`/`runDetailed`/`runGateResolution`; после слияния `main` — 1066 строк: `repoIndex` для FP-семейства 7, окна контекста, карточки символов, инкрементальный перенос, `efficiencyMetrics` в `run_end`), `PipelineOutcome` вместо `die`/`exit`. Зависит от T24, T28, T29, T34–T39 | `cargo build`; `cargo test pipeline::` |
 | T28 | `eval.rs` + подкоманда `eval`, замена стаба `bin/eval.rs` | `pr-review eval` → 16/16 |
 | T29 | подкоманда `metrics` ← `bin/pr-review-metrics.mjs` | отчёт совпадает по структуре с JS |
 
@@ -439,6 +481,7 @@ T08 замораживает сигнатуры трейтов до того, к
 | T25 | golden-финал: 16 фикстур + router skip/light + telegram, снять `#[ignore]` | `cargo test --test pipeline_golden` |
 | T27 | подкоманда `review` ← `bin/pr-review.mjs` + `runReview`: fail-open exit 0, блокеры exit 1, strict-режимы | dry-run на фикстуре с фейковым LLM-сервером |
 | T30 | подкоманды `feedback`, `feedback-batch`, `feedback-migrate`, `feedback-promote` | `cargo test --test feedback_cli` |
+| T41 | подкоманда `review-mcp` ← `bin/pr-review-mcp.mjs` + `lib/review-mcp{,-handshake,-tools}.mjs` (RFC 08–12: дешёвые стадии, `review_run` как pinned dry-run MoA поверх `runDetailed`, `wait: false` + поллинг по `jobId`, атомарный слот). Десятая подкоманда; `cursor-plugin/bin/review-mcp.sh` переводится в T31. Зависит от T26, T40 | `cargo test --test review_mcp_stdio`; кейсы `test/pr-review.mcp.test.mjs` |
 
 **Волна 6**
 
@@ -446,4 +489,5 @@ T08 замораживает сигнатуры трейтов до того, к
 |---|---|---|
 | T31 | `examples/ci/*.yml` (скачивание по пину + sha256), `docs/{integration,architecture,configuration}.md`, `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `package.json`, `examples/consumers/orakul/`, вынос `test/ci-templates.test.mjs` | `node --test test/ci-templates.test.mjs`; ни одного `node .ai-reviewer-engine/` в шаблонах |
 | T32 | `release.yml`: матрица 4 таргета, `SHA256SUMS`, публикация по тегу | `cargo build --release` локально; `actionlint` зелёный; реальный прогон по `workflow_dispatch` |
+| T42 | dev-тулы RFC 15 (`lib/cues.mjs`, `lib/brief.mjs`, `bin/pr-review-scout.mjs`) и пробники (`pr-review-probe-cache`, `pr-review-symbol-cards-probe`): остаются JS по non-goal «dev-тулы», поэтому решение 8 получает исключение — эти модули и их импорты (`diff`, `router`, `symbol-cards`) читают JSON-вывод бинаря или вынесены в `tools/`; порт `cues`/`brief` — только если RFC 15 перейдёт к этапу 1 (наряды в гейте) | `node bin/pr-review-scout.mjs --gold-dir gold` работает после T33 |
 | T33 | cutover: удаления по решению 8, `pr-review-gold.mjs` на спавн бинаря, новый порядок шагов `ci.yml` | `cargo build/test` и `npm test` зелёные; `grep -rn "pipeline.mjs\|lib/.*\.mjs" --include=*.mjs` не находит ссылок на удалённое; один бинарь запускает 9 подкоманд |

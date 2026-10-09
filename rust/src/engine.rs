@@ -1049,7 +1049,7 @@ pub(crate) fn messages_chars(messages: &[Value]) -> usize {
 }
 
 /// `promptMeta(messages, layout)` для раскладки `legacy`: только `prompt_chars`.
-/// Раскладка `shared-prefix` (`cache_prefix_chars`, `lib/prompt-layout.mjs`) — задача T41.
+/// Раскладка `shared-prefix` (`cache_prefix_chars`, `lib/prompt-layout.mjs`) — задача T37.
 fn prompt_meta(messages: &[Value]) -> (&'static str, Value) {
     ("prompt_chars", json!(messages_chars(messages)))
 }
