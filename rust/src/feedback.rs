@@ -618,7 +618,17 @@ fn fixture_slug(entry: &Value) -> String {
 /// `buildFixtureCandidate`: черновик eval-fixture из FP-записи; `None` без файла.
 pub fn build_fixture_candidate(entry: &Value) -> Option<Value> {
     let slug = fixture_slug(entry);
-    let id = js_slice_utf16(&format!("fp-pr-{}-{slug}", tpl(entry.get("pr"))), 64);
+    // id становится именем файла (write_fixture_candidates) и каталога fixture
+    // (promote, sanitizeFixtureId): поля находки не должны пронести `/`, `..`.
+    // `replace(/[^A-Za-z0-9_-]/g, '-')` без флага u — по UTF-16 единицам.
+    let id: String = js_slice_utf16(&format!("fp-pr-{}-{slug}", tpl(entry.get("pr"))), 64)
+        .chars()
+        .flat_map(|c| {
+            let keep = c.is_ascii_alphanumeric() || c == '_' || c == '-';
+            let (ch, n) = if keep { (c, 1) } else { ('-', c.len_utf16()) };
+            std::iter::repeat_n(ch, n)
+        })
+        .collect();
     let file = finding_field(entry, "file").filter(|f| js_truthy(f))?.clone();
 
     let mut from = Map::new();
@@ -1361,6 +1371,31 @@ mod tests {
         assert_eq!(row(json!({ "pr": "0b101" })), ok(3, ""));
         assert_eq!(row(json!({ "finding": { "file": "a.ts", "line": "infinity", "title": "t" } })), ok(0, ""));
         assert_eq!(row(json!({ "commentId": "0o17" })), ok(3, r#","commentId":15"#));
+    }
+
+    /// suggestedId — имя файла кандидата: поля находки не проносят `/` и `..`
+    /// (RFC 16 SEC; эталон — `test/feedback-candidate-path.test.mjs`).
+    #[test]
+    fn fixture_candidate_id_is_safe_file_name() {
+        let entry = |line: Value, title: &str| {
+            json!({ "pr": 7, "source": "label", "signal": "fp", "label": "ai-review-fp",
+                "finding": { "file": "server/a.ts", "line": line, "severity": "major", "title": title } })
+        };
+        let id = |e: &Value| build_fixture_candidate(e).unwrap()["suggestedId"].as_str().unwrap().to_string();
+        assert_eq!(id(&entry(json!(12), "unsafe eval")), "fp-pr-7-unsafe-eval-L12");
+        let evil = entry(json!("/../../../escape"), "unsafe eval");
+        assert_eq!(id(&evil), "fp-pr-7-unsafe-eval-L----------escape");
+        // Суррогатная пара — две UTF-16 единицы, как в JS `replace` без флага u.
+        assert_eq!(id(&entry(json!("😀"), "unsafe eval")), "fp-pr-7-unsafe-eval-L--");
+
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("a/b/candidates");
+        // Каталог, через который `..` в id вывел бы запись наружу.
+        std::fs::create_dir_all(dir.join("fp-pr-7-unsafe-eval-L")).unwrap();
+        let r = write_fixture_candidates(&dir, &[evil], &|_| {}).unwrap();
+        assert_eq!(r.written, 1);
+        assert!(dir.join("fp-pr-7-unsafe-eval-L----------escape.json").is_file());
+        assert!(!root.path().join("a/escape.json").exists());
     }
 
     #[test]
