@@ -571,11 +571,12 @@ pub fn build_structure_context(
 
     // tokenEstimate по сериализации результата БЕЗ tokenEstimate
     let estimate = |v: &Value| -> f64 { (utf16_len(&js_json_stringify(v)) as f64 / 4.0).ceil() };
-    result.insert("tokenEstimate".into(), int_json(estimate(&Value::Object(result.clone()))));
+    // гейт бюджета сравнивает именно эту оценку (result.tokenEstimate в JS), а
+    // не пересчёт по result, где поле tokenEstimate уже есть
+    let token_estimate = estimate(&Value::Object(result.clone()));
+    result.insert("tokenEstimate".into(), int_json(token_estimate));
     let compact = js_json_stringify(&Value::Object(result.clone()));
-    if (compact.len() as f64) > max_bytes
-        || estimate(&Value::Object(result.clone())) > token_budget
-    {
+    if (compact.len() as f64) > max_bytes || token_estimate > token_budget {
         let half = ((get_arr_len(&result, "dependencies") as f64) / 2.0)
             .floor()
             .max(0.0);
@@ -1043,6 +1044,25 @@ mod tests {
         });
         let err = build_structure_context_op(obj.as_object().unwrap()).unwrap_err();
         assert_eq!(format!("{err:#}"), "headSha or snapshotFingerprint is required");
+    }
+
+    #[test]
+    fn token_gate_matches_js_at_budget_boundary() {
+        // эталон JS (rust/parity/golden-structure/t18.json): без поля tokenEstimate
+        // оценка ровно 442 — при tokenBudget 442 усечения нет
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("parity/golden-structure/t18.json");
+        let golden: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let pair = &golden["payloads"]["rich"];
+        let ctx = build_structure_context(
+            &pair[0],
+            &pair[1],
+            &json!({"headSha": "abcdef1", "scopeRefs": ["e:a"], "taskRef": "T-1", "tokenBudget": 442}),
+            None,
+        )
+        .unwrap();
+        assert_eq!(get(&ctx, "truncated"), Some(&json!(false)));
+        assert_eq!(get(&ctx, "tokenEstimate"), Some(&json!(442)));
     }
 
     #[test]
