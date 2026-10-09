@@ -718,5 +718,18 @@ mod tests {
             root.join("linked/facts.json").to_string_lossy().into(),
         ));
         assert!(!outside.path().join("facts.json").exists());
+        // Висячий symlink: canonicalize цели падает, ближайший существующий предок —
+        // root, а запись пошла бы по ссылке и создала файл снаружи (RFC 16 SEC).
+        std::os::unix::fs::symlink(outside.path().join("dangling.json"), root.join("dangling.json")).unwrap();
+        escapes(with(
+            |o, p| o.facts_path = Some(p),
+            root.join("dangling.json").to_string_lossy().into(),
+        ));
+        assert!(!outside.path().join("dangling.json").exists());
+        std::os::unix::fs::symlink(outside.path().join("ghost"), root.join("ghost")).unwrap();
+        escapes(with(
+            |o, p| o.facts_path = Some(p),
+            root.join("ghost/facts.json").to_string_lossy().into(),
+        ));
     }
 }

@@ -740,6 +740,19 @@ test('writeStructureExports confines writes to the allowed root', async (t) => {
     factsPath: join(root, 'linked', 'facts.json'),
     rootDir: root,
   }), /escapes allowed root/);
+  // висячий symlink: realpath цели падает, ближайший существующий предок — root,
+  // а writeFile пошёл бы по ссылке и создал файл снаружи (RFC 16 SEC)
+  await symlink(join(outside, 'dangling.json'), join(root, 'dangling.json'));
+  await assert.rejects(() => writeStructureExports(result, {
+    factsPath: join(root, 'dangling.json'),
+    rootDir: root,
+  }), /escapes allowed root/);
+  await assert.rejects(() => readFile(join(outside, 'dangling.json')), { code: 'ENOENT' });
+  await symlink(join(outside, 'ghost'), join(root, 'ghost'));
+  await assert.rejects(() => writeStructureExports(result, {
+    factsPath: join(root, 'ghost', 'facts.json'),
+    rootDir: root,
+  }), /escapes allowed root/);
 });
 
 test('drift finding fingerprints are independent of subjectRefs order', async () => {

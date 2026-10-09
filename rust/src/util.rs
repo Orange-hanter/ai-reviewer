@@ -261,6 +261,12 @@ fn realpath_or_ancestor(path: &Path) -> Result<PathBuf> {
         if let Ok(real) = std::fs::canonicalize(&current) {
             return Ok(real);
         }
+        // Запись есть, а canonicalize не раскрывает — висячий (или зацикленный)
+        // symlink. Подъём к предку проверил бы не то место: write/create_dir_all
+        // пойдут по ссылке туда, куда она указывает, в том числе за пределы root.
+        if std::fs::symlink_metadata(&current).is_ok() {
+            bail!("path escapes allowed root: {}", path.display());
+        }
         match current.parent() {
             Some(parent) if parent != current => current = parent.to_path_buf(),
             _ => bail!("path escapes allowed root: {}", path.display()),
