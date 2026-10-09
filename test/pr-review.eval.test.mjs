@@ -1751,6 +1751,23 @@ test('loadReviewConfig: REVIEW_FEEDBACK off', () => {
   assert.match(cfg.feedback.logFile, /fp-feedback\.jsonl$/);
 });
 
+test('prescan: дочерний процесс (eslint с конфигом из PR) не получает секретов job', async () => {
+  const keys = ['AI_REVIEW_GITLAB_TOKEN', 'GITHUB_TOKEN', 'OLLAMA_API_KEY', 'CI_JOB_TOKEN', 'DB_PASSWORD'];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  for (const k of keys) process.env[k] = 'secret-value';
+  try {
+    const { stdout } = await runCommand(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.env))']);
+    const childEnv = JSON.parse(stdout);
+    for (const k of keys) assert.equal(childEnv[k], undefined, `${k} утёк в prescan`);
+    assert.ok(childEnv.PATH, 'PATH нужен eslint и остаётся');
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
 // RFC 16: шаблоны GitLab CI. Гейт держится на exit code job'а — allow_failure и пин движка
 // из target-ветки проверяются так же строго, как в шаблонах GitHub Actions.
 test('gitlab ci: ревью — MR pipeline, гейт не ослаблен, пин из target-ветки, секретов в файле нет', async () => {
@@ -1781,6 +1798,10 @@ test('gitlab ci: feedback — только schedule/web с явным AI_REVIEW_
   assert.equal(rules.length, 2);
   assert.ok(rules.every((l) => l.includes('$AI_REVIEW_JOB == "feedback"')), 'без метки job запускался бы в каждом pipeline');
   assert.ok(rules.every((l) => !l.includes('merge_request_event')), 'harvest пишет в репозиторий — не из MR pipeline');
+  assert.ok(
+    rules.every((l) => l.includes('$CI_COMMIT_REF_PROTECTED == "true"')),
+    'токен на запись и движок по пину ветки — только на защищённой ветке',
+  );
   assert.equal(workflowScalar(yml, 'ai-review-feedback.resource_group'), 'ai-review-feedback');
   assert.equal(workflowScalar(yml, 'ai-review-feedback.variables.REVIEW_FORGE'), 'gitlab');
   assert.doesNotMatch(yml, /https:\/\/[^\s"]*\$\{?AI_REVIEW_GITLAB_TOKEN/, 'токен в URL remote печатается в ошибках git');

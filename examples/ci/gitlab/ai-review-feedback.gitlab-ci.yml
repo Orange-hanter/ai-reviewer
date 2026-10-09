@@ -8,6 +8,11 @@
 # Переменные CI/CD (masked): AI_REVIEW_GITLAB_TOKEN — project access token, роль Developer,
 # scopes `api` + `write_repository` (push ветки с данными и создание MR).
 #
+# Job исполняет движок по пину из ветки, на которой запущен, с токеном на запись — поэтому
+# только на защищённых ветках (CI_COMMIT_REF_PROTECTED): иначе ручной pipeline на своей
+# ветке с подменённым ops/ai-reviewer-ref получил бы токен. Токен на запись лучше держать
+# отдельной protected-переменной (видна только защищённым веткам), а не той, что у job ревью.
+#
 # Доверенность авторов: на GitLab бот — владелец токена (`project_<id>_bot_<hash>`), и при
 # дефолтном REVIEW_FEEDBACK_TRUSTED_AUTHORS движок подставляет его логин сам. Если ревью
 # постит другой токен, задайте его логин явно.
@@ -16,8 +21,8 @@ ai-review-feedback:
   stage: test
   image: node:24-bookworm
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $AI_REVIEW_JOB == "feedback"
-    - if: $CI_PIPELINE_SOURCE == "web" && $AI_REVIEW_JOB == "feedback"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $AI_REVIEW_JOB == "feedback" && $CI_COMMIT_REF_PROTECTED == "true"
+    - if: $CI_PIPELINE_SOURCE == "web" && $AI_REVIEW_JOB == "feedback" && $CI_COMMIT_REF_PROTECTED == "true"
   # Два прогона одновременно запушили бы одну ветку данных.
   resource_group: ai-review-feedback
   timeout: 15m
