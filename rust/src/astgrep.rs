@@ -10,6 +10,12 @@
 //! во временный каталог-сосед и переименовывается атомарно — параллельные
 //! прогоны не видят полузаписанный ruleset.
 //!
+//! Имя каталога предсказуемо (digest вычисляется из публичного ruleset), а temp на
+//! Linux CI общий для всех пользователей. Поэтому готовый каталог переиспользуется,
+//! только если он наш ([`is_private_dir`]): не symlink, владелец — текущий
+//! пользователь, нет прав записи для группы/остальных. Чужой или открытый каталог
+//! не трогаем и распаковываем в свежий приватный (`mkdtemp`, 0700).
+//!
 //! Пустой `prescan.astgrep.configPath` (дефолт `loadReviewConfig` без профиля) —
 //! вшитый ruleset, как `DEFAULT_ASTGREP_CONFIG` в JS. Явный путь (env
 //! `REVIEW_ASTGREP_CONFIG` или `paths.astgrepConfig` профиля) имеет приоритет:
@@ -94,32 +100,52 @@ pub fn unpack_embedded_ruleset(base: &Path) -> std::io::Result<PathBuf> {
     let _guard = UNPACK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let target = base.join(format!("ai-reviewer-astgrep-{}", embedded_ruleset_digest()));
     let config = target.join(SGCONFIG);
-    if config.is_file() {
+    let reusable = || is_private_dir(&target) && config.is_file();
+    if reusable() {
         return Ok(config);
     }
     fs::create_dir_all(base)?;
+    // tempdir_in — mkdtemp: каталог 0700, имя непредсказуемо.
     let staging = tempfile::Builder::new().prefix(".ai-reviewer-astgrep-").tempdir_in(base)?;
     EMBEDDED_RULESET.extract(staging.path())?;
-    match fs::rename(staging.path(), &target) {
-        Ok(()) => {
-            // Каталог уже переименован; TempDir не должен пытаться его удалить.
-            let _ = staging.keep();
-        }
-        Err(e) => {
-            // Гонка с другим процессом: он успел первым — берём его копию.
-            if !config.is_file() {
-                // Битый целевой каталог без sgconfig (кто-то почистил частично):
-                // работаем из своей копии, она остаётся в temp_dir.
-                let kept = staging.keep();
-                let alt = kept.join(SGCONFIG);
-                if alt.is_file() {
-                    return Ok(alt);
-                }
-                return Err(e);
-            }
-        }
+    // Цель занята (чужой/открытый каталог, symlink, файл) — не переименовываем
+    // поверх и не читаем её: остаёмся в своей приватной копии.
+    let occupied = fs::symlink_metadata(&target).is_ok();
+    if !occupied && fs::rename(staging.path(), &target).is_ok() {
+        // Каталог уже переименован; TempDir не должен пытаться его удалить.
+        let _ = staging.keep();
+        return Ok(config);
     }
-    Ok(config)
+    // Гонка с другим нашим процессом: он успел первым — берём его копию, если она
+    // проходит ту же проверку.
+    if reusable() {
+        return Ok(config);
+    }
+    // Иначе работаем из своей копии, она остаётся в temp_dir.
+    let kept = staging.keep();
+    let alt = kept.join(SGCONFIG);
+    if alt.is_file() {
+        return Ok(alt);
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::NotFound, "sgconfig.yml не распаковался"))
+}
+
+/// Каталог распакованного ruleset можно переиспользовать: это сам каталог (не
+/// symlink), владелец — текущий пользователь, писать в него не может никто другой.
+#[cfg(unix)]
+fn is_private_dir(dir: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = fs::symlink_metadata(dir) else { return false };
+    // SAFETY: geteuid не имеет предусловий и не может завершиться ошибкой.
+    let euid = unsafe { libc::geteuid() };
+    meta.file_type().is_dir() && meta.uid() == euid && meta.mode() & 0o022 == 0
+}
+
+/// Вне unix temp каталог per-user (Windows: `%LOCALAPPDATA%\Temp`); проверяем
+/// только, что это каталог, а не ссылка.
+#[cfg(not(unix))]
+fn is_private_dir(dir: &Path) -> bool {
+    fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_dir())
 }
 
 /// Путь к `sgconfig.yml` вшитого ruleset в `std::env::temp_dir()`.
@@ -509,6 +535,38 @@ mod tests {
         let n = fs::read_dir(tmp.path()).unwrap().count();
         assert_eq!(n, 1);
         assert!(embedded_config_path().unwrap().is_file());
+    }
+
+    /// Каталог с предсказуемым именем, заранее созданный кем-то другим в общем
+    /// temp (на Linux CI `/tmp` общий), не должен считаться готовым ruleset:
+    /// иначе чужие правила подавят блок-находки или подсунут свои.
+    #[cfg(unix)]
+    #[test]
+    fn embedded_ruleset_ignores_planted_world_writable_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let planted = tmp.path().join(format!("ai-reviewer-astgrep-{}", embedded_ruleset_digest()));
+        fs::create_dir_all(planted.join("rules")).unwrap();
+        fs::write(planted.join(SGCONFIG), "ruleDirs: [rules]\n# planted\n").unwrap();
+        fs::set_permissions(&planted, fs::Permissions::from_mode(0o777)).unwrap();
+        let got = unpack_embedded_ruleset(tmp.path()).unwrap();
+        assert_ne!(got, planted.join(SGCONFIG));
+        let want = std::str::from_utf8(EMBEDDED_RULESET.get_file(SGCONFIG).unwrap().contents()).unwrap();
+        assert_eq!(fs::read_to_string(&got).unwrap(), want);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn embedded_ruleset_ignores_planted_symlink() {
+        let tmp = tempfile::tempdir().unwrap();
+        let evil = tempfile::tempdir().unwrap();
+        fs::write(evil.path().join(SGCONFIG), "ruleDirs: [rules]\n# planted\n").unwrap();
+        let target = tmp.path().join(format!("ai-reviewer-astgrep-{}", embedded_ruleset_digest()));
+        std::os::unix::fs::symlink(evil.path(), &target).unwrap();
+        let got = unpack_embedded_ruleset(tmp.path()).unwrap();
+        assert!(!got.starts_with(&target), "{got:?}");
+        let want = std::str::from_utf8(EMBEDDED_RULESET.get_file(SGCONFIG).unwrap().contents()).unwrap();
+        assert_eq!(fs::read_to_string(&got).unwrap(), want);
     }
 
     #[test]
