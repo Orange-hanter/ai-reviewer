@@ -7,7 +7,7 @@ import { createCostTracker, efficiencyMetrics } from './lib/cost.mjs';
 import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
 import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs';
 import { createGraphifyClient } from './lib/graphify.mjs';
-import { createGithubClient } from './lib/github.mjs';
+import { createForgeClient, forgeOf, forgeCredsHint } from './lib/forge.mjs';
 import { createReviewEngine } from './lib/engine.mjs';
 import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings, attachFingerprints } from './lib/findings.mjs';
 import { buildRepoPathIndex, listRepoFiles } from './lib/absent-path.mjs';
@@ -24,7 +24,7 @@ import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath } 
 import { createObservability, slimFindings, countBySeverity, PR_TITLE_LOG_MAX } from './lib/observability.mjs';
 import { buildSummary, buildRouterSummary, buildLlmUnavailableSummary } from './lib/report.mjs';
 import { buildReviewJson, writeReviewExports } from './lib/export.mjs';
-import { parseTrustedAuthors } from './lib/feedback.mjs';
+import { resolveTrustedAuthors } from './lib/feedback.mjs';
 import { buildTriageContext, runAutoTriage } from './lib/triage.mjs';
 import {
   fileInputHashes, configFingerprint, readIncrementalState, writeIncrementalState,
@@ -251,7 +251,7 @@ async function runVerifierStage(allFindings, {
 }
 
 /** Публикует inline и чистит устаревшие только после успешного post. */
-async function publishInline(github, { inline, headSha, maxInline, cleanupWithoutPost = false }, log) {
+async function publishInline(github, { inline, headSha, diff, maxInline, cleanupWithoutPost = false }, log) {
   const inlineToPost = inline.slice(0, maxInline);
   if (inline.length > inlineToPost.length) {
     log(`inline-комментов ${inline.length} > лимита ${maxInline} — постим первые ${maxInline} (полные счётчики в sticky)`);
@@ -262,8 +262,9 @@ async function publishInline(github, { inline, headSha, maxInline, cleanupWithou
   }
   // post-then-delete: сначала новый review, потом чистка старых инлайнов (кроме только что
   // запощенного) — при сбое постинга старые комментарии не теряются.
-  const reviewId = await github.postReview({ inline: inlineToPost, headSha });
-  // reviewId=null (GitHub не вернул id) → чистку пропускаем: иначе сотрём только что запощенное.
+  // diff нужен GitLab-клиенту: позиция инлайна там требует old_path/old_line (RFC 16).
+  const reviewId = await github.postReview({ inline: inlineToPost, headSha, diff });
+  // reviewId=null (хостинг не вернул id) → чистку пропускаем: иначе сотрём только что запощенное.
   const cleared = reviewId
     ? await github.deleteStaleInline({ exceptReviewId: reviewId })
     : (log('review id не получен — пропускаем чистку старых инлайнов'), 0);
@@ -271,8 +272,8 @@ async function publishInline(github, { inline, headSha, maxInline, cleanupWithou
 }
 
 /** Стадия публикации: post-then-delete inline → upsert sticky. */
-async function publishReview(github, { inline, md, headSha, maxInline }, log) {
-  const published = await publishInline(github, { inline, headSha, maxInline }, log);
+async function publishReview(github, { inline, md, headSha, diff, maxInline }, log) {
+  const published = await publishInline(github, { inline, headSha, diff, maxInline }, log);
   const op = await github.upsertSticky(md);
   return { ...published, op };
 }
@@ -319,7 +320,8 @@ export function createReviewPipeline(cfg, deps = {}) {
   const ollama = deps.ollama ?? createLlmClient(cfg, log, { costTracker });
   const prompt = deps.prompt ?? createPromptBuilder();
   const graphify = deps.graphify ?? createGraphifyClient(cfg);
-  const github = deps.github ?? createGithubClient(cfg, log);
+  // deps.github — прежнее имя шва (RFC 16, Р5): принимаем до снятия алиаса.
+  const github = deps.forge ?? deps.github ?? createForgeClient(cfg, log);
   const findingsFmt = deps.findingsFmt ?? createFindingsFormatter(cfg);
   const prescan = deps.prescan ?? createPrescanRunner(cfg, { log });
   const telegramNotifier = deps.notifyTelegram ?? notifyTelegram;
@@ -350,7 +352,8 @@ export function createReviewPipeline(cfg, deps = {}) {
   async function runDetailed() {
     const { cli, reviewMode, ollama: oCfg, moa, models, gate, limits, verifier, specialists } = cfg;
     const { dryRun, diffFile } = cli;
-    const postCreds = cfg.github.repo && cfg.github.prNumber && cfg.github.token;
+    const forge = forgeOf(cfg);
+    const postCreds = forge.repo && forge.prNumber && forge.token;
     let lastArtifact = null;
     let lastExport = null;
 
@@ -380,12 +383,12 @@ export function createReviewPipeline(cfg, deps = {}) {
     try {
       if (!oCfg.key) die('нет LLM API key (задайте LLM_API_KEY или OLLAMA_API_KEY)');
       if (reviewMode === 'moa' && !moa.references.length) die('MOA_REFERENCE_MODELS пуст — задай хотя бы один advisor');
-      if (!diffFile && !postCreds) die('нет REPO/PR_NUMBER/GITHUB_TOKEN для загрузки диффа');
-      if (!dryRun && !postCreds) die('постинг требует REPO/PR_NUMBER/GITHUB_TOKEN — для локального прогона добавь --dry-run');
+      if (!diffFile && !postCreds) die(`нет ${forgeCredsHint(cfg)} для загрузки диффа`);
+      if (!dryRun && !postCreds) die(`постинг требует ${forgeCredsHint(cfg)} — для локального прогона добавь --dry-run`);
 
       const engine = deps.engine ?? createReviewEngine(cfg, { ollama, prompt, log, observability: obs });
 
-      let pr = { number: cfg.github.prNumber, title: '(local diff)', html_url: '' };
+      let pr = { number: forge.prNumber, title: '(local diff)', html_url: '' };
       let headSha = '';
       let diff;
 
@@ -823,7 +826,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         const { inline } = findingsFmt.classify(prescanBlockers, files);
         try {
           const pub = await publishInline(github, {
-            inline, headSha, maxInline: limits.maxInline, cleanupWithoutPost: true,
+            inline, headSha, diff, maxInline: limits.maxInline, cleanupWithoutPost: true,
           }, log);
           log(`fail-closed: запощено ${pub.posted}/${pub.total} prescan inline, очищено старых ${pub.cleared}`);
         } catch (e) {
@@ -997,7 +1000,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         return detailedResult(exitCode, { wouldBlock: blockers.length > 0 });
       }
 
-      const pub = await publishReview(github, { inline, md, headSha, maxInline: limits.maxInline }, log);
+      const pub = await publishReview(github, { inline, md, headSha, diff, maxInline: limits.maxInline }, log);
       log(`review запощен (${pub.posted}/${pub.total} inline, очищено старых ${pub.cleared}) · summary ${pub.op}`);
 
       if (cfg.triage?.enabled) {
@@ -1009,7 +1012,7 @@ export function createReviewPipeline(cfg, deps = {}) {
             headSha,
             blockOn: gate.blockOn,
             patternsFile: cfg.feedback?.patternsFile,
-            trustedAuthors: parseTrustedAuthors(cfg.feedback?.trustedAuthors),
+            trustedAuthors: await resolveTrustedAuthors(cfg.feedback?.trustedAuthors, github),
           });
           const triageStats = await runAutoTriage(github, triageCtx, log);
           obs?.logEvent('auto_triage', triageStats);

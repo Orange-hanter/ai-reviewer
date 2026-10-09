@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// R8: harvest GitHub feedback (👍/👎, label ai-review-fp) → JSONL + fixture candidates.
+// R8: harvest feedback с хостинга (GitHub/GitLab, RFC 16) (👍/👎, label ai-review-fp) → JSONL + fixture candidates.
 // Запуск: npx pr-review-feedback [--dry-run] [--pr N] [--repo owner/repo]
 
 import { pathToFileURL } from 'node:url';
 import { loadReviewConfig, parseCli } from '../lib/config.mjs';
-import { createGithubClient } from '../lib/github.mjs';
+import { createForgeClient, forgeOf, forgeCredsHint } from '../lib/forge.mjs';
 import { harvestFeedback, formatHarvestReport } from '../lib/feedback.mjs';
 
 async function main() {
@@ -20,13 +20,14 @@ async function main() {
     console.log('REVIEW_FEEDBACK=0 — harvest отключён');
     process.exit(0);
   }
-  if (!cfg.github.token || !cfg.github.repo || !cfg.github.prNumber) {
-    console.error('[pr-review.feedback] нужны GITHUB_TOKEN, GITHUB_REPOSITORY (или --repo), PR_NUMBER (или --pr)');
+  const forge = forgeOf(cfg);
+  if (!forge.token || !forge.repo || !forge.prNumber) {
+    console.error(`[pr-review.feedback] нужны ${forgeCredsHint(cfg)} (или --repo/--pr)`);
     process.exit(1);
   }
 
   const log = (m) => console.log(m);
-  const github = createGithubClient(cfg, log);
+  const github = createForgeClient(cfg, log);
   const result = await harvestFeedback(cfg, github, { log });
   console.log(formatHarvestReport(result));
   process.exit(result.ok === false ? 1 : 0);

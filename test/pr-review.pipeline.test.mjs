@@ -740,3 +740,53 @@ test('pipeline: runDetailed отдаёт артефакт с cli.headSha на fi
     await rm(tmp, { force: true });
   }
 });
+
+test('pipeline: GitLab (RFC 16) — дифф из MR, инлайн draft note с позицией, sticky заметкой, exit 1', async () => {
+  const { createGitlabClient } = await import('../lib/gitlab.mjs');
+  const refs = { base_sha: 'b'.repeat(40), start_sha: 's'.repeat(40), head_sha: 'h'.repeat(40) };
+  const mr = '/projects/42/merge_requests/1';
+  const calls = [];
+  const ok = (body, status = 200) => ({
+    ok: true, status, headers: new Headers(), text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+  });
+  const routes = {
+    [`GET ${mr}`]: () => ok({ iid: 1, title: 'MR', web_url: 'https://gl.test/g/p/-/merge_requests/1', diff_refs: refs }),
+    [`GET ${mr}/raw_diffs`]: () => ok(CODE_DIFF),
+    [`GET ${mr}/notes`]: () => ok([]),
+    [`POST ${mr}/notes`]: () => ok({ id: 1 }),
+    [`GET ${mr}/discussions`]: () => ok([]),
+    [`GET ${mr}/draft_notes`]: () => ok([]),
+    [`POST ${mr}/draft_notes`]: () => ok({ id: 2 }),
+    [`POST ${mr}/draft_notes/bulk_publish`]: () => ok('', 204),
+  };
+  const fetch = async (url, opts = {}) => {
+    const u = new URL(String(url));
+    const key = `${opts.method || 'GET'} ${u.pathname.replace('/api/v4', '')}`;
+    calls.push({ key, body: opts.body ? JSON.parse(opts.body) : null });
+    const h = routes[key];
+    return h ? h() : { ok: false, status: 404, headers: new Headers(), text: async () => '{"message":"404"}' };
+  };
+  const cfg = loadReviewConfig({
+    ...ENV,
+    GITHUB_TOKEN: '',
+    REVIEW_FORGE: 'gitlab',
+    CI_API_V4_URL: 'https://gl.test/api/v4',
+    CI_PROJECT_ID: '42',
+    CI_MERGE_REQUEST_IID: '1',
+    AI_REVIEW_GITLAB_TOKEN: 't',
+  }, { dryRun: false, repo: '', prNumber: 0 });
+  const { deps } = mkDeps({ reviews: [criticalReview] });
+  delete deps.github;
+  deps.forge = createGitlabClient(cfg, () => {}, { fetch });
+
+  const code = await createReviewPipeline(cfg, deps).run();
+  assert.equal(code, 1, 'подтверждённый critical блокирует merge и на GitLab');
+  const draft = calls.find((c) => c.key === `POST ${mr}/draft_notes`);
+  assert.equal(draft.body.position.new_path, 'foo.ts');
+  assert.equal(draft.body.position.new_line, 3);
+  assert.equal(draft.body.position.head_sha, refs.head_sha);
+  assert.ok(calls.some((c) => c.key === `POST ${mr}/draft_notes/bulk_publish`));
+  const sticky = calls.find((c) => c.key === `POST ${mr}/notes`);
+  assert.ok(sticky.body.body.startsWith(MARKERS.review));
+  assert.ok(sticky.body.body.includes('Merge заблокирован'));
+});

@@ -3,7 +3,7 @@
 
 import { pathToFileURL } from 'node:url';
 import { loadReviewConfig, parseCli } from '../lib/config.mjs';
-import { createGithubClient } from '../lib/github.mjs';
+import { createForgeClient, forgeOf } from '../lib/forge.mjs';
 import { harvestFeedback } from '../lib/feedback.mjs';
 
 function positiveInt(value, fallback) {
@@ -38,22 +38,29 @@ export async function runFeedbackBatch(
   const dryRun = argv.includes('--dry-run');
   const runEnv = { ...env, ...(dryRun ? { REVIEW_FEEDBACK_WRITE: '0' } : {}) };
   const cli = parseCli(argv);
-  const repo = cli.repo || runEnv.GITHUB_REPOSITORY || '';
-  const token = runEnv.GITHUB_TOKEN || '';
-  if (!repo || !token) throw new Error('batch harvest требует GITHUB_REPOSITORY и GITHUB_TOKEN');
+  const probeCfg = loadReviewConfig(runEnv, { ...cli, prNumber: 0, dryRun });
+  const { kind, repo, token } = forgeOf(probeCfg);
+  if (!repo || !token) {
+    throw new Error(kind === 'gitlab'
+      ? 'batch harvest требует CI_PROJECT_ID и AI_REVIEW_GITLAB_TOKEN'
+      : 'batch harvest требует GITHUB_REPOSITORY и GITHUB_TOKEN');
+  }
 
   const log = deps.log || ((message) => console.log(message));
-  const makeGithub = deps.createGithubClient || createGithubClient;
+  // deps.createGithubClient — прежнее имя точки инъекции (RFC 16, Р5).
+  const makeClient = deps.createForgeClient || deps.createGithubClient || createForgeClient;
   const harvest = deps.harvestFeedback || harvestFeedback;
   const baseCli = { ...cli, repo, prNumber: 0, dryRun };
   const baseCfg = loadReviewConfig(runEnv, baseCli);
-  const discovery = makeGithub(baseCfg, log);
-  const explicitPr = positiveInt(cli.prNumber || runEnv.PR_NUMBER, 0);
+  const discovery = makeClient(baseCfg, log);
+  const explicitPr = positiveInt(cli.prNumber || runEnv.PR_NUMBER || (kind === 'gitlab' ? runEnv.CI_MERGE_REQUEST_IID : 0), 0);
   const pulls = explicitPr
     ? []
-    : await discovery.gh(
-      `/repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=100`,
-    );
+    : kind === 'gitlab'
+      ? await discovery.listRecentChanges({ limit: 100 })
+      : await discovery.gh(
+        `/repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=100`,
+      );
   const prNumbers = selectFeedbackPulls(pulls, {
     explicitPr,
     sinceDays: positiveInt(runEnv.REVIEW_FEEDBACK_SINCE_DAYS, 14),
@@ -63,7 +70,7 @@ export async function runFeedbackBatch(
   const results = [];
   for (const prNumber of prNumbers) {
     const cfg = loadReviewConfig(runEnv, { ...baseCli, prNumber });
-    const github = makeGithub(cfg, log);
+    const github = makeClient(cfg, log);
     try {
       results.push(await harvest(cfg, github, { log }));
     } catch (error) {
