@@ -20,6 +20,15 @@ last_updated: 2026-09-10
 - Формат футера sticky, namespace маркеров, контракты `swarm` / `export` / `structure` —
   без изменений.
 
+### Добавлено — пиктограммы в PR-комментариях
+
+`REVIEW_ICON_BASE_URL` (по умолчанию пусто — эмодзи, как раньше): sticky, шапка review-сводки и inline показывают
+SVG-набор из `.github/icons/` вместо эмодзи. Набор опубликован в публичном
+[Orange-hanter/ai-reviewer-icons](https://github.com/Orange-hanter/ai-reviewer-icons) — движок
+приватный, а GitHub грузит картинки комментариев через прокси без авторизации. Подмена —
+на границе публикации (`lib/icons.mjs`, обёртка github-клиента): HTML-комментарии с футером,
+код, ответы auto-triage, логи и Telegram не меняются; эмодзи остаётся в `alt`.
+
 ### Исправлено — поддельный sticky
 
 `readPriorStickyData`, `upsertSticky`, `readStickyReview` и `deleteStaleInline` брали последний

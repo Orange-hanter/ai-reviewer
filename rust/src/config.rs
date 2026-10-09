@@ -918,6 +918,11 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             },
         }),
     );
+    // Пиктограммы вместо эмодзи в PR-комментариях (lib/icons.mjs); пусто — эмодзи.
+    out.insert(
+        "render".into(),
+        json!({ "iconBaseUrl": or_env(env, "REVIEW_ICON_BASE_URL", "") }),
+    );
     out.insert(
         "telegram".into(),
         json!({

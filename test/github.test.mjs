@@ -4,7 +4,7 @@ import { referenceProfile } from './helpers/reference-profile.mjs';
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { MARKERS } from '../lib/constants.mjs';
-import { createGithubClient } from '../lib/github.mjs';
+import { createGithubClient, reviewSummaryBody } from '../lib/github.mjs';
 
 const API = 'https://api.github.test';
 const CFG = {
@@ -153,6 +153,20 @@ test('github: postReview — commit_id из headSha, возвращает id rev
     });
     assert.equal(id, 555);
   });
+});
+
+test('github: postReview — шапка по умолчанию reviewSummaryBody, явный body уходит как есть', async () => {
+  const sent = [];
+  await withFetch(async (_url, opts = {}) => {
+    sent.push(JSON.parse(opts.body).body);
+    return jsonRes({ id: 1 });
+  }, async (client) => {
+    await client.postReview({ inline: [], headSha: 'a' });
+    await client.postReview({ inline: [], headSha: 'a', body: '<img alt="🤖"> шапка' });
+  });
+  assert.deepEqual(sent, [reviewSummaryBody(0), '<img alt="🤖"> шапка']);
+  assert.match(reviewSummaryBody(0), /^🤖 Авто-ревью: инлайн-замечаний нет/);
+  assert.match(reviewSummaryBody(2), /^🤖 Авто-ревью: инлайн-замечания ниже/);
 });
 
 test('github: deleteStaleInline — exceptReviewId и треды с ответами не трогает', async () => {
