@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:90c83166ed8c`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:9f4762ee9311`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -102,7 +102,7 @@ graph TD
 
 ### RFC 14 — Карточки символов
 - **Описание:** строка объявления того, что вызывает изменённый код, во входе модели; семейство FP 8 («символа нет» по графу); шаг 0 — замер до кода.
-- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:c54e501ab10e`
+- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:77bd822e3e3f`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 15 — Наряды по косвенным признакам
@@ -112,7 +112,7 @@ graph TD
 
 ### Аудит RFC 14
 - **Описание:** независимый разбор карточек символов после включения по умолчанию: находки со статусами, методология решений, вектор развития.
-- **Ссылка:** `📁 docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md | 🗃️ doc:docs_dev_audit_2026-10-09-rfc-14-symbol-cards_md | 🔑 sha:7f218e9307a0`
+- **Ссылка:** `📁 docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md | 🗃️ doc:docs_dev_audit_2026-10-09-rfc-14-symbol-cards_md | 🔑 sha:e10049bd72ee`
 - **Статус:** `🟢 VERIFIED`
 
 ### Замер косвенных признаков
