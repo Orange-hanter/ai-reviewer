@@ -6,6 +6,11 @@
       "id": "fixture-consensus-major-two-models"
     },
     {
+      "description": "«модуля нет» о файле, который есть в репозитории, но не в PR → фильтруется (семейство 7); модуль, которого нет в дереве, и рантайм-«если файла нет» остаются",
+      "exitCode": 1,
+      "id": "fixture-fp-absent-path-outside-diff"
+    },
+    {
       "description": "«нет e2e» при e2e.spec.ts в PR → фильтруется (PR #245 pattern)",
       "exitCode": 0,
       "id": "fixture-fp-e2e-in-diff"

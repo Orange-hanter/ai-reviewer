@@ -18,7 +18,7 @@
 - 🟠 **push-sw.js отсутствует в PR** _(m2)_ (`app/client/public/push-sw.js:2`)
 - 🟠 **нет e2e на web push** _(m2)_ (`app/server/notifications.ts:11`)
 
-> _Скрыто FP-паттернами из feedback (`ops/pr-review/feedback/fp-patterns.jsonl`). Если среди них есть верное замечание — это ошибка паттерна, поправьте его._
+> _Скрыто FP-паттернами из feedback (`ops/pr-review/feedback/fp-patterns.jsonl`) или сверкой с деревом репозитория («файла нет» о файле вне PR; путь — в логе прогона). Если среди них есть верное замечание — это ошибка фильтра, поправьте его._
 
 </details>
 

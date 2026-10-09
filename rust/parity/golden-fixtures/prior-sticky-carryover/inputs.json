@@ -78,6 +78,7 @@
     ],
     "sha": "0123456"
   },
+  "repoFiles": null,
   "reviews": [
     {
       "findings": [

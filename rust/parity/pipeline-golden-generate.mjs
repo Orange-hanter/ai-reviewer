@@ -202,6 +202,7 @@ function makeDeps(inputs) {
   const deps = {
     log: () => {},
     die: (msg) => { throw new Error(`die: ${msg}`); },
+    repoFiles: () => clone(inputs.repoFiles),
     graphify: {
       buildBlastRadius: async () => { calls.blastRuns++; return clone(inputs.blastRadius); },
     },
@@ -294,6 +295,9 @@ async function runCase(kase) {
     verifier: clone(kase.verifier) ?? { mode: 'none' },
     githubResults: { ...GITHUB_RESULTS },
     telegram: { enabled: kase.telegram === true },
+    // Дерево репозитория для FP-семейства 7 (lib/absent-path.mjs). null — семейство
+    // выключено: иначе эталон зависел бы от `git ls-files` этого репозитория.
+    repoFiles: clone(kase.repoFiles) ?? null,
   };
 
   const cfg = loadReviewConfig(env, cli);
@@ -368,6 +372,12 @@ async function fixtureCases() {
       findings: llmFindings.filter((f) => (f.model || 'm1') === model),
     }));
 
+    // Дерево репозитория потребителя (по пути на строку) — как в loadFixtures (lib/eval.mjs).
+    const repoFilesPath = join(dir, 'repo-files.txt');
+    const repoFiles = existsSync(repoFilesPath)
+      ? (await readFile(repoFilesPath, 'utf8')).split('\n').map((s) => s.trim()).filter(Boolean)
+      : undefined;
+
     const hasClaims = llmFindings.some((f) => f.advisorClaims?.length);
     const verifierFile = join(dir, 'verifier.json');
     const hasVerifier = existsSync(verifierFile);
@@ -391,6 +401,7 @@ async function fixtureCases() {
       reviews,
       verifier,
       prescan: prescanFindings.length ? { ...EMPTY_PRESCAN, findings: prescanFindings } : undefined,
+      repoFiles,
     });
   }
   return cases;

@@ -14,7 +14,7 @@ cargo test --manifest-path rust/Cargo.toml --test pipeline_golden
 |------|-----------|
 | `diff.patch` | дифф PR (его отдаёт фейковый `github.loadDiff`) |
 | `env.json` | `env` для `loadReviewConfig`, разобранный `cli`, замороженные часы `fixedNow`, флаг `forceJs` |
-| `inputs.json` | ответы фейков: `loadDiff`, `priorSticky`, `prescan`, `blastRadius`, `reviews`, `verifier`, `githubResults`, `telegram` |
+| `inputs.json` | ответы фейков: `loadDiff`, `priorSticky`, `prescan`, `blastRadius`, `reviews`, `verifier`, `githubResults`, `telegram`, `repoFiles` (дерево репозитория для FP-семейства 7 из `fixtures/<id>/repo-files.txt`; `null` — семейство выключено) |
 | `expected/exit-code.txt` | код возврата `run()` |
 | `expected/sticky.md` | тело последнего `upsertSticky` (байт в байт, с машинным футером) |
 | `expected/calls.json` | порядок (`post`/`delete`/`sticky`/`telegram`) и ключевые аргументы вызовов — без тел |

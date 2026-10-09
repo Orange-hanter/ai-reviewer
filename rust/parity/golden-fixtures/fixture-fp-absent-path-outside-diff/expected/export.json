@@ -1,0 +1,141 @@
+{
+  "version": 2,
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "pr": {
+    "number": 1,
+    "title": "golden PR",
+    "url": "https://github.com/o/r/pull/1"
+  },
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "reviewMode": "consensus",
+  "router": {
+    "route": "full",
+    "reason": "server/shared/client или иной код"
+  },
+  "wouldBlock": true,
+  "verdict": {
+    "sha": "0123456",
+    "blocked": true,
+    "reproducibility": null
+  },
+  "counts": {
+    "critical": 1,
+    "major": 0,
+    "minor": 1,
+    "nit": 0
+  },
+  "total": 2,
+  "findings": [
+    {
+      "file": "app/server/routes/orders.ts",
+      "line": 5,
+      "severity": "critical",
+      "title": "Импорт audit-log без файла",
+      "body": "Модуль `../services/audit-log` не существует в репозитории: импорт упадёт при старте.",
+      "bodyTruncated": false,
+      "model": "m1",
+      "confidence": 0.92,
+      "consensusBlock": true,
+      "fp": "5da014cc5fbe",
+      "actionabilityScore": 2
+    },
+    {
+      "file": "app/server/routes/orders.ts",
+      "line": 24,
+      "severity": "minor",
+      "title": "Нет обработки отсутствующего шаблона",
+      "body": "Если `./templates/index.ts` не существует в окружении, loadTemplate бросит ENOENT без обработки.",
+      "bodyTruncated": false,
+      "model": "m2",
+      "confidence": 0.7,
+      "consensusBlock": false,
+      "fp": "f560770017da",
+      "actionabilityScore": 1
+    }
+  ],
+  "blockers": [
+    {
+      "file": "app/server/routes/orders.ts",
+      "line": 5,
+      "severity": "critical",
+      "title": "Импорт audit-log без файла",
+      "body": "Модуль `../services/audit-log` не существует в репозитории: импорт упадёт при старте.",
+      "bodyTruncated": false,
+      "model": "m1",
+      "confidence": 0.92,
+      "consensusBlock": true,
+      "fp": "5da014cc5fbe",
+      "actionabilityScore": 2
+    }
+  ],
+  "reasoning": [
+    {
+      "role": "model",
+      "model": "m1",
+      "excerpt": "ревью m1",
+      "truncated": false
+    },
+    {
+      "role": "model",
+      "model": "m2",
+      "excerpt": "ревью m2",
+      "truncated": false
+    }
+  ],
+  "blast": {
+    "symbols_total": 0,
+    "symbols_resolved": 0,
+    "affected_nonempty": 0,
+    "graph_status": "fresh",
+    "affected_files": [],
+    "cross_community": 0
+  },
+  "swarm": {
+    "version": 1,
+    "role": "external-verdict",
+    "generatedAt": "2026-01-01T00:00:00.000Z",
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "number": 1,
+      "title": "golden PR",
+      "url": "https://github.com/o/r/pull/1"
+    },
+    "wouldBlock": true,
+    "strong": false,
+    "blockers": [
+      {
+        "file": "app/server/routes/orders.ts",
+        "line": 5,
+        "severity": "critical",
+        "title": "Импорт audit-log без файла",
+        "confidence": 0.92
+      }
+    ],
+    "strongBlockers": 0,
+    "blastScope": {
+      "affected_files": [],
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_status": "fresh",
+      "cross_community": 0
+    },
+    "suggestedScopeFiles": [],
+    "verdict": {
+      "sha": "0123456",
+      "blocked": true,
+      "reproducibility": null
+    },
+    "notes": [
+      "wouldBlock without full strong confirmation — treat as advisory for swarm",
+      "blast scope empty"
+    ]
+  },
+  "prescan": {
+    "findings": 0,
+    "scanned": 0,
+    "skipped": 0,
+    "byTool": null,
+    "error": null
+  }
+}

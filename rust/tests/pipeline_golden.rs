@@ -86,6 +86,10 @@ pub struct GoldenInputs {
     pub verifier: GoldenVerifier,
     pub github_results: GoldenGithubResults,
     pub telegram: GoldenTelegram,
+    /// Дерево репозитория для FP-семейства 7 (`deps.repoFiles`, `lib/absent-path.mjs`):
+    /// путь на элемент. `None` — семейство выключено (эталон не зависит от `git ls-files`).
+    #[serde(default)]
+    pub repo_files: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
