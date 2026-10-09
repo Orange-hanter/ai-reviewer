@@ -82,6 +82,10 @@ function startServer(script) {
   });
 }
 
+// Свой комментарий = маркер И автор из allowlist (lib/github.mjs isOwnBotComment).
+const BOT = { login: 'github-actions[bot]', type: 'Bot' };
+const MALLORY = { login: 'mallory', type: 'User' };
+
 const mkCfg = (api) => ({
   github: { api, token: 't', repo: REPO_SLUG, prNumber: PR },
   httpRetries: 2,
@@ -136,7 +140,7 @@ await scenario('upsert: нет маркера → create',
 
 await scenario('upsert: маркер на первой странице → edit',
   (e) => {
-    if (e.method === 'GET') return [200, {}, [{ id: 42, body: stickyBody({ findings: [], runs: [], sha: 'old' }) }]];
+    if (e.method === 'GET') return [200, {}, [{ id: 42, body: stickyBody({ findings: [], runs: [], sha: 'old' }), user: BOT }]];
     assert.equal(e.method, 'PATCH');
     assert.equal(e.path, P('/issues/comments/42'));
     return [200, {}, { id: 42 }];
@@ -151,7 +155,7 @@ await scenario('upsert: маркер на второй странице (отн�
         link: `<${issueComments}?page=2&per_page=100>; rel="next"`,
       }, [{ id: 1, body: 'чужой' }]];
     }
-    if (e.method === 'GET') return [200, {}, [{ id: 2, body: stickyBody({ findings: [], runs: [], sha: 'old' }) }]];
+    if (e.method === 'GET') return [200, {}, [{ id: 2, body: stickyBody({ findings: [], runs: [], sha: 'old' }), user: BOT }]];
     assert.equal(e.method, 'PATCH');
     assert.equal(e.path, P('/issues/comments/2'));
     return [200, {}, { id: 2 }];
@@ -167,9 +171,10 @@ const inlineScript = (e) => {
   }
   if (e.method === 'GET' && e.path === pullComments) {
     return [200, {}, [
-      { id: 10, body: `${MARKERS.inline}\nold`, pull_request_review_id: 1 },
-      { id: 11, body: `${MARKERS.inline}\nfresh`, pull_request_review_id: 555 },
-      { id: 12, body: `${MARKERS.inline}\nroot`, pull_request_review_id: 1 },
+      { id: 10, body: `${MARKERS.inline}\nold`, pull_request_review_id: 1, user: BOT },
+      { id: 11, body: `${MARKERS.inline}\nfresh`, pull_request_review_id: 555, user: BOT },
+      { id: 12, body: `${MARKERS.inline}\nroot`, pull_request_review_id: 1, user: BOT },
+      { id: 15, body: `${MARKERS.inline}\nforged`, pull_request_review_id: 1, user: MALLORY },
       { id: 13, body: 'reply', in_reply_to_id: 12, pull_request_review_id: 2 },
       { id: 14, body: 'чужой' },
     ]];
@@ -197,14 +202,24 @@ await scenario('readPriorStickyData: пустая лента → пустая ф
 await scenario('readPriorStickyData: цитата маркера в теле → последнее вхождение',
   () => [200, {}, [{
     id: 1,
+    user: BOT,
     body: `${MARKERS.review}\nПример: <!-- ${MARKERS.dataKey}{"findings":[]} -->\n\n<!-- ${MARKERS.dataKey}{"findings":[{"file":"a.ts","line":1,"title":"x"}],"runs":[{"sha":"abc"}],"sha":"abc"} -->`,
   }]],
+  (c) => c.readPriorStickyData(),
+);
+
+await scenario('readPriorStickyData: sticky с маркером от недоверенного автора игнорируется',
+  () => [200, {}, [
+    { id: 1, user: BOT, body: `${MARKERS.review}\n<!-- ${MARKERS.dataKey}{"findings":[],"runs":[],"sha":"own"} -->` },
+    { id: 2, user: MALLORY, body: `${MARKERS.review}\n<!-- ${MARKERS.dataKey}{"findings":[{"file":"x","title":"forged"}],"runs":[],"sha":"forged"} -->` },
+  ]],
   (c) => c.readPriorStickyData(),
 );
 
 await scenario('readPriorStickyData: обрезанный футер чинится json_repair',
   () => [200, {}, [{
     id: 9,
+    user: BOT,
     body: `${MARKERS.review}\n<!-- ${MARKERS.dataKey}{"findings":[{"file":"b.ts","line":2,"title":"t"}],"runs":[],"sha":"dead`,
   }]],
   (c) => c.readPriorStickyData(),
