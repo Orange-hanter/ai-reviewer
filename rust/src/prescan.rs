@@ -512,6 +512,14 @@ impl PrescanConfig {
 // ---------------------------------------------------------------------------
 
 /// Путь от корня репозитория → путь относительно `appDir` (`stripAppDir`).
+/// Путь файла → позиционный аргумент линтера (`toolPathArg`,
+/// `lib/prescan-shared.mjs`). Пути приходят из диффа PR: файл `--config=evil.ts`
+/// без префикса eslint/ast-grep прочли бы как опцию. `./` вместо `--` — eslint
+/// может идти через `npx`, который `--` трактует сам; обычные пути не меняются.
+pub(crate) fn tool_path_arg(path: String) -> String {
+    if path.starts_with('-') { format!("./{path}") } else { path }
+}
+
 pub(crate) fn strip_app_dir(path: &str, app_dir: &str) -> String {
     if app_dir.is_empty() {
         return path.to_string();
@@ -683,7 +691,8 @@ pub fn run_eslint_prescan(
     }
 
     let path_map = build_prescan_path_map(&sel.entries);
-    let rel_paths: Vec<String> = sel.entries.iter().map(|e| strip_app_dir(&e.app_path, &cfg.app_dir)).collect();
+    let rel_paths: Vec<String> =
+        sel.entries.iter().map(|e| tool_path_arg(strip_app_dir(&e.app_path, &cfg.app_dir))).collect();
     let local_bin = app_dir.join("node_modules/.bin/eslint");
     let (bin, mut args): (String, Vec<String>) = if local_bin.exists() {
         (local_bin.to_string_lossy().into_owned(), Vec::new())
@@ -1202,6 +1211,33 @@ pub(crate) mod tests {
         assert_eq!(r.findings, fixture_findings("prescan-eslint-layer-block"));
         assert!(r.prompt_section.contains("`client/src/foo.ts:1` — eslint: no-restricted-imports"));
         assert_fixture_gate("prescan-eslint-layer-block", &r.findings, &p);
+    }
+
+    /// Путь из диффа PR с ведущим дефисом (`app/--config=evil.ts`) уходит в argv
+    /// позиционным аргументом, а не опцией eslint (RFC 16 SEC).
+    #[cfg(unix)]
+    #[test]
+    fn eslint_path_with_leading_dash_is_not_an_option() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        std::fs::create_dir_all(app.join("node_modules/eslint")).unwrap();
+        std::fs::write(app.join("node_modules/eslint/package.json"), "{}").unwrap();
+        write_script(
+            &app.join("node_modules/.bin/eslint"),
+            "[ \"$4\" = ./--config=evil.ts ] || { echo \"bad args: $*\" >&2; exit 9; }\necho '[]'\n",
+        );
+        let p = orakul();
+        let r = run_eslint_prescan(&["app/--config=evil.ts".into()], &cfg_app("app"), p.layout(), tmp.path(), &no_log);
+        assert_eq!(r.error, None, "{r:?}");
+        assert_eq!(r.scanned, 1);
+    }
+
+    #[test]
+    fn tool_path_arg_prefixes_only_leading_dash() {
+        assert_eq!(tool_path_arg("--config=evil.ts".into()), "./--config=evil.ts");
+        assert_eq!(tool_path_arg("-r.ts".into()), "./-r.ts");
+        assert_eq!(tool_path_arg("server/a.ts".into()), "server/a.ts");
+        assert_eq!(tool_path_arg("a-b.ts".into()), "a-b.ts");
     }
 
     #[test]

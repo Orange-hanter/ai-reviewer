@@ -36,7 +36,7 @@ use crate::findings::{js_to_number, js_to_string, js_trim, js_truthy};
 use crate::prescan::{
     build_prescan_path_map, build_prescan_prompt_section, empty_stdout_error, js_num_value, js_resolve,
     log_tool_failure, normalize_app_path, resolve_prescan_diff_key, run_command, select_lintable_entries,
-    str_list, strip_app_dir, tool_path_to_app_path, LogFn, PrescanConfig, PrescanPathMap, DEFAULT_MAX_BUFFER,
+    str_list, strip_app_dir, tool_path_arg, tool_path_to_app_path, LogFn, PrescanConfig, PrescanPathMap, DEFAULT_MAX_BUFFER,
 };
 use crate::profile::{Layout, Profile};
 use crate::traits::ToolPrescanResult;
@@ -372,7 +372,7 @@ pub fn run_astgrep_prescan(
         config_path.to_string_lossy().into_owned(),
         "--json=stream".into(),
     ];
-    args.extend(sel.entries.iter().map(|e| strip_app_dir(&e.app_path, &cfg.app_dir)));
+    args.extend(sel.entries.iter().map(|e| tool_path_arg(strip_app_dir(&e.app_path, &cfg.app_dir))));
 
     let out = match run_command(&bin, &args, &app_dir, DEFAULT_MAX_BUFFER) {
         Ok(o) => o,
@@ -567,6 +567,29 @@ mod tests {
         assert!(!got.starts_with(&target), "{got:?}");
         let want = std::str::from_utf8(EMBEDDED_RULESET.get_file(SGCONFIG).unwrap().contents()).unwrap();
         assert_eq!(fs::read_to_string(&got).unwrap(), want);
+    }
+
+    /// Путь из диффа PR с ведущим дефисом не становится опцией ast-grep (RFC 16 SEC).
+    #[cfg(unix)]
+    #[test]
+    fn path_with_leading_dash_is_not_an_option() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("app")).unwrap();
+        std::fs::write(tmp.path().join("sgconfig.yml"), "ruleDirs: []\n").unwrap();
+        crate::prescan::tests::write_script(
+            &tmp.path().join("bin/ast-grep"),
+            "[ \"$5\" = ./--config=evil.ts ] || { echo \"bad args: $*\" >&2; exit 9; }\necho '{}'\n",
+        );
+        let p = orakul();
+        let r = run_astgrep_prescan(
+            &["app/--config=evil.ts".into()],
+            &cfg("app", "./bin/ast-grep", "sgconfig.yml"),
+            &p,
+            tmp.path(),
+            &no_log,
+        );
+        assert_eq!(r.error, None, "{r:?}");
+        assert_eq!(r.scanned, 1);
     }
 
     #[test]
