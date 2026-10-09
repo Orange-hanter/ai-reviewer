@@ -26,6 +26,7 @@
 //!   которая живёт только в lib/chunk-routing.mjs.
 
 use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
@@ -36,7 +37,7 @@ use crate::diff::Chunk;
 use crate::findings::{
     dedupe_same_model_findings, js_to_number, js_to_string, js_truthy, normalize_finding,
 };
-use crate::llm::{ChatJsonOpts, ChatTextOpts, LlmApi};
+use crate::llm::{ChatJsonOpts, ChatTextOpts, LlmApi, UsageCallback};
 use crate::profile::Profile;
 use crate::prompt::{self, PromptCtx};
 use crate::specialists::merge_specialist_references;
@@ -510,16 +511,24 @@ impl<'a> RealEngine<'a> {
         result
     }
 
-    /// `trackText` (`lib/engine.mjs:205-223`). `text_chars` — длина в UTF-16
+    /// `trackText` (`lib/engine.mjs`). `text_chars` — длина в UTF-16
     /// юнитах (`String#length` в JS).
+    ///
+    /// `f` получает сборщик usage: prose-вызов возвращает строку (контракт `chat_text`),
+    /// поэтому токены приходят боковым каналом. Фейк, который его не зовёт, оставляет
+    /// usage пустым — событие пишется без токенов.
     fn track_text(
         &self,
         call_type: &str,
         meta: &[(&str, Value)],
-        f: impl FnOnce() -> Result<String, crate::llm::ChatError>,
+        f: impl FnOnce(UsageCallback) -> Result<String, crate::llm::ChatError>,
     ) -> Result<String, crate::llm::ChatError> {
         let t0 = self.now_ms();
-        let result = f();
+        let usage: Arc<Mutex<Option<Value>>> = Arc::new(Mutex::new(None));
+        let sink = Arc::clone(&usage);
+        let result = f(UsageCallback(Arc::new(move |u: &Value| {
+            *sink.lock().unwrap_or_else(|p| p.into_inner()) = Some(u.clone());
+        })));
         if self.on_event.is_none() {
             return result;
         }
@@ -533,6 +542,15 @@ impl<'a> RealEngine<'a> {
             Ok(text) => {
                 ev.insert("ok".into(), json!(true));
                 ev.insert("text_chars".into(), json!(utf16_len(text)));
+                let usage = usage.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(u) = usage.as_ref().filter(|u| js_truthy(u)) {
+                    for k in ["prompt_tokens", "completion_tokens", "total_tokens"] {
+                        // `usage.prompt_tokens` без поля — undefined, JSON.stringify его роняет.
+                        if let Some(v) = u.get(k) {
+                            ev.insert(k.into(), v.clone());
+                        }
+                    }
+                }
             }
             Err(e) => {
                 ev.insert("ok".into(), json!(false));
@@ -546,7 +564,7 @@ impl<'a> RealEngine<'a> {
     // -- один вызов модели -------------------------------------------------
 
     /// `reviewWithModel` (`lib/engine.mjs:238-259`): JSON-ответ модели →
-    /// `{model, summary, verdict, findings, __usage}`; сбой LLM → `{model, error}`.
+    /// `{model, summary, findings, __usage}`; сбой LLM → `{model, error}`.
     fn review_with_model(
         &self,
         model: &str,
@@ -559,6 +577,7 @@ impl<'a> RealEngine<'a> {
             ("model", json!(model)),
             ("chunkIndex", json!(chunk_index)),
             ("reviewMode", json!(self.cfg.review_mode)),
+            prompt_meta(messages),
         ];
         self.track_llm(call_type, &meta, || {
             let opts = ChatJsonOpts { temperature, call_type: None };
@@ -589,11 +608,8 @@ impl<'a> RealEngine<'a> {
                             _ => String::new(),
                         }),
                     );
-                    // verdict пробрасывается КАК ЕСТЬ: отсутствие ключа (undefined
-                    // в JS) и explicit null различает aggregate_model.
-                    if let Some(v) = r.value.get("verdict") {
-                        out.insert("verdict".into(), v.clone());
-                    }
+                    // `verdict` модели больше не пробрасывается (lib/engine.mjs): гейт
+                    // решает по находкам, агрегат вердикта не несёт.
                     out.insert("findings".into(), Value::Array(findings));
                     if let Some(u) = r.usage {
                         out.insert("__usage".into(), u);
@@ -691,15 +707,17 @@ impl<'a> RealEngine<'a> {
 
     /// `reviewSpecialist` (`lib/engine.mjs:283-292`).
     fn review_specialist(&self, role: &str, model: &str, base: &[Value], chunk_index: usize) -> Value {
+        let msgs = prompt::build_specialist_messages(role, base, &self.prompt_ctx);
         let meta = [
             ("model", json!(model)),
             ("role", json!(role)),
             ("chunkIndex", json!(chunk_index)),
             ("reviewMode", json!(self.cfg.review_mode)),
+            prompt_meta(&msgs),
         ];
-        let out = self.track_text("specialist", &meta, || {
-            let msgs = prompt::build_specialist_messages(role, base, &self.prompt_ctx);
-            self.llm.chat_text(&Value::Array(msgs), model, &ChatTextOpts::default())
+        let out = self.track_text("specialist", &meta, |on_usage| {
+            let opts = ChatTextOpts { on_usage: Some(on_usage), ..ChatTextOpts::default() };
+            self.llm.chat_text(&Value::Array(msgs), model, &opts)
         });
         match out {
             Ok(text) => json!({"role": role, "model": model, "text": text}),
@@ -713,14 +731,16 @@ impl<'a> RealEngine<'a> {
     /// `reviewReferenceModel` (`lib/engine.mjs:294-303`). `role: 'advisor'`
     /// дописывается вызывающим — как `.then((r) => ({...r, role: 'advisor'}))`.
     fn review_reference_model(&self, model: &str, base: &[Value], chunk_index: usize) -> Value {
+        let msgs = prompt::build_reference_messages(base, &self.prompt_ctx);
         let meta = [
             ("model", json!(model)),
             ("chunkIndex", json!(chunk_index)),
             ("reviewMode", json!(self.cfg.review_mode)),
+            prompt_meta(&msgs),
         ];
-        let out = self.track_text("advisor", &meta, || {
-            let msgs = prompt::build_reference_messages(base, &self.prompt_ctx);
-            self.llm.chat_text(&Value::Array(msgs), model, &ChatTextOpts::default())
+        let out = self.track_text("advisor", &meta, |on_usage| {
+            let opts = ChatTextOpts { on_usage: Some(on_usage), ..ChatTextOpts::default() };
+            self.llm.chat_text(&Value::Array(msgs), model, &opts)
         });
         match out {
             Ok(text) => json!({"model": model, "text": text}),
@@ -1014,6 +1034,26 @@ fn utf16_len(s: &str) -> usize {
     s.chars().map(char::len_utf16).sum()
 }
 
+/// `messagesChars` (`lib/engine.mjs`): размер промпта в символах — детерминированный
+/// прокси токенов, доступный ДО вызова и независимый от того, вернул ли провайдер usage.
+/// `String(m?.content ?? '')`: отсутствие и `null` — пустая строка.
+pub(crate) fn messages_chars(messages: &[Value]) -> usize {
+    messages
+        .iter()
+        .map(|m| match m.get("content") {
+            None | Some(Value::Null) => 0,
+            Some(Value::String(s)) => utf16_len(s),
+            Some(v) => utf16_len(&js_to_string(v)),
+        })
+        .sum()
+}
+
+/// `promptMeta(messages, layout)` для раскладки `legacy`: только `prompt_chars`.
+/// Раскладка `shared-prefix` (`cache_prefix_chars`, `lib/prompt-layout.mjs`) — задача T41.
+fn prompt_meta(messages: &[Value]) -> (&'static str, Value) {
+    ("prompt_chars", json!(messages_chars(messages)))
+}
+
 /// Внутренний JSON-агрегат → [`ModelReview`].
 ///
 /// Своя функция, а не `serde_json::from_value`: агрегат собирается как JS-объект
@@ -1036,7 +1076,6 @@ pub fn model_review_from_value(v: &Value) -> ModelReview {
     ModelReview {
         model: opt_str("model").unwrap_or_default(),
         summary: opt_str("summary"),
-        verdict: opt_str("verdict"),
         findings: arr("findings"),
         error: opt_str("error"),
         skipped: flag("skipped"),
@@ -1203,6 +1242,9 @@ mod tests {
         /// (модель, content последнего сообщения) — аналог `msgs.at(-1)?.content`.
         json_calls: Mutex<Vec<(String, String)>>,
         text_calls: Mutex<Vec<(String, String)>>,
+        /// usage, которое фейк отдаёт через `on_usage` prose-вызова (`None` — не зовёт,
+        /// как DI-мок, ничего не знающий про usage).
+        text_usage: Option<Value>,
     }
 
     fn chat_err(message: String) -> ChatError {
@@ -1231,6 +1273,7 @@ mod tests {
                 on_text: Box::new(|_, m| Err(format!("chatText не ожидался: {m}"))),
                 json_calls: Mutex::new(Vec::new()),
                 text_calls: Mutex::new(Vec::new()),
+                text_usage: None,
             }
         }
 
@@ -1277,10 +1320,14 @@ mod tests {
             &self,
             messages: &Value,
             model: &str,
-            _opts: &ChatTextOpts,
+            opts: &ChatTextOpts,
         ) -> std::result::Result<String, ChatError> {
             self.text_calls.lock().unwrap().push((model.to_string(), last_content(messages)));
-            (self.on_text)(messages, model).map_err(chat_err)
+            let out = (self.on_text)(messages, model).map_err(chat_err)?;
+            if let (Some(u), Some(cb)) = (&self.text_usage, &opts.on_usage) {
+                (cb.0)(u);
+            }
+            Ok(out)
         }
     }
 
@@ -1436,7 +1483,9 @@ mod tests {
         let res = engine.review_all_models(&plain_chunks(), &ReviewContext::default()).unwrap();
         assert_eq!(res[0].findings.len(), 2, "по находке с каждого из двух чанков");
         assert_eq!(res[0].findings[0]["model"], "m1");
-        assert_eq!(res[0].verdict.as_deref(), Some("comment"));
+        // `verdict` модели из агрегата удалён (lib/engine.mjs): гейт решает по находкам.
+        let v = serde_json::to_value(&res[0]).unwrap();
+        assert!(v.get("verdict").is_none(), "verdict модели не протекает в агрегат");
     }
 
     // Регрессия PR #520: одна тема из нескольких чанков попадала в sticky N раз.
@@ -1628,6 +1677,26 @@ mod tests {
     }
 
     #[test]
+    fn verifier_event_carries_prompt_chars_on_ok_and_error() {
+        // lib/verifier.mjs: prompt_chars пишется и в ok-, и в error-событие.
+        let log = |_: &str| {};
+        for fail in [false, true] {
+            let llm = FakeLlm::json(move |_, _| {
+                if fail { Err("verifier timeout".to_string()) } else { Ok(json!({"verdicts": []})) }
+            });
+            let events: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+            let sink = |_: &str, payload: &Value| events.lock().unwrap().push(payload.clone());
+            let engine = mk_engine(&llm, moa_cfg(), &log).with_events(&sink);
+            let _ = engine.verify_findings(&candidates(), &verify_ctx());
+            let evs = events.lock().unwrap();
+            assert_eq!(evs.len(), 1);
+            assert_eq!(evs[0]["ok"], !fail);
+            assert!(evs[0]["prompt_chars"].as_u64().unwrap() > 0);
+            assert!(evs[0].get("total_tokens").is_none(), "usage нет — полей токенов нет");
+        }
+    }
+
+    #[test]
     fn verifier_without_verdicts_field_returns_empty() {
         let llm = FakeLlm::json(|_, _| Ok(json!({"summary": "oops no verdicts"})));
         let log = |_: &str| {};
@@ -1683,5 +1752,51 @@ mod tests {
         // Часы заморожены — длительность детерминирована (требование golden-прогонов).
         assert_eq!(ev["duration_ms"], 0);
         assert!(ev.get("error").is_none(), "ok-событие без ключа error");
+        // promptMeta (legacy): размер входа — детерминированный прокси токенов.
+        assert!(ev["prompt_chars"].as_u64().unwrap() > 0);
+        let keys: Vec<&String> = ev.as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys[..5],
+            ["callType", "model", "chunkIndex", "reviewMode", "prompt_chars"],
+            "порядок ключей как в JS-литерале"
+        );
+    }
+
+    #[test]
+    fn specialist_events_carry_usage_from_on_usage() {
+        // lib/engine.mjs trackText: токены prose-вызова приходят боковым каналом onUsage.
+        let mut llm = FakeLlm::json(|_, _| Ok(json!({"findings": []})))
+            .with_text(|_, model| Ok(format!("prose from {model}")));
+        llm.text_usage = Some(json!({"prompt_tokens": 11, "completion_tokens": 2, "total_tokens": 13}));
+        let log = |_: &str| {};
+        let events: Mutex<Vec<(String, Value)>> = Mutex::new(Vec::new());
+        let sink = |name: &str, payload: &Value| {
+            events.lock().unwrap().push((name.to_string(), payload.clone()));
+        };
+        let engine = mk_engine(&llm, moa_cfg(), &log).with_events(&sink);
+        engine
+            .review_all_models(&[chunk_of("d1", &["a.ts"], &[], false)], &ReviewContext::default())
+            .unwrap();
+        let evs = events.lock().unwrap();
+        let specs: Vec<&Value> =
+            evs.iter().filter(|(_, e)| e["callType"] == "specialist").map(|(_, e)| e).collect();
+        assert_eq!(specs.len(), 3);
+        for e in specs {
+            assert_eq!(e["total_tokens"], 13);
+            assert_eq!(e["prompt_tokens"], 11);
+            assert!(e["prompt_chars"].as_u64().unwrap() > 0);
+            assert!(e["text_chars"].as_u64().unwrap() > 0);
+        }
+    }
+
+    #[test]
+    fn messages_chars_counts_utf16_and_skips_missing_content() {
+        let msgs = vec![
+            json!({"role": "system", "content": "аб"}),
+            json!({"role": "user", "content": "😀"}),
+            json!({"role": "user"}),
+            json!({"role": "user", "content": null}),
+        ];
+        assert_eq!(messages_chars(&msgs), 4);
     }
 }

@@ -335,7 +335,7 @@ pub struct VerifyContext {
 /// (`lib/engine.mjs:127-153` `aggregateModel`, декорации — `lib/engine.mjs:340-410`).
 ///
 /// Все поля, кроме `model`, опциональны по сути: JS кладёт либо ветку успеха
-/// (`summary`/`verdict`/`findings`), либо ветку отказа (`error`). Отсюда `Default` +
+/// (`summary`/`findings`; `verdict` из контракта агрегата удалён), либо ветку отказа (`error`). Отсюда `Default` +
 /// `skip_serializing_if`: сериализация даёт ту же форму ключей, что JS-объект, и
 /// `report.rs`/`export.rs`, читающие `&Value`, работают без адаптера.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -346,9 +346,6 @@ pub struct ModelReview {
     /// Первое непустое summary среди чанков (`lib/engine.mjs:145-147`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
-    /// Максимальный по `VERDICT_RANK` вердикт среди чанков (`lib/engine.mjs:141-142`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verdict: Option<String>,
     /// Находки после дедупа ВНУТРИ модели (`lib/engine.mjs:152`).
     pub findings: Vec<Value>,
     /// Модель недоступна. Пайплайн считает такие ревью «не ok»
@@ -567,6 +564,11 @@ pub struct BlastRadius {
     /// Готовые текстовые блоки для промпта (`formatBlastBlock`, `lib/graphify.mjs:229-236`).
     pub blocks: Vec<String>,
     pub metrics: BlastMetrics,
+    /// Индекс уже прочитанного `graph.json` (`graphIndex`, `lib/graphify.mjs`) — для
+    /// карточек символов (RFC 14): второй раз граф с диска не читаем. `None` — обогащение
+    /// не загрузилось. В артефакты не сериализуется: это рабочее состояние прогона.
+    #[serde(skip)]
+    pub graph_index: Option<std::sync::Arc<crate::graphify_client::GraphIndex>>,
 }
 
 /// Индекс графа кода и радиус поражения (`lib/graphify.mjs:400`).

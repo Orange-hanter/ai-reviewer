@@ -39,14 +39,8 @@ pub const BLAST_CONF_UNKNOWN: f64 = 0.7;
 pub const BLAST_CONF_AMBIGUOUS: f64 = 0.55;
 pub const BLAST_FINDINGS_MAX: usize = 8;
 
-/// `VERDICT_RANK` — порядок вердиктов ревью (порядок элементов как в JS-объекте).
-pub const VERDICT_RANK: &[(&str, u8)] =
-    &[("changes_requested", 2), ("comment", 1), ("approve", 0)];
-
-/// `VERDICT_RANK[v] ?? 0`: неизвестный вердикт — как approve.
-pub fn verdict_rank(verdict: &str) -> u8 {
-    VERDICT_RANK.iter().find(|(k, _)| *k == verdict).map(|(_, r)| *r).unwrap_or(0)
-}
+// `VERDICT_RANK` удалён из lib/constants.mjs: агрегат модели больше не несёт
+// `verdict` (lib/engine.mjs) — гейт решает по находкам, а не по вердикту модели.
 
 /// Правила репозитория для промпта: слои, канонические примитивы, чем проверяется
 /// поведение. Приходят из профиля (`repoRules` / `repoRulesFile`); без профиля
@@ -156,10 +150,10 @@ mod tests {
     /// вместе с промптами, и молчаливый дрейф здесь стоит целого прогона eval.
     #[test]
     fn default_models_match_js() {
-        assert_eq!(DEFAULT_MOA_REFERENCES, "kimi-k2.7-code,glm-5.2,deepseek-v4-flash");
+        assert_eq!(DEFAULT_MOA_REFERENCES, "kimi-k2.7-code,glm-5.3,glm-5.3-flash");
         assert_eq!(
             DEFAULT_MOA_SPECIALIST_MODELS,
-            "security:deepseek-v4-flash,correctness:kimi-k2.7-code,architecture:glm-5.2"
+            "security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3"
         );
         // Агрегатор и verifier намеренно ВНЕ пула advisors — два независимых судьи.
         assert_eq!(DEFAULT_MOA_AGGREGATOR, "minimax-m3");
@@ -167,19 +161,15 @@ mod tests {
         assert!(!DEFAULT_MOA_REFERENCES.contains(DEFAULT_MOA_AGGREGATOR));
         assert!(!DEFAULT_MOA_REFERENCES.contains(DEFAULT_REVIEW_VERIFIER_MODEL));
         assert!(!DEFAULT_MOA_SPECIALIST_MODELS.contains(DEFAULT_MOA_AGGREGATOR));
-        assert_eq!(DEFAULT_OLLAMA_MODELS_FALLBACK, "deepseek-v4-flash");
+        assert_eq!(DEFAULT_OLLAMA_MODELS_FALLBACK, "deepseek-v4.1-flash");
     }
 
     #[test]
-    fn sev_and_verdict_rank() {
+    fn sev_labels() {
         assert_eq!(sev_label("critical"), "🔴");
         assert_eq!(sev_label("nit"), "🔵");
         assert_eq!(sev_label("wat"), "⚪");
         assert_eq!(SEV.len(), 4);
-        assert_eq!(verdict_rank("changes_requested"), 2);
-        assert_eq!(verdict_rank("comment"), 1);
-        assert_eq!(verdict_rank("approve"), 0);
-        assert_eq!(verdict_rank("что-то новое"), 0, "неизвестный вердикт = approve");
     }
 
     #[test]

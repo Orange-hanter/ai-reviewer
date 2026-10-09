@@ -207,12 +207,85 @@ impl CostTracker {
     }
 }
 
+/// `Number(v) || 0` над полем JSON: отсутствие, NaN и нечисло — 0.
+fn num_or_zero(v: Option<&Value>) -> f64 {
+    match v.and_then(js_to_number) {
+        Some(x) if !x.is_nan() => x,
+        _ => 0.0,
+    }
+}
+
+/// `efficiencyMetrics(snapshot, outcome)`: токены на единицу результата.
+///
+/// Знаменатель — не число находок вообще (их легко нагенерировать), а то, что заняло
+/// внимание человека: находки (`outcome.total`), строки в PR (`outcome.inline`) и
+/// блокеры (`outcome.blockers`). Знаменатель 0 → поле отсутствует, а не Infinity:
+/// «ничего не нашли» — отдельный случай, тренд по нему считать нельзя.
+/// Токенов нет вовсе → `None` (JS `null`). `cost_usd` — только при `cost_known`.
+/// `Math.round` для положительных — `floor(x + 0.5)`.
+pub fn efficiency_metrics(snapshot: &Value, outcome: &Value) -> Option<Value> {
+    let total = num_or_zero(snapshot.get("total_tokens"));
+    if total == 0.0 {
+        return None;
+    }
+    let per = |key: &str| {
+        let d = num_or_zero(outcome.get(key));
+        (d > 0.0).then(|| num_json((total / d + 0.5).floor()))
+    };
+    let mut out = Map::new();
+    out.insert("tokens_total".into(), num_json(total));
+    out.insert("prompt_tokens".into(), num_json(num_or_zero(snapshot.get("prompt_tokens"))));
+    out.insert(
+        "completion_tokens".into(),
+        num_json(num_or_zero(snapshot.get("completion_tokens"))),
+    );
+    out.insert("llm_calls".into(), num_json(num_or_zero(snapshot.get("calls"))));
+    for (key, field) in [
+        ("tokens_per_finding", "total"),
+        ("tokens_per_inline", "inline"),
+        ("tokens_per_blocker", "blockers"),
+    ] {
+        if let Some(v) = per(field) {
+            out.insert(key.into(), v);
+        }
+    }
+    if snapshot.get("cost_known").is_some_and(js_truthy) {
+        out.insert("cost_usd".into(), num_json(num_or_zero(snapshot.get("cost_usd"))));
+    }
+    Some(Value::Object(out))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn usage(prompt: i64, completion: i64, total: i64) -> Value {
         json!({ "prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total })
+    }
+
+    #[test]
+    fn efficiency_metrics_знаменатель_ноль_даёт_пропуск_поля() {
+        // Эталон снят с node -e на lib/cost.mjs (efficiencyMetrics).
+        let snap = json!({
+            "prompt_tokens": 900, "completion_tokens": 101, "total_tokens": 1001,
+            "calls": 4, "cost_usd": 0.25, "cost_known": true,
+        });
+        assert_eq!(
+            efficiency_metrics(&snap, &json!({ "total": 2, "inline": 0, "blockers": 3 })),
+            Some(json!({
+                "tokens_total": 1001, "prompt_tokens": 900, "completion_tokens": 101,
+                "llm_calls": 4, "tokens_per_finding": 501, "tokens_per_blocker": 334,
+                "cost_usd": 0.25,
+            }))
+        );
+        let unknown = json!({ "total_tokens": 10, "cost_usd": 1.5, "cost_known": false });
+        assert_eq!(
+            efficiency_metrics(&unknown, &json!({})),
+            Some(json!({ "tokens_total": 10, "prompt_tokens": 0, "completion_tokens": 0, "llm_calls": 0 })),
+            "cost_usd только при cost_known; пустой outcome — без tokens_per_*"
+        );
+        assert_eq!(efficiency_metrics(&json!({ "total_tokens": 0 }), &json!({ "total": 1 })), None);
+        assert_eq!(efficiency_metrics(&Value::Null, &json!({})), None);
     }
 
     fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {

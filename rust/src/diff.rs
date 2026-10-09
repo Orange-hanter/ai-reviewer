@@ -520,6 +520,35 @@ fn split_file_segments(annotated: &str) -> Vec<String> {
     segs.into_iter().filter(|s| !s.trim().is_empty()).collect()
 }
 
+/// `collectAddedPaths` (`lib/diff.mjs`): пути, добавленные этим PR — секции
+/// `diff --git` со строкой `new file mode`. Порядок — первого появления (JS `Set`).
+///
+/// Полный текст добавленного файла и есть его дифф, поэтому контекст такого файла
+/// модели второй раз не прикладывают (RFC 04, `readChangedFiles` с `addedPaths`).
+/// Путь — из `+++ `, иначе из `diff --git ` (пустой путь — falsy в JS, идём дальше).
+pub fn collect_added_paths(diff: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for seg in split_file_segments(diff) {
+        if !seg.split('\n').any(|l| l.starts_with("new file mode ")) {
+            continue;
+        }
+        let path = first_line_starting_with(&seg, "+++ ")
+            .and_then(parse_diff_new_path)
+            .filter(|p| !p.is_empty())
+            .or_else(|| {
+                first_line_starting_with(&seg, "diff --git ")
+                    .and_then(parse_diff_git_path)
+                    .filter(|p| !p.is_empty())
+            });
+        if let Some(p) = path {
+            if !out.contains(&p) {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
 /// Собрать чанки для LLM: разрез аннотированного диффа по бюджету с картой видимости файлов.
 #[allow(unused_assignments)] // финальный flush в конце цикла «зря» обнуляет состояние — как в JS
 pub fn build_chunks(
@@ -847,5 +876,41 @@ mod tests {
         assert_eq!(u16_len("ab"), 2);
         assert_eq!(u16_len("😀"), 2);
         assert_eq!(u16_len("Прайс"), 5);
+    }
+
+    #[test]
+    fn collect_added_paths_как_js() {
+        // Эталон снят с node на lib/diff.mjs (collectAddedPaths, FORCE_JS):
+        // ["new.ts","with space.md","empty.txt"] — изменённый файл не попадает,
+        // quoted-путь раскрыт, пустой новый файл берётся из `diff --git`, повтор схлопнут.
+        let diff = r#"diff --git a/old.ts b/old.ts
+index 1..2 100644
+--- a/old.ts
++++ b/old.ts
+@@ -1 +1 @@
+-a
++b
+diff --git a/new.ts b/new.ts
+new file mode 100644
+index 0000000..3
+--- /dev/null
++++ b/new.ts
+@@ -0,0 +1 @@
++x
+diff --git "a/with space.md" "b/with space.md"
+new file mode 100644
+--- /dev/null
++++ "b/with space.md"
+@@ -0,0 +1 @@
++y
+diff --git a/empty.txt b/empty.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/new.ts b/new.ts
+new file mode 100644
++++ b/new.ts
+"#;
+        assert_eq!(collect_added_paths(diff), vec!["new.ts", "with space.md", "empty.txt"]);
+        assert!(collect_added_paths("").is_empty());
     }
 }

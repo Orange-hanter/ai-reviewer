@@ -146,6 +146,25 @@ pub fn num_env(env: &HashMap<String, String>, name: &str, def: f64) -> f64 {
     }
 }
 
+/// `nonNegEnv`: конечное число ≥ 0, где НОЛЬ — значащее значение («выключено»), а не
+/// повод взять дефолт (`REVIEW_CONTEXT_MARGIN=0` — откат окон контекста, RFC 07; через
+/// [`num_env`] он молча стал бы дефолтными 40). Отсутствие и пустая строка (после trim) —
+/// «не задано» → дефолт: `VAR=` в workflow означает «не передали», а не «ноль».
+pub fn non_neg_env(env: &HashMap<String, String>, name: &str, def: f64) -> f64 {
+    let Some(raw) = env.get(name) else {
+        return def;
+    };
+    if raw.trim().is_empty() {
+        return def;
+    }
+    let n = js_number(raw);
+    if n.is_finite() && n >= 0.0 {
+        n
+    } else {
+        def
+    }
+}
+
 /// `ratioEnv`: конечное число в диапазоне [0, 1] (доли/рейты), иначе дефолт.
 pub fn ratio_env(env: &HashMap<String, String>, name: &str, def: f64) -> f64 {
     match env.get(name).map(|s| js_number(s)) {
@@ -592,6 +611,25 @@ mod tests {
         assert_eq!(num_env(&e, "E", 3.0), 3.0);
         assert_eq!(num_env(&e, "F", 3.0), 1000.0);
         assert_eq!(num_env(&e, "MISSING", 3.0), 3.0);
+    }
+
+    #[test]
+    fn non_neg_env_ноль_значащий() {
+        let e = env(&[
+            ("A", "0"),
+            ("B", ""),
+            ("C", "  "),
+            ("D", "-1"),
+            ("E", "abc"),
+            ("F", "12"),
+        ]);
+        assert_eq!(non_neg_env(&e, "A", 40.0), 0.0, "0 — «выключено», не дефолт");
+        assert_eq!(non_neg_env(&e, "B", 40.0), 40.0, "пустая строка — «не задано»");
+        assert_eq!(non_neg_env(&e, "C", 40.0), 40.0, "пробелы — тоже «не задано»");
+        assert_eq!(non_neg_env(&e, "D", 40.0), 40.0);
+        assert_eq!(non_neg_env(&e, "E", 40.0), 40.0);
+        assert_eq!(non_neg_env(&e, "F", 40.0), 12.0);
+        assert_eq!(non_neg_env(&e, "MISSING", 40.0), 40.0);
     }
 
     #[test]

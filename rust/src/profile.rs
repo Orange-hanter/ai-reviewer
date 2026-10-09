@@ -317,6 +317,11 @@ impl Paths {
     pub fn export_dir(&self) -> &str {
         self.get("exportDir")
     }
+    /// Состояние инкрементального прогона (`lib/incremental.mjs`): хэши входа по
+    /// файлам и находки прошлого прогона. Данные потребителя — путь от рабочего каталога.
+    pub fn incremental_state(&self) -> &str {
+        self.get("incrementalState")
+    }
     pub fn structure_export_dir(&self) -> &str {
         self.get("structureExportDir")
     }
@@ -792,6 +797,7 @@ mod tests {
         assert_eq!(p.astgrep_config(), p.paths().astgrep_config(), "одно значение, не два");
         // structureExportDir профиль не задаёт — остаётся дефолт движка.
         assert_eq!(p.paths().structure_export_dir(), ".ai-review/structure");
+        assert_eq!(p.paths().incremental_state(), ".ai-review/incremental/state.json");
     }
 
     #[test]

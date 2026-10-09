@@ -494,12 +494,17 @@ pub struct LlmConfig {
     /// `o.temperature` (`REVIEW_TEMPERATURE`, дефолт 0.4) — дефолт `chat_json`.
     /// `None` — поле `temperature` в payload отсутствует (JS: `undefined` не сериализуется).
     pub temperature: Option<f64>,
-    /// `o.requestTimeoutMs || 240_000` — бюджет одного `chat_request` целиком
+    /// `o.requestTimeoutMs || 420_000` — бюджет одного `chat_request` целиком
     /// (все ретраи внутри) и per-op таймаут HTTP-клиента.
     pub request_timeout_ms: u64,
     /// `o.effort || 'low'` — `reasoning_effort` для `chat_text`.
-    /// `chat_json` эффорт НЕ берёт отсюда: там он жёстко зашит в каскад (low → none).
+    /// `chat_json` эффорт НЕ берёт отсюда: у него свой [`LlmConfig::aggregator_effort`].
     pub effort: String,
+    /// `o.aggregatorEffort || 'low'` (`REVIEW_AGGREGATOR_REASONING_EFFORT`) — effort
+    /// ПЕРВОЙ попытки `chat_json`. Reasoning провайдер считает completion-токенами, и это
+    /// самая дорогая строка прогона; эксперименту (бэклог A6) нужен переключатель.
+    /// Каскад ретраев остаётся на `none`: там effort снимают, чтобы модель договорила JSON.
+    pub aggregator_effort: String,
     /// `o.providerConcurrency || 12` — жёсткий максимум глобального семафора.
     pub provider_concurrency: usize,
     /// `o.providerPerModel || 6` — жёсткий максимум семафора одной модели.
@@ -522,12 +527,13 @@ impl Default for LlmConfig {
             seed: None,
             json_mode: true,
             temperature: Some(0.4),
-            request_timeout_ms: 240_000,
+            request_timeout_ms: 420_000,
             effort: "low".to_string(),
+            aggregator_effort: "low".to_string(),
             provider_concurrency: 12,
             provider_per_model: 6,
             http_retries: 3,
-            ref_max_tokens: Some(json!(12_000)),
+            ref_max_tokens: Some(json!(6_000)),
             ref_temp: Some(0.3),
         }
     }
@@ -584,6 +590,11 @@ impl LlmConfig {
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
                 .unwrap_or(def.effort),
+            aggregator_effort: get(o, "aggregatorEffort")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .unwrap_or(def.aggregator_effort),
             provider_concurrency: limit_of(num_or(
                 get(o, "providerConcurrency"),
                 def.provider_concurrency as f64,
@@ -689,7 +700,18 @@ pub struct ChatJsonOpts {
     pub call_type: Option<String>,
 }
 
-/// Опции `chatText` (`lib/llm.mjs:225`). `None` в поле = аргумент опущен в JS.
+/// Колбэк `onUsage` у `chatText`: prose-вызов возвращает строку (контракт, который
+/// подменяют DI-фейки), поэтому токены уходят боковым каналом.
+#[derive(Clone)]
+pub struct UsageCallback(pub std::sync::Arc<dyn Fn(&Value) + Send + Sync>);
+
+impl std::fmt::Debug for UsageCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("UsageCallback(..)")
+    }
+}
+
+/// Опции `chatText` (`lib/llm.mjs:239`). `None` в поле = аргумент опущен в JS.
 #[derive(Debug, Clone, Default)]
 pub struct ChatTextOpts {
     /// Дефолт — `moa.refMaxTokens`.
@@ -698,6 +720,10 @@ pub struct ChatTextOpts {
     pub temperature: Option<f64>,
     /// Дефолт — `"advisor"`.
     pub call_type: Option<String>,
+    /// `onUsage`: зовётся с usage успешного запроса (если провайдер его вернул).
+    /// Без него специалисты — единственная роль, чей расход виден только как
+    /// `text_chars`, и атрибуция «токены на роль» невозможна.
+    pub on_usage: Option<UsageCallback>,
 }
 
 /// Клиент LLM глазами движка — то, что `pipeline.mjs:231` кладёт в `deps.ollama`.
@@ -972,9 +998,22 @@ impl LlmApi for RealLlmClient {
         let jm = self.cfg.json_mode;
         let temperature = opts.temperature.or(self.cfg.temperature);
         let call_type = opts.call_type.as_deref().unwrap_or("review_json");
+        // JS: `o.aggregatorEffort || 'low'`.
+        let first_effort = if self.cfg.aggregator_effort.is_empty() {
+            "low"
+        } else {
+            self.cfg.aggregator_effort.as_str()
+        };
 
-        let e = match self.chat_json_once(messages, model, 24_000, "low", jm, temperature, call_type)
-        {
+        let e = match self.chat_json_once(
+            messages,
+            model,
+            24_000,
+            first_effort,
+            jm,
+            temperature,
+            call_type,
+        ) {
             Ok(ok) => return Ok(ok),
             Err(e) => e,
         };
@@ -982,7 +1021,7 @@ impl LlmApi for RealLlmClient {
         // Ветка 1 (lib/llm.mjs:205-208): пустой content — модель ушла в reasoning.
         if e.empty {
             self.log(&format!(
-                "[{model}] content пуст на effort=low → повтор effort=none: {}",
+                "[{model}] content пуст на effort={first_effort} → повтор effort=none: {}",
                 e.message
             ));
             return self
@@ -1041,6 +1080,11 @@ impl LlmApi for RealLlmClient {
             self.cfg.effort.as_str()
         };
 
+        let report = |usage: &Option<Value>| {
+            if let (Some(u), Some(cb)) = (usage, &opts.on_usage) {
+                (cb.0)(u);
+            }
+        };
         match self.chat_request(
             messages,
             model,
@@ -1050,7 +1094,10 @@ impl LlmApi for RealLlmClient {
             false,
             call_type,
         ) {
-            Ok(out) => Ok(out.content),
+            Ok(out) => {
+                report(&out.usage);
+                Ok(out.content)
+            }
             Err(e) if e.empty => {
                 self.log(&format!(
                     "[{model}] advisor content пуст на effort=low → effort=none"
@@ -1064,7 +1111,10 @@ impl LlmApi for RealLlmClient {
                     false,
                     call_type,
                 )
-                .map(|out| out.content)
+                .map(|out| {
+                    report(&out.usage);
+                    out.content
+                })
             }
             Err(e) => Err(e),
         }

@@ -1319,6 +1319,7 @@ impl GraphifyApi for RealGraphify {
         affected_files.sort();
 
         Ok(BlastRadius {
+            graph_index: index.map(std::sync::Arc::new),
             blocks,
             metrics: BlastMetrics {
                 symbols_total: symbols.len(),
@@ -1358,6 +1359,7 @@ fn empty_blast(
     skip_reasons: IndexMap<String, u64>,
 ) -> BlastRadius {
     BlastRadius {
+        graph_index: None,
         blocks: Vec::new(),
         metrics: BlastMetrics {
             symbols_total,
@@ -2054,6 +2056,7 @@ mod tests {
         assert_eq!(out.metrics.symbols_resolved, Some(0));
         assert_eq!(out.metrics.symbols_total, 1);
         assert!(calls.lock().unwrap().is_empty(), "affected/git не вызываем без графа");
+        assert!(out.graph_index.is_none(), "графа нет — индекса для карточек символов нет");
     }
 
     #[test]
@@ -2073,6 +2076,7 @@ mod tests {
         );
 
         let out = client.build_blast_radius(&[]).unwrap();
+        assert!(out.graph_index.is_some(), "прочитанный граф отдаётся наружу (graphIndex)");
         assert_eq!(out.metrics.skip_reasons.get("no_symbols_in_diff"), Some(&1));
         assert_eq!(out.metrics.symbols_total, 0);
         assert_eq!(out.metrics.skip_reason, "no_symbols_in_diff");

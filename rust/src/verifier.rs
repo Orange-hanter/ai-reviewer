@@ -286,6 +286,10 @@ impl VerifierRunner<'_> {
             "changedFilesSection": ctx.changed_files_section,
         });
         let messages = prompt::build_verifier_messages(&args, self.prompt_ctx)?;
+        // Размер входа verifier'а — единственного вызова прогона, который engine не
+        // оборачивает (он ходит в LLM напрямую). Без него gold-замер не покажет, что
+        // дали окна контекста вместо файлов: у остальных ролей prompt_chars пишет engine.
+        let prompt_chars = crate::engine::messages_chars(&messages);
         let t0 = (self.now)();
         let opts = ChatJsonOpts { temperature: self.temperature, call_type: None };
         // Порядок ключей события — как в JS-литерале (lib/verifier.mjs:184-191).
@@ -302,12 +306,22 @@ impl VerifierRunner<'_> {
                 ev.insert("duration_ms".into(), json!((self.now)().saturating_sub(t0)));
                 ev.insert("ok".into(), json!(true));
                 ev.insert("verdicts".into(), json!(verdicts.len()));
+                ev.insert("prompt_chars".into(), json!(prompt_chars));
+                // `...(usage ? {prompt_tokens, …} : {})` — undefined-поля JSON.stringify выбрасывает.
+                if let Some(u) = r.usage.as_ref().filter(|u| !u.is_null()) {
+                    for k in ["prompt_tokens", "completion_tokens", "total_tokens"] {
+                        if let Some(v) = u.get(k) {
+                            ev.insert(k.into(), v.clone());
+                        }
+                    }
+                }
                 self.emit(ev);
                 Ok(verdicts)
             }
             Err(e) => {
                 ev.insert("duration_ms".into(), json!((self.now)().saturating_sub(t0)));
                 ev.insert("ok".into(), json!(false));
+                ev.insert("prompt_chars".into(), json!(prompt_chars));
                 // JS: `e.message?.slice(0, 200)` — без маскировки, в отличие от trackLlm.
                 ev.insert("error".into(), json!(js_slice_utf16(&e.message, 200)));
                 self.emit(ev);

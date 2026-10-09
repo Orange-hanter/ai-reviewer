@@ -547,6 +547,7 @@ fn client_cfg(url: &str) -> LlmConfig {
         temperature: Some(0.4),
         request_timeout_ms: 5_000,
         effort: "low".to_string(),
+        aggregator_effort: "low".to_string(),
         provider_concurrency: 12,
         provider_per_model: 6,
         http_retries: 0,
@@ -986,13 +987,13 @@ fn llm_config_читает_замороженный_конфиг() {
     assert_eq!(llm.base, "https://ollama.com/v1");
     assert_eq!(llm.provider_concurrency, 12, "REVIEW_PROVIDER_CONCURRENCY по умолчанию");
     assert_eq!(llm.provider_per_model, 6, "REVIEW_PROVIDER_PER_MODEL по умолчанию");
-    assert_eq!(llm.request_timeout_ms, 240_000);
+    assert_eq!(llm.request_timeout_ms, 420_000);
     assert_eq!(llm.http_retries, 3);
     assert_eq!(llm.effort, "low");
     assert!(llm.json_mode, "REVIEW_JSON_MODE по умолчанию включён");
     assert_eq!(llm.temperature, Some(0.4));
     assert_eq!(llm.ref_temp, Some(0.3));
-    assert_eq!(llm.ref_max_tokens.as_ref().and_then(Value::as_f64), Some(12_000.0));
+    assert_eq!(llm.ref_max_tokens.as_ref().and_then(Value::as_f64), Some(6_000.0));
 }
 
 #[test]
@@ -1009,7 +1010,59 @@ fn llm_config_falsy_поля_дают_дефолты_как_в_js() {
     }));
     assert_eq!(llm.provider_concurrency, 12);
     assert_eq!(llm.provider_per_model, 6);
-    assert_eq!(llm.request_timeout_ms, 240_000);
+    assert_eq!(llm.request_timeout_ms, 420_000);
     assert_eq!(llm.effort, "low", "o.effort || 'low'");
+    assert_eq!(llm.aggregator_effort, "low", "o.aggregatorEffort || 'low'");
     assert_eq!(llm.seed, None, "null seed в payload не попадает");
+}
+
+#[test]
+fn llm_config_aggregator_effort_из_конфига() {
+    let llm = LlmConfig::from_cfg(&json!({ "ollama": { "aggregatorEffort": "none" } }));
+    assert_eq!(llm.aggregator_effort, "none");
+    assert_eq!(llm.effort, "low", "effort advisors от aggregatorEffort не зависит");
+}
+
+#[test]
+fn client_chat_json_первая_попытка_на_aggregator_effort_каскад_на_none() {
+    // lib/llm.mjs chatJson: firstEffort = o.aggregatorEffort || 'low'; ветка пустого
+    // content повторяет на 'none' и пишет в лог фактический firstEffort.
+    let mut server = fake_server(
+        vec![ok(200, empty_body()), ok(200, sse_body(r#"{"findings":[]}"#))],
+        Duration::ZERO,
+    );
+    let mut cfg = client_cfg(&server.url);
+    cfg.aggregator_effort = "medium".to_string();
+    let (c, logs) = client_with_logs(cfg);
+    c.chat_json(&msgs(), "m1", &ChatJsonOpts::default()).unwrap();
+    let p = payloads(&server);
+    assert_eq!(p[0]["reasoning_effort"], json!("medium"));
+    assert_eq!(p[1]["reasoning_effort"], json!("none"));
+    assert!(logs.lock().unwrap().iter().any(|l| l.contains("effort=medium → повтор effort=none")));
+    server.stop();
+}
+
+#[test]
+fn client_chat_text_отдаёт_usage_через_on_usage() {
+    // lib/llm.mjs chatText: контракт — строка, токены — боковым каналом onUsage.
+    let body = sse_body_with_usage(
+        "текст",
+        json!({"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}),
+    );
+    let mut server = fake_server(vec![ok(200, body)], Duration::ZERO);
+    let c = client(client_cfg(&server.url));
+    let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let sink = Arc::clone(&seen);
+    let opts = ChatTextOpts {
+        on_usage: Some(crate::llm::UsageCallback(Arc::new(move |u: &Value| {
+            sink.lock().unwrap().push(u.clone());
+        }))),
+        ..ChatTextOpts::default()
+    };
+    assert_eq!(c.chat_text(&msgs(), "m1", &opts).unwrap(), "текст");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![json!({"prompt_tokens": 7.0, "completion_tokens": 3.0, "total_tokens": 10.0})]
+    );
+    server.stop();
 }
