@@ -249,6 +249,10 @@ const envCases = [
   ['export off', { REVIEW_EXPORT: '0' }, CLI_A],
   ['feedback off', { REVIEW_FEEDBACK: '0' }, CLI_A],
   ['triage off', { REVIEW_AUTO_TRIAGE: '0' }, CLI_A],
+  // Доверенные авторы: новое имя главнее алиаса; пустая строка — откат «доверять всем».
+  ['trusted authors new name', { REVIEW_TRUSTED_AUTHORS: ' a[bot] , b ,', REVIEW_FEEDBACK_TRUSTED_AUTHORS: 'old[bot]' }, CLI_A],
+  ['trusted authors empty rollback', { REVIEW_TRUSTED_AUTHORS: '' }, CLI_A],
+  ['trusted authors alias empty', { REVIEW_FEEDBACK_TRUSTED_AUTHORS: '' }, CLI_A],
 
   // Price map.
   ['price json valid', { REVIEW_PRICE_JSON: '{"m1":{"in":1.5,"out":2}}' }, CLI_A],
