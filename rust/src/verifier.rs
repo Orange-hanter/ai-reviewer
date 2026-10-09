@@ -20,9 +20,13 @@
 //!   kept-индексы, мутации по индексу и строки лога — JS-обёртка накладывает
 //!   на исходные объекты, сохраняя семантику разделяемых ссылок пайплайна.
 
+use anyhow::{anyhow, Result};
 use serde_json::{json, Map, Value};
 
 use crate::findings::{js_to_string, js_truthy};
+use crate::llm::{ChatJsonOpts, LlmApi};
+use crate::prompt::{self, PromptCtx};
+use crate::traits::VerifyContext;
 
 /// lib/verifier.mjs SEV_ORDER (прочее/отсутствующее → 9).
 fn sev_order(sev: Option<&Value>) -> i32 {
@@ -213,6 +217,104 @@ pub fn apply_verifier_verdicts(
 
     let kept: Vec<usize> = (0..all_findings.len()).filter(|i| !removed.contains(i)).collect();
     AppliedVerdicts { kept, mutations, stats, logs }
+}
+
+// ---------------------------------------------------------------------------
+// LLM-раннер Pass B (T12): порт createVerifierRunner (lib/verifier.mjs:166-206)
+// ---------------------------------------------------------------------------
+
+/// `s.slice(0, end)` по UTF-16 юнитам (не-BMP символ считается за два).
+fn js_slice_utf16(s: &str, end: usize) -> String {
+    let mut units = 0usize;
+    let mut out = String::new();
+    for c in s.chars() {
+        let n = c.len_utf16();
+        if units + n > end {
+            break;
+        }
+        units += n;
+        out.push(c);
+    }
+    out
+}
+
+/// Второй проход отдельной моделью: один batch-вызов на весь список кандидатов.
+///
+/// Отдельная структура, а не метод движка, потому что в JS это отдельная фабрика
+/// (`createVerifierRunner`), которую `createReviewEngine` только подмешивает в
+/// свой возврат (`lib/engine.mjs:412`). Граница та же: `RealEngine` строит раннер
+/// на месте вызова, а сам раннер ничего не знает про MoA/consensus.
+///
+/// Все зависимости — по ссылке: раннер живёт ровно один вызов `verify_findings`.
+pub struct VerifierRunner<'a> {
+    /// `cfg.verifier.model` — модель Pass B, намеренно ВНЕ пула advisors.
+    pub model: &'a str,
+    /// `cfg.verifier.temperature`.
+    pub temperature: Option<f64>,
+    pub llm: &'a dyn LlmApi,
+    pub prompt_ctx: &'a PromptCtx,
+    /// `observability?.logEvent`; `None` — observability выключена.
+    pub on_event: Option<&'a (dyn Fn(&str, &Value) + Send + Sync)>,
+    /// Часы прогона (epoch-мс) — те же, что у движка; инъекция ради golden.
+    pub now: &'a (dyn Fn() -> u64 + Send + Sync),
+}
+
+impl VerifierRunner<'_> {
+    fn emit(&self, payload: Map<String, Value>) {
+        if let Some(sink) = self.on_event {
+            sink("llm_call", &Value::Object(payload));
+        }
+    }
+
+    /// Порт `verifyFindings` (`lib/verifier.mjs:167-203`).
+    ///
+    /// Семантика, которую нельзя менять:
+    /// - пустой список кандидатов → пустой ответ БЕЗ вызова LLM;
+    /// - ответ без массива `verdicts` → пустой список, а не ошибка
+    ///   (fail-open здесь, fail-closed решает `strictUnverified` снаружи);
+    /// - сбой LLM → `Err`: стадию глушит пайплайн, а не движок.
+    pub fn verify_findings(&self, candidates: &[Value], ctx: &VerifyContext) -> Result<Vec<Value>> {
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let args = json!({
+            "candidates": candidates,
+            "annotated": ctx.annotated,
+            "fileContents": ctx.file_contents,
+            "blastBlocks": ctx.blast_blocks,
+            "pr": ctx.pr,
+            "changedFilesSection": ctx.changed_files_section,
+        });
+        let messages = prompt::build_verifier_messages(&args, self.prompt_ctx)?;
+        let t0 = (self.now)();
+        let opts = ChatJsonOpts { temperature: self.temperature, call_type: None };
+        // Порядок ключей события — как в JS-литерале (lib/verifier.mjs:184-191).
+        let mut ev = Map::new();
+        ev.insert("callType".into(), json!("verifier"));
+        ev.insert("model".into(), json!(self.model));
+        ev.insert("candidates".into(), json!(candidates.len()));
+        match self.llm.chat_json(&Value::Array(messages), self.model, &opts) {
+            Ok(r) => {
+                let verdicts = match r.value.get("verdicts") {
+                    Some(Value::Array(a)) => a.clone(),
+                    _ => Vec::new(), // Array.isArray(...) ? ... : []
+                };
+                ev.insert("duration_ms".into(), json!((self.now)().saturating_sub(t0)));
+                ev.insert("ok".into(), json!(true));
+                ev.insert("verdicts".into(), json!(verdicts.len()));
+                self.emit(ev);
+                Ok(verdicts)
+            }
+            Err(e) => {
+                ev.insert("duration_ms".into(), json!((self.now)().saturating_sub(t0)));
+                ev.insert("ok".into(), json!(false));
+                // JS: `e.message?.slice(0, 200)` — без маскировки, в отличие от trackLlm.
+                ev.insert("error".into(), json!(js_slice_utf16(&e.message, 200)));
+                self.emit(ev);
+                Err(anyhow!(e.message))
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
