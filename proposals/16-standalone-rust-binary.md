@@ -457,7 +457,7 @@ T08 замораживает сигнатуры трейтов до того, к
 | # | Суть | DoD |
 |---|---|---|
 | ✅ T18 | `structure_identity.rs` + `structure_context.rs` | `cargo test structure_identity:: structure_context::` на `fixtures/structure/` |
-| T19 | `structure_drift.rs` | `cargo test structure_drift::` |
+| ✅ T19 | `structure_drift.rs` | `cargo test structure_drift::` |
 | T20 | `structure_export.rs` | `cargo test structure_export::` |
 | T21 | `structure.rs` — glue `analyze_structure`, git exec; без импорта pipeline/engine/github/llm | `cargo test structure::` |
 | T22 | подкоманда `structure` ← `bin/pr-review-structure.mjs` | `assert_cmd`-тест: `facts.json` совпадает с JS на фикстуре |
