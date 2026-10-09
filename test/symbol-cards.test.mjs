@@ -11,6 +11,7 @@ const {
   extractUsedIdentifiers, scanDeclaration, findDeclarationEnd, buildSymbolCards, selectChunkCards,
   symbolCardsHashInput, renderSymbolCard, addedLinesOfSection, declarationRegex, createLineReader, packageImportedNames,
   resolveCardNode, hasLocalBinding, symbolCardsOutcome, isAbsenceClaim,
+  relativeImportBindings, resolveImportPath, extractNamespaceCalls, cardDeclaration, maskNonCode,
 } = await import('../lib/symbol-cards.mjs');
 const { buildGraphIndex } = await import('../lib/graphify.mjs');
 const { backfillMissing } = await import('../lib/config.mjs');
@@ -271,9 +272,9 @@ const DIFF = `diff --git a/foo.ts b/foo.ts
 +const b = parseLimits(a, { strict: true });
 `;
 
-async function runWithCards(env) {
+async function runWithCards(env, { graph = GRAPH, diff = DIFF, findings = [] } = {}) {
   const tmp = join(tmpdir(), `symbol-cards-${process.pid}-${Math.random().toString(36).slice(2)}.patch`);
-  await writeFile(tmp, DIFF);
+  await writeFile(tmp, diff);
   const seen = { chunks: null };
   try {
     const cfg = loadReviewConfig({
@@ -285,15 +286,15 @@ async function runWithCards(env) {
       die: (m) => { throw new Error(`die: ${m}`); },
       repoFiles: async () => null,
       readLines,
-      graphify: { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex: GRAPH }) },
+      graphify: { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex: graph }) },
       prescan: {
         run: async () => ({
           findings: [], scanned: 0, skipped: 0, truncated: false, lintableTotal: 0, byTool: null, error: null, promptSection: '',
         }),
       },
       engine: {
-        reviewAllModels: async (chunks) => { seen.chunks = chunks; return [{ model: 'm1', summary: 'ok', findings: [] }]; },
-        verifyFindings: async () => [],
+        reviewAllModels: async (chunks) => { seen.chunks = chunks; seen.calls = (seen.calls || 0) + 1; return [{ model: 'm1', summary: 'ok', findings }]; },
+        verifyFindings: async (cands, ctx) => { seen.verifyCtx = ctx; return []; },
       },
       github: {
         readPriorStickyData: async () => ({ findings: [], runs: [], sha: '' }),
@@ -433,4 +434,230 @@ test('аудит 1.5: symbolCardsOutcome связывает находки с к
   assert.deepEqual(out.names, ['parseLimits']);
   assert.deepEqual(out.llm, { findings: 4, mentioning: 1, absenceClaims: 1 });
   assert.deepEqual(out.final, { findings: 2, mentioning: 1, inline: 1, bySeverity: { major: 1 }, byVerifier: { verified: 1 } });
+});
+
+// ── Аудит RFC 14, открытые пункты ──
+
+test('аудит 1.12: relativeImportBindings — именованные, псевдонимы, default, namespace, require; пакеты мимо', () => {
+  const b = relativeImportBindings([
+    "import { parse, build as make } from './a.mjs';",
+    "import def, { other } from '../b';",
+    "import * as util from './util/index.js';",
+    "import { ok } from 'node:assert';",
+    "const helpers = require('./helpers');",
+    'import {',
+    '  multi,',
+    "} from './c';",
+  ]);
+  assert.deepEqual(Object.fromEntries(b), {
+    parse: { spec: './a.mjs', imported: 'parse' },
+    make: { spec: './a.mjs', imported: 'build' },
+    def: { spec: '../b', imported: 'default' },
+    other: { spec: '../b', imported: 'other' },
+    util: { spec: './util/index.js', imported: '*' },
+    helpers: { spec: './helpers', imported: '*' },
+    multi: { spec: './c', imported: 'multi' },
+  });
+});
+
+test('аудит 1.12: resolveImportPath — точный путь, .js → .ts, расширения, index', () => {
+  const files = new Set(['src/a.ts', 'src/lib/b.mjs', 'src/util/index.ts', 'shared/c.tsx']);
+  const has = (f) => files.has(f);
+  assert.equal(resolveImportPath('src/x.ts', './a.js', has), 'src/a.ts');
+  assert.equal(resolveImportPath('src/x.ts', './lib/b.mjs', has), 'src/lib/b.mjs');
+  assert.equal(resolveImportPath('src/x.ts', './util', has), 'src/util/index.ts');
+  assert.equal(resolveImportPath('src/x.ts', '../shared/c', has), 'shared/c.tsx');
+  assert.equal(resolveImportPath('src/x.ts', './missing', has), null);
+  assert.equal(resolveImportPath('x.ts', '../../escape', has), null);
+});
+
+test('аудит 1.12: extractNamespaceCalls — только для namespace-импортов', () => {
+  const calls = extractNamespaceCalls(['const r = util.parse(x) + other.parse(y);', 'util.parse(z); util.build();'], new Set(['util']));
+  assert.deepEqual([...calls.values()], [{ ns: 'util', fn: 'parse', count: 2 }, { ns: 'util', fn: 'build', count: 1 }]);
+});
+
+const IMPORT_GRAPH = buildGraphIndex({
+  nodes: [
+    { id: 'p1', label: 'parse()', source_file: 'src/a.ts', source_location: 'L1' },
+    { id: 'p2', label: 'parse()', source_file: 'src/other.ts', source_location: 'L1' },
+    { id: 'u1', label: 'build()', source_file: 'src/util/index.ts', source_location: 'L1' },
+  ],
+  links: [],
+});
+const IMPORT_FILES = {
+  'src/a.ts': lines('export function parse(raw: string, strict = false) {\n  return raw;\n}'),
+  'src/other.ts': lines('export function parse(n: number) {\n  return n;\n}'),
+  'src/util/index.ts': lines('export function build(cfg: Cfg) {\n  return cfg;\n}'),
+  'src/caller.ts': lines("import { parse as px } from './a.js';\nimport * as util from './util';\n\nfunction go() {}"),
+};
+const importCards = (added) => buildSymbolCards(['src/caller.ts'], {
+  graphIndex: IMPORT_GRAPH, sections: new Map([['src/caller.ts', section(added)]]), windows: new Map(),
+  readLines: (f) => IMPORT_FILES[f] ?? null,
+});
+
+test('аудит 1.12: импорт снимает неоднозначность и открывает ns.fn(', () => {
+  const r = importCards(['const v = px(x);', 'const c = util.build(cfg);']);
+  assert.deepEqual(r.byPath.get('src/caller.ts').map((c) => [c.name, c.path, c.declaration]).sort(), [
+    ['build', 'src/util/index.ts', 'export function build(cfg: Cfg)'],
+    ['parse', 'src/a.ts', 'export function parse(raw: string, strict = false)'],
+  ]);
+  assert.equal(r.metrics.via_import, 2);
+  // без импорта то же имя неоднозначно по графу — карточки нет
+  const bare = buildSymbolCards(['src/z.ts'], {
+    graphIndex: IMPORT_GRAPH, sections: new Map([['src/z.ts', section(['parse(x);'])]]), windows: new Map(), readLines: () => [],
+  });
+  assert.equal(bare.metrics.skip_reasons.ambiguous, 1);
+});
+
+test('аудит 1.6: TS — стрелка и литерал типа в аннотации не обрывают заголовок', () => {
+  assert.deepEqual(
+    scanDeclaration(lines('export function make(n: number): (x: number) => number {\n  return (x) => x + n;\n}'), 0),
+    { header: 'export function make(n: number): (x: number) => number', endIdx: 2 },
+  );
+  assert.deepEqual(
+    scanDeclaration(lines('async function load(id: string): Promise<{ id: string; ok: boolean }> {\n  return { id, ok: true };\n}'), 0),
+    { header: 'async function load(id: string): Promise<{ id: string; ok: boolean }>', endIdx: 2 },
+  );
+  assert.deepEqual(
+    scanDeclaration(lines('function shape(): { a: number } {\n  return { a: 1 };\n}'), 0),
+    { header: 'function shape(): { a: number }', endIdx: 2 },
+  );
+  assert.deepEqual(
+    scanDeclaration(lines('const twice: (x: number) => number = (x) => x * 2;\nnext();'), 0),
+    { header: 'const twice: (x: number) => number = (x) =>', endIdx: 0 },
+  );
+  assert.deepEqual(
+    scanDeclaration(lines('class Box<T extends { id: string }> extends Base<T> {\n  get() {}\n}'), 0),
+    { header: 'class Box<T extends { id: string }> extends Base<T>', endIdx: 2 },
+  );
+});
+
+test('аудит 1.6: перегрузки TS собираются вместе с реализацией', () => {
+  const src = lines([
+    'export function pick(a: string): string;',
+    'export function pick(a: number): number;',
+    'export function pick(a: string | number) {',
+    '  return a;',
+    '}',
+    'const after = 1;',
+  ].join('\n'));
+  assert.deepEqual(cardDeclaration(src, 0, 'pick'), {
+    header: 'export function pick(a: string): string\nexport function pick(a: number): number\nexport function pick(a: string | number)',
+    endIdx: 4,
+  });
+});
+
+test('аудит 1.6: класс — с сигнатурой конструктора для new X(…)', () => {
+  const src = lines([
+    'export class Client extends Base {',
+    '  private readonly url: string;',
+    '  constructor(url: string, opts: Opts = {}) {',
+    '    super();',
+    '  }',
+    '}',
+  ].join('\n'));
+  assert.deepEqual(cardDeclaration(src, 0, 'Client'), {
+    header: 'export class Client extends Base { constructor(url: string, opts: Opts = {}) }',
+    endIdx: 5,
+  });
+});
+
+test('аудит 1.9: граф недоступен во втором прогоне — хэши с прошлым входом карточек, файл не пере-ревьюится', async () => {
+  const { mkdtemp, readFile: rf } = await import('node:fs/promises');
+  const dir = await mkdtemp(join(tmpdir(), 'cards-inc-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    const env = { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateFile };
+    await runWithCards(env);
+    const first = JSON.parse(await rf(stateFile, 'utf8'));
+    assert.ok(first.cardsInput?.['foo.ts'], 'вход карточек сохранён в состоянии');
+    const second = await runWithCards(env, { graph: null });
+    const after = JSON.parse(await rf(stateFile, 'utf8'));
+    assert.deepEqual(after.hashes, first.hashes, 'сбой графа не меняет хэши');
+    assert.equal(second.calls ?? 0, 0, 'неизменившийся файл не отправлен в LLM');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('аудит 1.9 (безопасность): второй сбой графа подряд и карточка на файл PR — без переиспользования', async () => {
+  const { mkdtemp, readFile: rf } = await import('node:fs/promises');
+  const dir = await mkdtemp(join(tmpdir(), 'cards-inc2-'));
+  try {
+    // второй сбой подряд — хэши пересчитываются честно
+    const stateA = join(dir, 'a.json');
+    const envA = { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateA };
+    await runWithCards(envA);
+    const first = JSON.parse(await rf(stateA, 'utf8'));
+    await runWithCards(envA, { graph: null });
+    assert.equal(JSON.parse(await rf(stateA, 'utf8')).cardsInputReused, true);
+    const third = await runWithCards(envA, { graph: null });
+    assert.notDeepEqual(JSON.parse(await rf(stateA, 'utf8')).hashes, first.hashes);
+    assert.equal(third.calls, 1, 'файл отправлен в LLM заново');
+
+    // карточка указывает на файл, который сам входит в PR, — сигнатура могла измениться
+    const stateB = join(dir, 'b.json');
+    const envB = { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateB };
+    const diffWithTarget = `${DIFF}diff --git a/lib/config.mjs b/lib/config.mjs
+--- a/lib/config.mjs
++++ b/lib/config.mjs
+@@ -1,1 +1,1 @@
+-// old header
++// header
+`;
+    await runWithCards(envB, { diff: diffWithTarget });
+    const before = JSON.parse(await rf(stateB, 'utf8'));
+    assert.deepEqual(before.cardsTargets['foo.ts'], ['lib/config.mjs']);
+    const again = await runWithCards(envB, { diff: diffWithTarget, graph: null });
+    assert.notEqual(JSON.parse(await rf(stateB, 'utf8')).hashes['foo.ts'], before.hashes['foo.ts']);
+    assert.equal(again.calls, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('решение 4: REVIEW_VERIFIER_SYMBOL_CARDS=1 — карточки файла кандидата доходят до verifier; по умолчанию нет', async () => {
+  const findings = [{ file: 'foo.ts', line: 2, severity: 'major', title: 'вызов `parseLimits` со strict', body: 'b', confidence: 0.9, model: 'm1' }];
+  const env = { REVIEW_VERIFIER: '1', REVIEW_MODE: 'consensus', OLLAMA_MODELS: 'm1' };
+  const on = await runWithCards({ ...env, REVIEW_VERIFIER_SYMBOL_CARDS: '1' }, { findings });
+  assert.deepEqual(on.verifyCtx?.symbolCards, ['// lib/config.mjs:L2–L4\nexport function parseLimits(raw, { strict = false } = {})']);
+  const off = await runWithCards(env, { findings });
+  assert.ok(off.verifyCtx, 'verifier вызван');
+  assert.equal(off.verifyCtx.symbolCards, undefined);
+});
+
+test('маска: строка внутри многострочного литерала или комментария не даёт вызовов', () => {
+  const file = [
+    'const sql = `',
+    "  -- Postgres materialises a pg_constraint row (contype 'n') for every",
+    '  select ${quote(name)} from t',
+    '`;',
+    '/*',
+    '  helper(1) в комментарии',
+    '*/',
+    'run(x);',
+  ];
+  const masked = maskNonCode(file);
+  assert.equal(masked.length, file.length);
+  assert.ok(!masked[1].includes('row'), 'текст литерала замаскирован');
+  assert.ok(masked[2].includes('quote(name)'), 'код в ${…} сохранён');
+  assert.ok(!masked[5].includes('helper'), 'блочный комментарий замаскирован');
+  assert.deepEqual([...extractUsedIdentifiers(masked).keys()].sort(), ['quote', 'run']);
+  // в отборе: файл на диске совпадает с диффом — строка литерала не даёт кандидата `row`
+  const graph = buildGraphIndex({ nodes: [{ id: 'r', label: 'row()', source_file: 'lib/r.mjs', source_location: 'L1' }], links: [] });
+  const r = buildSymbolCards(['src/q.ts'], {
+    graphIndex: graph,
+    sections: new Map([['src/q.ts', `    2: +${file[1]}`]]),
+    windows: new Map(),
+    readLines: (f) => (f === 'src/q.ts' ? file : f === 'lib/r.mjs' ? ['export function row(x) {}'] : null),
+  });
+  assert.equal(r.metrics.candidates, 0);
+});
+
+test('маска и лексер линейны на цепочке делений', () => {
+  const line = `a${'/a'.repeat(50000)}`;
+  const t0 = performance.now();
+  maskNonCode([line]);
+  scanDeclaration([`const x = ${line};`], 0);
+  assert.ok(performance.now() - t0 < 500);
 });

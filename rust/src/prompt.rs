@@ -560,12 +560,22 @@ pub fn build_verifier_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Valu
     } else {
         file_contents
     };
+    // Карточки символов verifier'у (RFC 14, решение 4): поле symbolCards — готовые строки.
+    let cards: Vec<String> = match args.get("symbolCards") {
+        Some(Value::Array(a)) => a.iter().map(js_to_string).collect(),
+        _ => Vec::new(),
+    };
+    let cards_part = if cards.is_empty() {
+        String::new()
+    } else {
+        format!("\n{SYMBOL_CARDS_HEADER}\n```\n{}\n```\n", fence_escape(&cards.join("\n")))
+    };
     let pr = args.get("pr").cloned().unwrap_or(Value::Null);
     let pr_number = js_to_string(pr.get("number").unwrap_or(&Value::Null));
     let title = safe_pr_title(pr.get("title"));
 
     let user = format!(
-        "PR #{pr_number}: «{title}»\n\n{changed}{blast}## Candidates to verify ({n})\n{list}\n\n## Context of changed files (windows around the candidate lines; «… (строки N–M пропущены)» marks text not shown)\n{file_part}\n\n## Diff (RIGHT-side line numbers)\n```diff\n{annotated}\n```",
+        "PR #{pr_number}: «{title}»\n\n{changed}{blast}## Candidates to verify ({n})\n{list}\n\n## Context of changed files (windows around the candidate lines; «… (строки N–M пропущены)» marks text not shown)\n{file_part}\n{cards_part}\n## Diff (RIGHT-side line numbers)\n```diff\n{annotated}\n```",
         changed = str_arg(args, "changedFilesSection"),
         n = candidates.len(),
         annotated = fence_escape(&str_arg(args, "annotated")),
@@ -574,10 +584,10 @@ pub fn build_verifier_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Valu
     Ok(vec![msg("system", system), msg("user", user)])
 }
 
-/// buildMessages — основной промпт ревью (чанк диффа + контекст).
 /// Заголовок блока карточек символов (RFC 14); зеркало SYMBOL_CARDS_HEADER в lib/prompt.mjs.
 const SYMBOL_CARDS_HEADER: &str = "## Declarations of symbols called by the changed lines (defined outside the context shown above)\nEach entry is the declaration only — the body is NOT shown. It proves the symbol EXISTS and what its signature is; it proves NOTHING about what the body does: do not report the behaviour of such a symbol and do not call it undefined. An entry marked (full body) shows the whole short body.";
 
+/// buildMessages — основной промпт ревью (чанк диффа + контекст).
 pub fn build_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
     let changed_paths: Option<Vec<Value>> = match args.get("changedPaths") {
         Some(Value::Array(a)) => Some(a.clone()),

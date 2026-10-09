@@ -141,7 +141,7 @@ async function persistExports(cfg, payload, log, obs) {
 /** Стадия verifier Pass B: кандидаты critical/major → второй проход. Fail-open при сбое LLM. */
 async function runVerifierStage(allFindings, {
   engine, gate, verifier, deadline, contentMap, annotated, blastBlocks, pr, changedFilesSection,
-  actionability, actionabilityCtx, files,
+  actionability, actionabilityCtx, files, symbolCardsByPath = null, limits = {},
 }, log, obs) {
   const empty = { findings: allFindings, stats: null };
   if (!verifier.enabled) return empty;
@@ -206,8 +206,17 @@ async function runVerifierStage(allFindings, {
       .map(([, s]) => s);
     const annotatedScoped = sections.length ? sections.join('\n') : annotated;
     log(`verifier ctx: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, контекст ${ctxWindow.before}→${ctxWindow.after} симв. (окна ±${verifier.contextMargin}), дифф ${annotatedScoped.length}/${annotated.length} симв.`);
+    // Карточки символов файлов-кандидатов (RFC 14, решение 4) — только под флагом: это вход
+    // судьи, чей вердикт решает блокировку.
+    const verifierCards = verifier.symbolCards && symbolCardsByPath?.size
+      ? selectChunkCards(symbolCardsByPath, [...candFiles], {
+        max: limits.symbolCardsMax, maxChars: limits.symbolCardsMaxChars, visibleText: `${annotatedScoped}\n${fileContents}`,
+      }).cards
+      : [];
+    if (verifierCards.length) log(`verifier: карточек символов ${verifierCards.length}`);
     const verdicts = await engine.verifyFindings(candidates, {
       annotated: annotatedScoped, fileContents, blastBlocks, pr, changedFilesSection,
+      ...(verifierCards.length ? { symbolCards: verifierCards } : {}),
     });
     const applied = applyVerifierVerdicts(allFindings, candidates, verdicts, log, {
       strictUnverified: verifier.strictBlocks,
@@ -539,14 +548,34 @@ export function createReviewPipeline(cfg, deps = {}) {
       if (symbolCards) {
         log(`карточки символов: ${symbolCards.metrics.cards} из ${symbolCards.metrics.candidates} вызванных имён`, symbolCards.metrics.skip_reasons);
       }
-      const inputHashes = fileInputHashes(
-        changedPaths, diffSections, ctxWindows.map,
-        symbolCards ? new Map([...symbolCards.byPath].map(([p, cards]) => [p, symbolCardsHashInput(cards)])) : null,
-      );
-      const configFp = configFingerprint({ ...cfg, version: cfg.profile?.version });
       const priorIncremental = cfg.incremental?.enabled
         ? await readIncrementalState(cfg.incremental.stateFile)
         : null;
+      // Вход карточек в хэш. Граф недоступен (graphify упал в CI — шаг continue-on-error), а
+      // фича включена: карточек нет не потому, что код изменился, — берём вход карточек из
+      // прошлого прогона, иначе каждый такой сбой заново ревьюил бы все JS/TS-файлы PR
+      // (аудит RFC 14, п. 1.9). Перенесённые находки получены С карточками — это не хуже.
+      let cardsInput = symbolCards ? new Map([...symbolCards.byPath].map(([p, cards]) => [p, symbolCardsHashInput(cards)])) : null;
+      let cardsTargets = symbolCards
+        ? Object.fromEntries([...symbolCards.byPath].map(([p, cards]) => [p, [...new Set(cards.map((c) => c.path))]]))
+        : null;
+      let cardsInputReused = 0;
+      // Переиспользование сужено, чтобы не перенести находку мимо реального изменения:
+      //   - вызывающий файл, чья карточка указывает на файл ЭТОГО PR, не переиспользуется —
+      //     сигнатура могла измениться в этом же пуше, а без графа мы этого не увидим;
+      //   - не больше одного прогона подряд: второй сбой графа подряд пересчитывает честно,
+      //     иначе на время сбоя вход карточек застыл бы на неопределённый срок.
+      if (symbolCards && !graphIndex && priorIncremental?.cardsInput && !priorIncremental.cardsInputReused) {
+        const inPr = new Set(changedPaths);
+        const targets = priorIncremental.cardsTargets || {};
+        cardsInput = new Map(Object.entries(priorIncremental.cardsInput).filter(([p]) => inPr.has(p)
+          && Array.isArray(targets[p]) && !targets[p].some((t) => inPr.has(t))));
+        cardsTargets = Object.fromEntries([...cardsInput.keys()].map((p) => [p, targets[p]]));
+        cardsInputReused = cardsInput.size;
+        if (cardsInputReused) log(`карточки: граф недоступен — вход карточек ${cardsInputReused} файл(ов) взят из прошлого прогона (их карточки не указывают на файлы PR)`);
+      }
+      const inputHashes = fileInputHashes(changedPaths, diffSections, ctxWindows.map, cardsInput);
+      const configFp = configFingerprint({ ...cfg, version: cfg.profile?.version });
       const incrementalPlan = cfg.incremental?.enabled
         ? planIncremental({
           state: priorIncremental,
@@ -564,6 +593,8 @@ export function createReviewPipeline(cfg, deps = {}) {
           reviewed: incrementalPlan.reviewPaths.size,
           unchanged: incrementalPlan.unchanged.length,
           carried: incrementalPlan.carried.length,
+          // сколько хэшей посчитано с входом карточек из прошлого прогона (граф недоступен)
+          symbolCardsReused: cardsInputReused,
         });
       }
       // Дифф для LLM сужаем до ревьюируемых файлов; `files`/`changedPaths` остаются полными —
@@ -633,6 +664,8 @@ export function createReviewPipeline(cfg, deps = {}) {
         symbolCards: symbolCards ? {
           ...symbolCards.metrics,
           dropped: symbolCardsDropped,
+          // граф недоступен: вход карточек для хэша взят из прошлого прогона (аудит, п. 1.9)
+          hash_input_reused: cardsInputReused,
           chunks_over_limit: chunks.filter((c) => c.symbolCardsDropped > 0).length,
         } : null,
         contextWindows: {
@@ -852,6 +885,8 @@ export function createReviewPipeline(cfg, deps = {}) {
                 actionability: cfg.actionability,
                 actionabilityCtx,
                 files,
+                symbolCardsByPath: symbolCards?.byPath ?? null,
+                limits,
               }, log, obs)
             : { findings: currentFindings, stats: null };
           currentFindings = verifierStage.findings;
@@ -941,6 +976,9 @@ export function createReviewPipeline(cfg, deps = {}) {
           // Счётчик прогонов подряд без полного: страховка от накопления дрейфа.
           sinceFull: incrementalPlan.mode === 'incremental' ? Number(priorIncremental?.sinceFull || 0) + 1 : 0,
           hashes: inputHashes,
+          // Вход карточек по файлам — чтобы сбой графа в следующем прогоне не менял хэши.
+          ...(cardsInput?.size ? { cardsInput: Object.fromEntries(cardsInput), cardsTargets } : {}),
+          ...(cardsInputReused ? { cardsInputReused: true } : {}),
           findings: carryable,
         }, log);
       }

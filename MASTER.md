@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:01989b8dac8b`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:e2b71db3f56c`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:6951ddf818b3`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:2d0fadddfb13`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -102,7 +102,7 @@ graph TD
 
 ### RFC 14 — Карточки символов
 - **Описание:** строка объявления того, что вызывает изменённый код, во входе модели; семейство FP 8 («символа нет» по графу); шаг 0 — замер до кода.
-- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:95bbcc0269ba`
+- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:c54e501ab10e`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 15 — Наряды по косвенным признакам
@@ -112,7 +112,7 @@ graph TD
 
 ### Аудит RFC 14
 - **Описание:** независимый разбор карточек символов после включения по умолчанию: находки со статусами, методология решений, вектор развития.
-- **Ссылка:** `📁 docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md | 🗃️ doc:docs_dev_audit_2026-10-09-rfc-14-symbol-cards_md | 🔑 sha:d77b55df7ee9`
+- **Ссылка:** `📁 docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md | 🗃️ doc:docs_dev_audit_2026-10-09-rfc-14-symbol-cards_md | 🔑 sha:49e489d153b4`
 - **Статус:** `🟢 VERIFIED`
 
 ### Замер косвенных признаков
@@ -137,7 +137,7 @@ graph TD
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:770a143d6adc`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:151c94e3219e`
 - **Статус:** `🟢 VERIFIED`
 
 ### README
