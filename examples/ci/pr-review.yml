@@ -146,7 +146,7 @@ jobs:
           MOA_AGGREGATOR: minimax-m3
           MOA_REFERENCE_TEMPERATURE: '0.3'   # меньше находок, плотнее по существу (см. docs/model-tuning.md движка)
           MOA_AGGREGATOR_TEMPERATURE: '0.4'
-          OLLAMA_MODELS_FALLBACK: deepseek-v4-flash
+          OLLAMA_MODELS_FALLBACK: deepseek-v4.1-flash
           REVIEW_AUTO_TRIAGE: '1'
           REVIEW_INLINE_ON: critical,major
           REVIEW_BLOCK_ON: critical,major

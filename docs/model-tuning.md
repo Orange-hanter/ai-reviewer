@@ -21,7 +21,7 @@ last_updated: 2026-09-10
 | specialist security | `glm-5.3-flash` | prose | дёшево и быстро на типовых паттернах уязвимостей |
 | jury aggregator | `minimax-m3` | **JSON** | синтез + refutation, вне пула advisors |
 | verifier (Pass B) | `deepseek-v4-pro` | **JSON** | глубокий судья, независимый от аггрегатора |
-| fallback | `deepseek-v4-flash` | JSON+prose | замена упавшей модели, чтобы прогон не терял роль целиком |
+| fallback | `deepseek-v4.1-flash` | JSON+prose | замена упавшей модели, чтобы прогон не терял роль целиком |
 
 Колонка «Ответ» — не декорация, а ограничение при подборе (см. «JSON-роли» ниже).
 
@@ -44,6 +44,16 @@ last_updated: 2026-09-10
 | `glm-5.3` | JSON ok (~1.2 с) | **проза** | **нет** — только prose-роль |
 | `glm-5.3-flash` | JSON ok (~0.8 с) | **проза** | **нет** — только prose-роль |
 | `minimax-m3` | JSON с обрезанным префиксом | JSON ok (~5.0 с) | да, но см. ниже |
+
+Замена 2026-10-09: провайдер снял `deepseek-v4-flash` (`410 retired`, 2026-09-25) — он был
+запасной моделью, и на исчерпанном лимите прогон уходил на неё и падал целиком. Замер
+`pr-review-probe-models` (2026-10-09; `mistral-large-4` проверялся как кандидат на verifier,
+но verifier остался `deepseek-v4-pro`):
+
+| Модель | `low` | `none` | Годна на JSON-роль |
+|--------|-------|--------|--------------------|
+| `deepseek-v4.1-flash` | JSON ok (~0.9 с) | JSON ok (~0.6 с) | да |
+| `mistral-large-4` | JSON ok, **медленно** (11–18 с, ~1000 токенов рассуждения) | JSON в ```` ```json ```` (~1.2–1.6 с) — `extractJsonObject` снимает обёртку | да |
 
 Оба GLM 5.3 на `none` игнорируют `response_format: json_object` и уходят в развёрнутую прозу.
 Поэтому они стоят на specialist-ролях (prose) и **не** назначаются агрегатором/верификатором:

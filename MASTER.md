@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:2d0fadddfb13`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:92a147d57c54`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -112,7 +112,7 @@ graph TD
 
 ### Аудит RFC 14
 - **Описание:** независимый разбор карточек символов после включения по умолчанию: находки со статусами, методология решений, вектор развития.
-- **Ссылка:** `📁 docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md | 🗃️ doc:docs_dev_audit_2026-10-09-rfc-14-symbol-cards_md | 🔑 sha:49e489d153b4`
+- **Ссылка:** `📁 docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md | 🗃️ doc:docs_dev_audit_2026-10-09-rfc-14-symbol-cards_md | 🔑 sha:7f218e9307a0`
 - **Статус:** `🟢 VERIFIED`
 
 ### Замер косвенных признаков
@@ -137,7 +137,7 @@ graph TD
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:151c94e3219e`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:d2f79d6d2084`
 - **Статус:** `🟢 VERIFIED`
 
 ### README

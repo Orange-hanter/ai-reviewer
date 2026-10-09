@@ -85,7 +85,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `MOA_REFERENCE_MAX_TOKENS` | `6000` | Потолок ответа advisor'а. Страховка под лимит «не более 8 пунктов» из промпта роли (RFC 04) |
 | `OLLAMA_MODEL` | `kimi-k2.7-code` | Одиночная модель (consensus) |
 | `OLLAMA_MODELS` | — | Consensus mode: список моделей |
-| `OLLAMA_MODELS_FALLBACK` | `deepseek-v4-flash` | Аварийная замена упавшей модели |
+| `OLLAMA_MODELS_FALLBACK` | `deepseek-v4.1-flash` | Аварийная замена упавшей модели |
 | `REVIEW_JSON_MODE` | `1` | JSON-mode для structured output |
 | `REVIEW_TEMPERATURE` | `0.4` | Consensus mode |
 | `REVIEW_SEED` | `7` | Детерминизм (где поддерживается) |
