@@ -442,7 +442,7 @@ T08 замораживает сигнатуры трейтов до того, к
 | ✅ T11 | `github.rs`: `RealGithubClient: GithubApi` (14 методов) | `cargo test github::`, кейсы `test/github.test.mjs` |
 | ✅ T12 | `engine.rs`: `RealEngine: EngineApi` + `verify_findings` | `cargo test engine::`, кейсы `test/pr-review.engine.test.mjs` |
 | ✅ T13 | `graphify_client.rs`: индекс, blast-форматирование, спавн git+graphify | `cargo test graphify_client::` |
-| T14 | `astgrep.rs` + `prescan.rs`, embedded ruleset → `temp_dir()`, fail-open | `cargo test astgrep:: prescan::`; фикстуры `prescan-astgrep-xff`, `prescan-eslint-layer-block`; интеграционный тест с реальным `ast-grep` |
+| ✅ T14 | `astgrep.rs` + `prescan.rs`, embedded ruleset → `temp_dir()`, fail-open | `cargo test astgrep:: prescan::`; фикстуры `prescan-astgrep-xff`, `prescan-eslint-layer-block`; интеграционный тест с реальным `ast-grep` |
 | ✅ T15 | `blast_findings.rs`, `cost.rs`, `swarm.rs` — чистые порты | `cargo test blast_findings:: cost:: swarm::` |
 | ✅ T16 | `observability.rs` ← `lib/observability.mjs` | `cargo test observability::` |
 | T17 | `feedback.rs` ← `feedback-schema` + `feedback` (harvest через `GithubApi`) | `cargo test feedback::` |
