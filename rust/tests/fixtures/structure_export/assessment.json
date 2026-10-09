@@ -1,0 +1,79 @@
+{
+  "fingerprint": "aa02",
+  "temporalAlignment": "aligned",
+  "obligationsRevision": "7",
+  "hints": [
+    {
+      "priority": "medium",
+      "ruleId": "cov.gap",
+      "remediation": "Add test\r\nnow \\ ok",
+      "subjectRefs": [
+        "src/a.ts",
+        "x``y"
+      ],
+      "evidence": [
+        "ev:1"
+      ],
+      "missingEvidence": [
+        "mut|ation",
+        "lcov"
+      ]
+    }
+  ],
+  "assessments": {
+    "dataQuality": {
+      "unresolvedJoinRate": 0.12345
+    },
+    "codeCoverage": {
+      "totals": {
+        "lines": {
+          "hit": 3,
+          "found": 4
+        },
+        "functions": {
+          "hit": 1,
+          "found": 2
+        },
+        "branches": {
+          "hit": 0,
+          "found": 1
+        }
+      }
+    },
+    "contractScenarios": [
+      {
+        "obligationRef": "obl:1",
+        "kind": "happy_path",
+        "status": "covered",
+        "contractRefs": [
+          "c:1",
+          null,
+          "c:2"
+        ],
+        "statusReason": "ok `x`"
+      }
+    ],
+    "dependencyRisk": {
+      "highFanIn": [
+        {
+          "entityRef": "e1",
+          "fanIn": 5,
+          "executionStatus": "executed",
+          "crossBoundaryCallers": 2
+        },
+        {
+          "entityRef": "e2",
+          "fanIn": 3,
+          "executionStatus": "unavailable",
+          "crossBoundaryCallers": 0
+        },
+        {
+          "entityRef": "zz",
+          "fanIn": 1.5,
+          "executionStatus": null,
+          "crossBoundaryCallers": 1
+        }
+      ]
+    }
+  }
+}

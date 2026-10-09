@@ -1,0 +1,46 @@
+{
+  "generatedAt": "2026-09-03T12:00:00.000Z",
+  "fingerprint": "ff01",
+  "provenance": {
+    "headSha": "abc123",
+    "branchRef": "main",
+    "graphStatus": "ok",
+    "truncated": true
+  },
+  "facts": {
+    "entities": [
+      {
+        "observedId": "e1",
+        "label": "validate()"
+      },
+      {
+        "observedId": "e2",
+        "label": ""
+      },
+      {
+        "observedId": "e1",
+        "label": "validate2()"
+      }
+    ],
+    "boundaries": [
+      {
+        "kind": "module",
+        "name": "auth|core",
+        "paths": [
+          "src/auth",
+          "src/`x`"
+        ]
+      },
+      {
+        "kind": "layer",
+        "name": "ui"
+      }
+    ],
+    "dependencies": [
+      1,
+      2,
+      3
+    ],
+    "n": 1.5e-7
+  }
+}
