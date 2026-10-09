@@ -1,0 +1,38 @@
+{
+  "id": "orakul-65-fix-cp2-flattened-layout-headless-provis",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": "#65 «fix(cp2): прод-пути провижининга (flattened layout) + headless provision CLI (#65)» — дефект, который потом исправил #68",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "8137048c96e5fa32ab3ab1871689c0bad3a7ade2",
+    "base": "ddf1d1b735bb922a50425237bf8cd116e893d353",
+    "ref": "#65",
+    "fixes": [
+      {
+        "sha": "dce7c474c2a942cc87727b0935bb99c711ac32c9",
+        "ref": "#68",
+        "title": "fix(cp2): валидация на проде — envsubst чистит только наши плейсхолдеры + created_by=NULL (#68)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 85 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: createProvisioningJob"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/ops/provision-tenant-cli.ts",
+        "lines": [
+          56,
+          56
+        ]
+      }
+    ]
+  }
+}

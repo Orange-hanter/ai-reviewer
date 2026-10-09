@@ -1,0 +1,35 @@
+{
+  "id": "gateway-a26b09ca-add-example-adapter-configuration-and-gr",
+  "type": "tp",
+  "tags": [],
+  "description": " «Add example adapter configuration and gRPC server implementation» — дефект, который потом исправил e9ac4d6e",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "a26b09ca8f0a4819c794d3b9efeabd7160c3892b",
+    "base": "103bedfd1678f371d381a31d0cacc577369a0fc8",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "e9ac4d6e65410e72338531f1a1c33ff42bee66d8",
+        "ref": null,
+        "title": "fix(config): adapter-runtime and api-gateway both defaulted to :9093"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 430 строк в 8 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "deploy/adapter-runtime.example.yaml",
+        "lines": [
+          17,
+          17
+        ]
+      }
+    ]
+  }
+}

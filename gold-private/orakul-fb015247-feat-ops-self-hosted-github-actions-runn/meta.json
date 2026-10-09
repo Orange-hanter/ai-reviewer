@@ -1,0 +1,47 @@
+{
+  "id": "orakul-fb015247-feat-ops-self-hosted-github-actions-runn",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(ops): self-hosted GitHub Actions runners on Hermes VPS» — дефект, который потом исправил 1e6a2358, 5e8a8d07",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "fb01524744b1566d92c65b1056bc4ea71f7545f7",
+    "base": "b76f8671b037d05f626c7c2168411e0f922c1e9d",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "1e6a23584295cae41fd42430285e86d717f78acb",
+        "ref": null,
+        "title": "fix(ops): deploy after CI via workflow_run, drop duplicate gate"
+      },
+      {
+        "sha": "5e8a8d072cbb6199a81a025e2964494ad3b76a03",
+        "ref": null,
+        "title": "fix(ops): run deploy SSH job on hermes-ci when self-hosted CI enabled"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 463 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/deploy.yml",
+        "lines": [
+          20,
+          20
+        ]
+      },
+      {
+        "file": ".github/workflows/deploy.yml",
+        "lines": [
+          74,
+          75
+        ]
+      }
+    ]
+  }
+}

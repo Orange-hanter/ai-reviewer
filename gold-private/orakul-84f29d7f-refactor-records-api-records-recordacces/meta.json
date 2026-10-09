@@ -1,0 +1,50 @@
+{
+  "id": "orakul-84f29d7f-refactor-records-api-records-recordacces",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": " «refactor(records): вынести слой доступа /api/records в recordAccess.ts (A-04)» — дефект, который потом исправил #516, #545",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "84f29d7f77446c29fb838d15281d72e2d5958d6e",
+    "base": "94a381fb0c0e725240adec9f52409598790f0b60",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "43b9e27ef2cda227a3b8c3cf5212e026419dd6f9",
+        "ref": "#516",
+        "title": "fix(pricing): довести unit-aware до серверных вызовов + точка запуска бэкафилла"
+      },
+      {
+        "sha": "576bc3d2c4f760e694cd5b4fee09972cba3eae95",
+        "ref": "#545",
+        "title": "fix(security): тип записи неизменяем — PUT /api/records не даёт подменить права сменой type"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 261 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: canWriteType"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/server/recordAccess.ts",
+        "lines": [
+          40,
+          41
+        ]
+      },
+      {
+        "file": "app/server/recordAccess.ts",
+        "lines": [
+          53,
+          53
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "coddoc-clean-159021be-feat-services-cod-022-revisionservice-re",
+  "type": "clean",
+  "description": " «feat(services): COD-022 — RevisionService.revert dispatch + plan staleness» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "159021bea12a4249b7eca838721f6e1ce338abe6",
+    "base": "426b33abbdd91b97913833e1a00a0048ed5c8982",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

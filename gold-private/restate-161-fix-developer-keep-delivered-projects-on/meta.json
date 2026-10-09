@@ -1,0 +1,35 @@
+{
+  "id": "restate-161-fix-developer-keep-delivered-projects-on",
+  "type": "tp",
+  "tags": [],
+  "description": "!161 «fix(developer): keep delivered projects on the public surface (#63)» — дефект, который потом исправил !163",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "ce8d8591d93c6de452d03bc4bbed114ff01d41e6",
+    "base": "ae33c9cb9045fd4aa27b5c3a49d342e8a6ce0c0c",
+    "ref": "!161",
+    "fixes": [
+      {
+        "sha": "e4efd1977cf421cfc88a18e014a5e6716b74884d",
+        "ref": "!163",
+        "title": "fix(developer): compare projects.status against the enum, not against text"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 195 строк в 9 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/developer/repositories/developer-projects.repository.ts",
+        "lines": [
+          47,
+          47
+        ]
+      }
+    ]
+  }
+}

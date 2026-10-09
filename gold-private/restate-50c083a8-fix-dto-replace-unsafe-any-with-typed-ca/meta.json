@@ -1,0 +1,42 @@
+{
+  "id": "restate-50c083a8-fix-dto-replace-unsafe-any-with-typed-ca",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(dto): replace unsafe any with typed casts in Transform decorators» — дефект, который потом исправил !67",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "50c083a869e0cf603e072ba139c4a34e62e9edbd",
+    "base": "ee1e7dbd4b63ad8cef2015e895eb27d2a571a458",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "37ba36f115b448469a09de38695f7bf9d7e8600e",
+        "ref": "!67",
+        "title": "fix(auth): align developer registration with agency — phone required (SPR-002)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 85 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/auth/dto/register-developer.dto.ts",
+        "lines": [
+          18,
+          18
+        ]
+      },
+      {
+        "file": "restate-api/src/auth/dto/register-developer.dto.ts",
+        "lines": [
+          46,
+          46
+        ]
+      }
+    ]
+  }
+}

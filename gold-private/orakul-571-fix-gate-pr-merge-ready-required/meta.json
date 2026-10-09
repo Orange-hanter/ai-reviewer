@@ -1,0 +1,49 @@
+{
+  "id": "orakul-571-fix-gate-pr-merge-ready-required",
+  "type": "tp",
+  "tags": [],
+  "description": "#571 «fix(gate): pr-merge-ready видит ОТСУТСТВУЮЩИЙ required-чек» — дефект, который потом исправил #576",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "58842a9af7d629254ef34cc5078b896e45c73b06",
+    "base": "30c0c59fb784e1813003e962e0dadd018e4d1a32",
+    "ref": "#571",
+    "fixes": [
+      {
+        "sha": "d6431b48b07a13cbea36d3ddc62b69cf9e767fbb",
+        "ref": "#576",
+        "title": "fix(gate): разбор gh pr checks — таб-разделители и три исхода вместо двух"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 238 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "ops/pr-merge-ready.sh",
+        "lines": [
+          68,
+          70
+        ]
+      },
+      {
+        "file": "ops/pr-merge-ready.sh",
+        "lines": [
+          79,
+          82
+        ]
+      },
+      {
+        "file": "ops/pr-merge-ready.sh",
+        "lines": [
+          164,
+          168
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "id": "restate-159-refactor-storage-one-media-presigning-im",
+  "type": "tp",
+  "tags": [],
+  "description": "!159 «refactor(storage): one media-presigning implementation, in the domain layer (#66)» — дефект, который потом исправил !171",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "7d31e0138205b749424d2529fe06c4ac9cdc4d79",
+    "base": "f56c96ba7057805f4a70ac41e949008a76957250",
+    "ref": "!159",
+    "fixes": [
+      {
+        "sha": "fc63b47651e6644e434f74dee58cbcc1cd4664e9",
+        "ref": "!171",
+        "title": "fix(projects): repair and constrain the media JSONB that 500s the catalog"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 590 строк в 13 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/infrastructure/storage/media-presign.service.ts",
+        "lines": [
+          68,
+          68
+        ]
+      },
+      {
+        "file": "restate-api/src/infrastructure/storage/media-presign.service.ts",
+        "lines": [
+          71,
+          71
+        ]
+      }
+    ]
+  }
+}

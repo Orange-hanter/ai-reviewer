@@ -1,0 +1,78 @@
+{
+  "id": "restate-5302311f-refactor-ci-extract-inline-pipeline-scri",
+  "type": "tp",
+  "tags": [],
+  "description": " «refactor(ci): extract inline pipeline scripts into tools/ci» — дефект, который потом исправил c250ecb8, d4fc0b88, 84bacbb0, 004a98af",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "5302311f77ecdb4f5cb4ae2f83d568d6834bb952",
+    "base": "eea22102b4418925da122c296eb8a2384bee3c33",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "c250ecb8f8ac6dca2bd1868e2facbf86df1281d5",
+        "ref": null,
+        "title": "fix: update smoke test login to use environment variables for credentials"
+      },
+      {
+        "sha": "d4fc0b883f43f900611bd9c3db2f4f93b89ac914",
+        "ref": null,
+        "title": "fix(deploy): set S3 public endpoint during full stack rebuild"
+      },
+      {
+        "sha": "84bacbb0389801671b45494117cb96489c41ef82",
+        "ref": null,
+        "title": "fix(ci): recover from postgres PG16→PG17 data mismatch on develop deploy"
+      },
+      {
+        "sha": "004a98af4eb8c0cb34adcd3d2c10a2d8770b2df4",
+        "ref": null,
+        "title": "fix(ci): fix smoke test jq path for /auth/me account_type"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 703 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          51,
+          53
+        ]
+      },
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          64,
+          64
+        ]
+      },
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          128,
+          128
+        ]
+      },
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          148,
+          148
+        ]
+      },
+      {
+        "file": "tools/ci/run-deploy-stub.sh",
+        "lines": [
+          9,
+          9
+        ]
+      }
+    ]
+  }
+}

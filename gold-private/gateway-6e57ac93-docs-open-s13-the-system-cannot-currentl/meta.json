@@ -1,0 +1,42 @@
+{
+  "id": "gateway-6e57ac93-docs-open-s13-the-system-cannot-currentl",
+  "type": "tp",
+  "tags": [],
+  "description": " «docs: open S13 — the system cannot currently report its own failure» — дефект, который потом исправил e9ac4d6e",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "6e57ac9363f99a55c1426b765ca23b8444a6b821",
+    "base": "90fbdec866c234e7fea4624d05d79d42e2f4c80c",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "e9ac4d6e65410e72338531f1a1c33ff42bee66d8",
+        "ref": null,
+        "title": "fix(config): adapter-runtime and api-gateway both defaulted to :9093"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 292 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "deploy/prometheus/prometheus.yml",
+        "lines": [
+          4,
+          4
+        ]
+      },
+      {
+        "file": "deploy/prometheus/prometheus.yml",
+        "lines": [
+          49,
+          56
+        ]
+      }
+    ]
+  }
+}

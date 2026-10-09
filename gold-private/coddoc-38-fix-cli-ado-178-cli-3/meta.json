@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-38-fix-cli-ado-178-cli-3",
+  "type": "tp",
+  "tags": [],
+  "description": "#38 «fix(cli): ADO-178 — CLI знал 3 статуса задачи из девяти» — дефект, который потом исправил #40",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "1d43628cb7cc19f3e4127ef2411af694cb3838dc",
+    "base": "bd7b45e336a73ea5dc614d47d19165513e59b01e",
+    "ref": "#38",
+    "fixes": [
+      {
+        "sha": "2df7abe8c4f9657c6e2a11328fe6d9db226d1617",
+        "ref": "#40",
+        "title": "fix(infra): ADO-182 — фильтр по статусу резал класс эквивалентности"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 173 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/cli/task.py",
+        "lines": [
+          88,
+          90
+        ]
+      }
+    ]
+  }
+}

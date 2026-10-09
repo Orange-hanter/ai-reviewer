@@ -1,0 +1,49 @@
+{
+  "id": "coddoc-e14c4b3d-feat-web-agent-console-live-event-stream",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(web): Agent Console (live event stream) + Routines redesign» — дефект, который потом исправил 758c3b54",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "e14c4b3d628d85dd91632cf5c0de3e411bf21398",
+    "base": "1d57efb0d216af5564a0fae55b5c8de60f853c73",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "758c3b543e28cf50424440554f3fd9978c5aaaa4",
+        "ref": null,
+        "title": "fix(ADO-028): web routines page на _cron_next_fire"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 629 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/web/pages/routines.py",
+        "lines": [
+          20,
+          20
+        ]
+      },
+      {
+        "file": "cod_doc/api/web/pages/routines.py",
+        "lines": [
+          23,
+          23
+        ]
+      },
+      {
+        "file": "cod_doc/api/web/pages/routines.py",
+        "lines": [
+          27,
+          27
+        ]
+      }
+    ]
+  }
+}

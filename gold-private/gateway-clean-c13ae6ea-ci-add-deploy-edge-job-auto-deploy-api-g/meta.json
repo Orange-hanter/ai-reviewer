@@ -1,0 +1,15 @@
+{
+  "id": "gateway-clean-c13ae6ea-ci-add-deploy-edge-job-auto-deploy-api-g",
+  "type": "clean",
+  "description": " «ci: add deploy-edge job — auto-deploy api-gateway + wizard on push to main» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "c13ae6ea517c71e1c672463a7fb57dcaf43ed89f",
+    "base": "ed2d489815e92675374d1c4716596bf9f8360689",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

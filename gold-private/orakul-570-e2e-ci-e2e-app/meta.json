@@ -1,0 +1,87 @@
+{
+  "id": "orakul-570-e2e-ci-e2e-app",
+  "type": "tp",
+  "tags": [],
+  "description": "#570 «e2e: прогон из CI + джоб E2E (app) на каждый пуш» — дефект, который потом исправил #573, #575, #577",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "30c0c59fb784e1813003e962e0dadd018e4d1a32",
+    "base": "d046b2fda2563e1cf1e64ebebc9a873d1ef190c8",
+    "ref": "#570",
+    "fixes": [
+      {
+        "sha": "6ab93132ba666ec47f54bfea2b284e27de2cfc05",
+        "ref": "#573",
+        "title": "ci: e2e — отдельный workflow, чтобы не блокировать деплой"
+      },
+      {
+        "sha": "1952fb2e0305119bc9940f9af3424532c6aaeda6",
+        "ref": "#575",
+        "title": "fix(ocr): не показывать оператору сырой текст ошибки провайдера"
+      },
+      {
+        "sha": "115325a3f0b98c7c9f70e61e24f00ad4281fa6d3",
+        "ref": "#577",
+        "title": "fix(e2e): две флаки починены, третья опровергла мою гипотезу"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 475 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          189,
+          193
+        ]
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          286,
+          295
+        ]
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          301,
+          324
+        ]
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          327,
+          370
+        ]
+      },
+      {
+        "file": "app/playwright.config.ts",
+        "lines": [
+          76,
+          81
+        ]
+      },
+      {
+        "file": "app/playwright.config.ts",
+        "lines": [
+          91,
+          91
+        ]
+      },
+      {
+        "file": "app/playwright.config.ts",
+        "lines": [
+          106,
+          115
+        ]
+      }
+    ]
+  }
+}

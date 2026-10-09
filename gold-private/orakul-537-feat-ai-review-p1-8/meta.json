@@ -1,0 +1,77 @@
+{
+  "id": "orakul-537-feat-ai-review-p1-8",
+  "type": "tp",
+  "tags": [],
+  "description": "#537 «feat(ai-review): стабильность набора находок как измеримая метрика (P1 #8)» — дефект, который потом исправил #540",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "8e895845d7aa64f175e19ffc04e6101675b570ed",
+    "base": "b57acc17284cdeb8b0261dfdece11d1938062efe",
+    "ref": "#537",
+    "fixes": [
+      {
+        "sha": "953ac222eb01c2b5f7555aeb74190f91ddcc63d1",
+        "ref": "#540",
+        "title": "fix(ai-review): идентичность находки против идентичности точки кода"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 294 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "ops/pr-review/lib/metrics.mjs",
+        "lines": [
+          158,
+          158
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          189,
+          195
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          205,
+          208
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          237,
+          237
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          323,
+          323
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          441,
+          441
+        ]
+      },
+      {
+        "file": "ops/pr-review/pipeline.mjs",
+        "lines": [
+          571,
+          571
+        ]
+      }
+    ]
+  }
+}

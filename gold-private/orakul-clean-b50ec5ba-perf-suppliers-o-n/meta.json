@@ -1,0 +1,15 @@
+{
+  "id": "orakul-clean-b50ec5ba-perf-suppliers-o-n",
+  "type": "clean",
+  "description": " «perf(suppliers): привязка к складу — кэш токенов + индекс аналогов O(N²)→блокинг» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "b50ec5baceadab0cb61c48ecf65485d7ff9898f3",
+    "base": "7be3097225546a67ed76d26c1dcc8e87e1fc29e2",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

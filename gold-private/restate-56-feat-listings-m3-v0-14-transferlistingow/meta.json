@@ -1,0 +1,49 @@
+{
+  "id": "restate-56-feat-listings-m3-v0-14-transferlistingow",
+  "type": "tp",
+  "tags": [],
+  "description": "!56 «feat(listings): M3 v0.14 — transferListingOwnership (LST-022)» — дефект, который потом исправил !78",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "ba91f3bfb52ce1981b0c2081936b74a2b08be0b1",
+    "base": "7c61d4383f8e12cbba2a23addf10f8a92f623ce6",
+    "ref": "!56",
+    "fixes": [
+      {
+        "sha": "13c9e58c79a98925baf4cb81e37daad54b142d61",
+        "ref": "!78",
+        "title": "fix(listings): M3 v0.17 — audit hotfixes (C1+C2+H1+M2 + FK migration)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 651 строк в 9 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/listings/repositories/listing-ownership.repository.ts",
+        "lines": [
+          25,
+          25
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-ownership.repository.ts",
+        "lines": [
+          105,
+          105
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-ownership.repository.ts",
+        "lines": [
+          109,
+          109
+        ]
+      }
+    ]
+  }
+}

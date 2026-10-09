@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-9cb37b91-refactor-services-rfl-011-split-link-ser",
+  "type": "tp",
+  "tags": [],
+  "description": " «refactor(services): RFL-011 — split link_service.py into a package» — дефект, который потом исправил 47ce9f2b",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "9cb37b914c98cb3b51bb5df615ac24d524b0aef0",
+    "base": "516ffc034bc529bda8ec12a5d5c428d2cc8806c1",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "47ce9f2bfcce1d0bc9a5257df56add8a135b9246",
+        "ref": null,
+        "title": "fix: COD-079 — render markdown tables, auto-sync section links, link backfill CLI"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 775 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/link_service/rename_cascade.py",
+        "lines": [
+          131,
+          131
+        ]
+      }
+    ]
+  }
+}

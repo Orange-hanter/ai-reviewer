@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-25-perf-web-590-150-view-document-body-lega",
+  "type": "tp",
+  "tags": [],
+  "description": "#25 «perf(web): страница проекта — 590 → 150 мс (view document_body + legacy tasks.yaml)» — дефект, который потом исправил #87",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "1b38b101083ca98580ce7bd163f6a9118f9e5140",
+    "base": "807f405b2405990002d3f6e998ed4f1cfc514a89",
+    "ref": "#25",
+    "fixes": [
+      {
+        "sha": "3840646e8a2bb24bf0e9acd2b228deb670b333f9",
+        "ref": "#87",
+        "title": "fix(services): ADO-078 — cancelled уходит из remaining, но не в done (#87)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 305 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/web/pages/project.py",
+        "lines": [
+          61,
+          61
+        ]
+      }
+    ]
+  }
+}

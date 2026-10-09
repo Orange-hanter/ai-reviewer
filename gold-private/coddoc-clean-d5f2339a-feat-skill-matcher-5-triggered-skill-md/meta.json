@@ -1,0 +1,15 @@
+{
+  "id": "coddoc-clean-d5f2339a-feat-skill-matcher-5-triggered-skill-md",
+  "type": "clean",
+  "description": " «feat: skill matcher + 5 triggered SKILL.md catalog (PCA-002 / PCA-004)» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "d5f2339acbcc2830f01d892141ada7931f0db33f",
+    "base": "fdabcae00a22d0fa4bd99ab1ad28eae7beac2ae8",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

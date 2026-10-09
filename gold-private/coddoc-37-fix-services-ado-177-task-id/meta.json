@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-37-fix-services-ado-177-task-id",
+  "type": "tp",
+  "tags": [],
+  "description": "#37 «fix(services): ADO-177 — автонумерация task_id считала максимум по плану» — дефект, который потом исправил #120",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "db73f7487fb2393ecf9a23c14a94ae05b99755be",
+    "base": "b3b1528ce19ddf2d2b010245b2ba6bb6bb81409d",
+    "ref": "#37",
+    "fixes": [
+      {
+        "sha": "d36b9d9301654b2c17562e26b4e696220fbf81bd",
+        "ref": "#120",
+        "title": "fix(tasks): AFT-011 — task_create: префикс из плана, занятый ID без сырого IntegrityError, ретрай авто-ID (#120)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 114 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/task_service.py",
+        "lines": [
+          235,
+          235
+        ]
+      }
+    ]
+  }
+}

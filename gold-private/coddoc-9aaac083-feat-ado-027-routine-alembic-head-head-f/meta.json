@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-9aaac083-feat-ado-027-routine-alembic-head-head-f",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(ADO-027): routine-чек alembic_head — рабочая БД на head-миграции (F1)» — дефект, который потом исправил #113",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "9aaac083ff70c4150f935d4425a54637aba81ee7",
+    "base": "6cdbe4c4fd8bd059f453fd1c72eeefa2cfcd7d71",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "2766e4def0d67505e2df43f7764aede89240bc88",
+        "ref": "#113",
+        "title": "fix(domain): ADO-218 — DocumentStatus учит resolved и done (#113)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 70 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/routine_service.py",
+        "lines": [
+          330,
+          330
+        ]
+      }
+    ]
+  }
+}

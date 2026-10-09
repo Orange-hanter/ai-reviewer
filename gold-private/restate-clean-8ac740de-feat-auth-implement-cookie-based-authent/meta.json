@@ -1,0 +1,15 @@
+{
+  "id": "restate-clean-8ac740de-feat-auth-implement-cookie-based-authent",
+  "type": "clean",
+  "description": " «feat(auth): implement cookie-based authentication with JWT tokens» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "8ac740de2aeab1a577a0dba1df46f96037899d7a",
+    "base": "07441db76e2fdd94d823a005c05925cc997c3559",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

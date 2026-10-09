@@ -1,0 +1,15 @@
+{
+  "id": "restate-clean-102-feat-listings-close-section-e-docs-tests",
+  "type": "clean",
+  "description": "!102 «feat(listings): close Section E docs+tests — LST-047 OpenAPI + LST-044 cover-photo invariant» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "ed1988a0c3ec2a8054599d39e95cc8bb41325a27",
+    "base": "a51d5c465a20e2d1fdf803ff34eb3f3fa0d070f3",
+    "ref": "!102"
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

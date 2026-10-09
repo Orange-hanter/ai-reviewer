@@ -1,0 +1,35 @@
+{
+  "id": "restate-197-test-partner-bridge-contract-tests-front",
+  "type": "tp",
+  "tags": [],
+  "description": "!197 «test(partner-bridge): contract tests + frontend guide (PBR-043, PBR-044)» — дефект, который потом исправил !204",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "dc6c66dada8f01d20c0aac12fac28e0f69df02d3",
+    "base": "e1769049bd8d95cd0a71f382ced81e9d27a0cedc",
+    "ref": "!197",
+    "fixes": [
+      {
+        "sha": "24646bd1d12c828e4d9dcb77f1de605b09982b3e",
+        "ref": "!204",
+        "title": "fix(partner-bridge): sign counterparty logos in summaries and the partners list"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 491 строк в 9 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/partner-bridge/dto/partner-analytics.dto.ts",
+        "lines": [
+          150,
+          150
+        ]
+      }
+    ]
+  }
+}

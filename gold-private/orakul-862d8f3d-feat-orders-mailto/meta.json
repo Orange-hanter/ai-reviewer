@@ -1,0 +1,38 @@
+{
+  "id": "orakul-862d8f3d-feat-orders-mailto",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": " «feat(orders): «Отправить все», переотправка из карточки заявки, mailto-лимит» — дефект, который потом исправил #74",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "862d8f3dcff3ace40fc46b0198a7cf300507c112",
+    "base": "a371c6c8a0dd4b931bb01dafe1fcb59d5abdd0a8",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "8766b7779b947a64d59ba9ab61ccf58167011597",
+        "ref": "#74",
+        "title": "feat(pilot): #42 клик по аномалии, #22 статус интеграций, #7 разбор аномалий"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 380 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: nplural"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/orders/OrderFromStock.tsx",
+        "lines": [
+          311,
+          311
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "orakul-287-feat-schedule-now-today-287",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": "#287 «feat(schedule): ростер-борд — единый цвет цеха, дневной таймлайн с now-линией, today-рейл, покрытие, разгруженная навигация (#287)» — дефект, который потом исправил #503",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "a996f96c767f21f6c1e48a024ea786f25f74bb15",
+    "base": "af47c11e452904af6056bdfecbd52a846711b870",
+    "ref": "#287",
+    "fixes": [
+      {
+        "sha": "8ad12d6520fb63db96a770efe6be4b8dc5763054",
+        "ref": "#503",
+        "title": "fix(staff): кривая сетка расписания — DndContext вне table (#194)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 272 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: isWeekendIso"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/tabs/StaffTab/ScheduleGridView.tsx",
+        "lines": [
+          372,
+          372
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/StaffTab/ScheduleGridView.tsx",
+        "lines": [
+          376,
+          377
+        ]
+      }
+    ]
+  }
+}

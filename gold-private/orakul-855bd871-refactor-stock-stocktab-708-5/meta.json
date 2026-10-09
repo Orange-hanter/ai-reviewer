@@ -1,0 +1,76 @@
+{
+  "id": "orakul-855bd871-refactor-stock-stocktab-708-5",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": " «refactor(stock): декомпозиция StockTab 708→5 файлов (папка-на-таб)» — дефект, который потом исправил 9da57542, #74, #494",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "855bd871646563efe5ca23e48399c4572b4914f4",
+    "base": "3521bc67f0e1b8738ca258bec47aa7165f5f72b9",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "9da57542cc2121c19659a00eb089d5f85df9ffff",
+        "ref": null,
+        "title": "fix(home): перенос «Заказать отсутствующие» на дашборд + фикс задвоения числа"
+      },
+      {
+        "sha": "8766b7779b947a64d59ba9ab61ccf58167011597",
+        "ref": "#74",
+        "title": "feat(pilot): #42 клик по аномалии, #22 статус интеграций, #7 разбор аномалий"
+      },
+      {
+        "sha": "5f77821887d477b6afb4693320cef7b11f9ce7d8",
+        "ref": "#494",
+        "title": "fix(stock): clarify product cards and category hierarchy (#17)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 771 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: nplural, productHasLabel"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/tabs/StockTab/index.tsx",
+        "lines": [
+          180,
+          180
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/StockTab/useStockActions.ts",
+        "lines": [
+          89,
+          89
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/StockTab/useStockData.ts",
+        "lines": [
+          53,
+          53
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/StockTab/useStockData.ts",
+        "lines": [
+          128,
+          128
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/StockTab/useStockData.ts",
+        "lines": [
+          135,
+          135
+        ]
+      }
+    ]
+  }
+}

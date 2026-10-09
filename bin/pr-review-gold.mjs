@@ -4,14 +4,15 @@
 // Запуск: OLLAMA_API_KEY=… npx pr-review-gold [--case <id>] [--jsonl out.jsonl]
 // Каталог набора — REVIEW_GOLD_DIR; диффы публичных кейсов тянутся по пину в REVIEW_GOLD_CACHE.
 // Blast-radius в gold-прогонах заглушен (детерминизм; на находки влияет слабо).
-import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadReviewConfig } from '../lib/config.mjs';
 import { createReviewPipeline } from '../pipeline.mjs';
 import { MARKERS } from '../lib/constants.mjs';
 import { scoreGoldCase } from '../lib/benchmark.mjs';
-import { ensureCaseDiff } from '../lib/gold-fetch.mjs';
+import { ensureCaseDiff, localRepoPath } from '../lib/gold-fetch.mjs';
+import { spawn } from 'node:child_process';
 import { buildGraphIndex } from '../lib/graphify.mjs';
 
 const GOLD_DIR = process.env.REVIEW_GOLD_DIR
@@ -38,16 +39,52 @@ async function goldGraphIndex(cfg) {
   return graphIndexCache;
 }
 
+/** Граф Graphify внутри дерева кейса (`.graphify/graphify-out/graph.json`), если его построили. */
+async function treeGraphIndex(tree) {
+  try {
+    return buildGraphIndex(JSON.parse(await readFile(join(tree, '.graphify/graphify-out/graph.json'), 'utf8')));
+  } catch { return null; }
+}
+
 function footerFindings(text) {
   const m = MARKERS.dataRe.exec(text);
   if (!m) return [];
   try { return JSON.parse(m[1].trim()).findings || []; } catch { return []; }
 }
 
+/**
+ * Дерево проекта на коммите кейса — для кейсов из своих репозиториев (`source.local`).
+ * Без него пайплайн читает файлы PR из каталога ai-reviewer: окон контекста нет, карточкам
+ * нечего читать, и прогон меряет не тот вход, что получил бы живой PR (аудит RFC 14, 0.3).
+ * `git archive`, а не `git worktree add`: в клонах пользователя не остаётся записей о worktree.
+ * REVIEW_GOLD_CHECKOUT=0 — по-старому, без дерева.
+ */
+async function caseTree(meta) {
+  if (!meta?.source?.local || process.env.REVIEW_GOLD_CHECKOUT === '0') return null;
+  const repo = localRepoPath(meta);
+  const tree = join(CACHE_DIR, 'trees', `${meta.id}.${String(meta.source.sha).slice(0, 12)}`);
+  const done = join(tree, '.gold-tree-ok');
+  try { await access(done); return tree; } catch { /* развернуть */ }
+  await mkdir(tree, { recursive: true });
+  await new Promise((ok, fail) => {
+    const archive = spawn('git', ['-C', repo, 'archive', '--format=tar', meta.source.sha]);
+    const tar = spawn('tar', ['-x', '-C', tree]);
+    archive.stdout.pipe(tar.stdin);
+    let err = '';
+    archive.stderr.on('data', (d) => { err += d; });
+    tar.on('close', (code) => (code === 0 ? ok() : fail(new Error(`tar ${code}: ${err.slice(0, 200)}`))));
+    archive.on('error', fail);
+    tar.on('error', fail);
+  });
+  await writeFile(done, `${meta.source.sha}\n`, 'utf8');
+  return tree;
+}
+
 async function runCase(id) {
   const dir = join(GOLD_DIR, id);
   const meta = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8'));
   const diff = await ensureCaseDiff(dir, meta, { cacheDir: CACHE_DIR });
+  const tree = await caseTree(meta);
   const env = {
     ...process.env,
     // REVIEW_GOLD_OBSERVABILITY_DIR — JSONL прогона (токены, plan.symbolCards) для сравнения
@@ -59,21 +96,28 @@ async function runCase(id) {
     REVIEW_AUTO_TRIAGE: '0',
   };
   const cfg = loadReviewConfig(env, { dryRun: true, diffFile: diff.path, repo: '', prNumber: 0 });
+  // Граф для карточек: у кейса со своим деревом — только граф внутри дерева (если его там
+  // построили), общий REVIEW_GOLD_GRAPH относится к другому коду.
+  const graphIndex = !cfg.limits.symbolCards ? null
+    : tree ? await treeGraphIndex(tree) : await goldGraphIndex(cfg);
   const captured = [];
   const origLog = console.log;
   console.log = (...a) => { captured.push(a.join(' ')); };
   const t0 = Date.now();
+  const cwd0 = process.cwd();
   let code;
   try {
+    if (tree) process.chdir(tree);
     const pipeline = createReviewPipeline(cfg, {
       // Blast-radius заглушен, но при карточках символов (RFC 14) индекс графа нужен — без
       // него сравнение REVIEW_SYMBOL_CARDS=0/1 дало бы два одинаковых прогона.
-      graphify: { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex: cfg.limits.symbolCards ? await goldGraphIndex(cfg) : null }) },
+      graphify: { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex }) },
       die: (m) => { throw new Error(`die: ${m}`); },
     });
     code = await pipeline.run();
   } finally {
     console.log = origLog;
+    if (tree) process.chdir(cwd0);
   }
   return {
     meta,
@@ -81,6 +125,7 @@ async function runCase(id) {
     findings: footerFindings(captured.join('\n')),
     wallMs: Date.now() - t0,
     diffSource: diff.source,
+    tree: Boolean(tree),
   };
 }
 

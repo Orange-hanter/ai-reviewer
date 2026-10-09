@@ -1,0 +1,96 @@
+{
+  "id": "coddoc-7185897e-feat-section-f-consolidation-8-backlog-f",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat: Section F consolidation — 8 backlog findings closed» — дефект, который потом исправил 1c66f380, a8baa34b",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "7185897ea87a96287f36f030959e59e0bf9641f6",
+    "base": "b392535b83fee13d2cf22076253a444b662e54cb",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "1c66f380fd005d050bab9464d766e0e1a2894d9f",
+        "ref": null,
+        "title": "fix(ADO-028): полный cron-парсинг в routine tick — next-fire вместо интервала (F2)"
+      },
+      {
+        "sha": "a8baa34b7912e041305189c5769de8dbc03389ed",
+        "ref": null,
+        "title": "fix(ADO-055): import_or_update_markdown больше не глотает падения patch/add_section — warning + CoercedField в report"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 560 строк в 9 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/routine_service.py",
+        "lines": [
+          473,
+          481
+        ]
+      },
+      {
+        "file": "cod_doc/services/routine_service.py",
+        "lines": [
+          485,
+          491
+        ]
+      },
+      {
+        "file": "cod_doc/services/routine_service.py",
+        "lines": [
+          498,
+          500
+        ]
+      },
+      {
+        "file": "cod_doc/services/routine_service.py",
+        "lines": [
+          516,
+          516
+        ]
+      },
+      {
+        "file": "cod_doc/services/routine_service.py",
+        "lines": [
+          526,
+          526
+        ]
+      },
+      {
+        "file": "cod_doc/services/import_service.py",
+        "lines": [
+          239,
+          239
+        ]
+      },
+      {
+        "file": "cod_doc/services/import_service.py",
+        "lines": [
+          252,
+          253
+        ]
+      },
+      {
+        "file": "cod_doc/services/import_service.py",
+        "lines": [
+          258,
+          263
+        ]
+      },
+      {
+        "file": "cod_doc/services/import_service.py",
+        "lines": [
+          267,
+          272
+        ]
+      }
+    ]
+  }
+}

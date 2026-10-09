@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-1c2d2f85-feat-services-cod-010-docservice-create",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(services): COD-010 — DocService (create/get/patch_section)» — дефект, который потом исправил ff7f92cc",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "1c2d2f856050bad46818615ccc32da808a2be348",
+    "base": "c8291cc1f617ffa2f674b9d9a7146d1754bddfdf",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "ff7f92ccf53b1c36e092e9df78fae66afc5e24f8",
+        "ref": null,
+        "title": "fix(security): SD-100 — path traversal in document export"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 641 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/doc_service.py",
+        "lines": [
+          110,
+          110
+        ]
+      }
+    ]
+  }
+}

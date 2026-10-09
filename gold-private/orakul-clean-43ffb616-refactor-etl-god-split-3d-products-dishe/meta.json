@@ -1,0 +1,15 @@
+{
+  "id": "orakul-clean-43ffb616-refactor-etl-god-split-3d-products-dishe",
+  "type": "clean",
+  "description": " «refactor(etl): god-split #3d — products/dishes/dish-sales → server/etl/queries.js» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "43ffb616f819d7c8589a6d7ea0b62612d2df6bf7",
+    "base": "abd0e4b16425768a462123dc8a41af6ee4fc2bfd",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

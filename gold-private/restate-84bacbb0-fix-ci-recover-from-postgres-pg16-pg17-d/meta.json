@@ -1,0 +1,56 @@
+{
+  "id": "restate-84bacbb0-fix-ci-recover-from-postgres-pg16-pg17-d",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(ci): recover from postgres PG16→PG17 data mismatch on develop deploy» — дефект, который потом исправил 87d47b74",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "84bacbb0389801671b45494117cb96489c41ef82",
+    "base": "0ead8da49bfaeff980f4c69e8d036a13c97a6086",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "87d47b74e2c0d61d5df7a82b7992a6e5e747791a",
+        "ref": null,
+        "title": "fix(ci): detect api migration checksum drift in deploy recovery"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 44 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          61,
+          61
+        ]
+      },
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          64,
+          66
+        ]
+      },
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          84,
+          84
+        ]
+      },
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          88,
+          88
+        ]
+      }
+    ]
+  }
+}

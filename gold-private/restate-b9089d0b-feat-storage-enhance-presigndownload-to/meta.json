@@ -1,0 +1,49 @@
+{
+  "id": "restate-b9089d0b-feat-storage-enhance-presigndownload-to",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(storage): enhance presignDownload to handle comma-joined keys and improve key extraction logic» — дефект, который потом исправил ea256048",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "b9089d0b1d616d96889f0dd5c2d7954382ce007f",
+    "base": "c250ecb8f8ac6dca2bd1868e2facbf86df1281d5",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "ea256048667ca1df3c0302d9379d31aa8fac3635",
+        "ref": null,
+        "title": "fix(storage): split admin vs ownership presign-download flows (AGN-065)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 104 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/infrastructure/storage/storage.controller.ts",
+        "lines": [
+          140,
+          140
+        ]
+      },
+      {
+        "file": "restate-api/src/infrastructure/storage/storage.controller.ts",
+        "lines": [
+          170,
+          170
+        ]
+      },
+      {
+        "file": "restate-api/src/infrastructure/storage/storage.controller.ts",
+        "lines": [
+          186,
+          186
+        ]
+      }
+    ]
+  }
+}

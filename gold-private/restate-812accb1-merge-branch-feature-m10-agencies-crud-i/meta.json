@@ -1,0 +1,35 @@
+{
+  "id": "restate-812accb1-merge-branch-feature-m10-agencies-crud-i",
+  "type": "tp",
+  "tags": [],
+  "description": " «Merge branch 'feature/M10-agencies-crud' into develop» — дефект, который потом исправил f42c595c",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "812accb1cc1ba80c277405022f512f0a1575b5a7",
+    "base": "fc2c5bad939b0d4a693a2c3ad807d1370b223c2a",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "f42c595cd9443c93b856e6faf7e5a4343db9982f",
+        "ref": null,
+        "title": "fix(e2e): resolve 33 failing tests — schema gaps, RBAC, enum casts, race conditions"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 382 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/auth/repositories/agency.repository.ts",
+        "lines": [
+          38,
+          38
+        ]
+      }
+    ]
+  }
+}

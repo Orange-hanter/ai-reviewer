@@ -1,0 +1,42 @@
+{
+  "id": "restate-fc2c5bad-merge-branch-feature-m1-auth-2fa-infra-i",
+  "type": "tp",
+  "tags": [],
+  "description": " «Merge branch 'feature/M1-auth-2fa-infra' into develop» — дефект, который потом исправил !64",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "fc2c5bad939b0d4a693a2c3ad807d1370b223c2a",
+    "base": "3959f995387e9939008356b38a28cdb290b3b9e5",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "1c7d45bb09397b54159754490401c350492a8961",
+        "ref": "!64",
+        "title": "fix(notifications): surface SMTP + broker errors instead of swallowing (SPR-004)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 340 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/shared/adapters/notification.publisher.ts",
+        "lines": [
+          44,
+          51
+        ]
+      },
+      {
+        "file": "restate-api/src/shared/ports/notification.publisher.port.ts",
+        "lines": [
+          31,
+          32
+        ]
+      }
+    ]
+  }
+}

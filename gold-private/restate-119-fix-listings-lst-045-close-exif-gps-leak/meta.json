@@ -1,0 +1,96 @@
+{
+  "id": "restate-119-fix-listings-lst-045-close-exif-gps-leak",
+  "type": "tp",
+  "tags": [],
+  "description": "!119 «fix(listings): LST-045 — close EXIF GPS-leak when the strip fails» — дефект, который потом исправил !120, !123",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "3f0d0cd0f492066a4470216fb2f08726cce8ac95",
+    "base": "01ae74ac6002f2428448bb4f117ee968ef609288",
+    "ref": "!119",
+    "fixes": [
+      {
+        "sha": "2d8d2501b682cd1d23106186c89d41860d7b0a21",
+        "ref": "!120",
+        "title": "fix(listings): LST-045 — gate pending photos out of the public media mirror"
+      },
+      {
+        "sha": "f051454de9921c3f0f79938695ef5ab6ee9d9d23",
+        "ref": "!123",
+        "title": "fix(listings): #41 — media_urls is photos-only (no non-photo pollution)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 161 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/listings/repositories/listing-media.repository.ts",
+        "lines": [
+          16,
+          20
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-media.repository.ts",
+        "lines": [
+          30,
+          30
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-media.repository.ts",
+        "lines": [
+          164,
+          164
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-media.repository.ts",
+        "lines": [
+          169,
+          169
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-media.repository.ts",
+        "lines": [
+          174,
+          174
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-media.repository.ts",
+        "lines": [
+          232,
+          233
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-media.repository.ts",
+        "lines": [
+          237,
+          237
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-media.repository.ts",
+        "lines": [
+          241,
+          241
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listing-media.repository.ts",
+        "lines": [
+          245,
+          245
+        ]
+      }
+    ]
+  }
+}

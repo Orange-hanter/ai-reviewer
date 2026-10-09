@@ -1,0 +1,63 @@
+{
+  "id": "restate-122-feat-listings-dynamic-storefront-filter",
+  "type": "tp",
+  "tags": [],
+  "description": "!122 «feat(listings): dynamic storefront filter metadata — facets + field catalog» — дефект, который потом исправил !174",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "135a1c317a9ba36dd5259c9789da291b6da61ed6",
+    "base": "31b668ad795310b97509793773eb87a9f5dd427e",
+    "ref": "!122",
+    "fixes": [
+      {
+        "sha": "f6c5e4f874aa4788aafcdf743e5b2e5f8f89a89d",
+        "ref": "!174",
+        "title": "fix(listings): scope catalog facets by market type, count projects not units (#79)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 311 строк в 10 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/listings/repositories/listings.repository.ts",
+        "lines": [
+          780,
+          780
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listings.repository.ts",
+        "lines": [
+          795,
+          795
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listings.repository.ts",
+        "lines": [
+          798,
+          798
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listings.repository.ts",
+        "lines": [
+          801,
+          801
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listings.repository.ts",
+        "lines": [
+          804,
+          809
+        ]
+      }
+    ]
+  }
+}

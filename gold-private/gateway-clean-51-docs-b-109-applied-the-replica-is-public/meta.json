@@ -1,0 +1,15 @@
+{
+  "id": "gateway-clean-51-docs-b-109-applied-the-replica-is-public",
+  "type": "clean",
+  "description": "#51 «docs: B-109 applied — the replica is public, and what the rollout cost (#51)» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "03d71d0f8b071935876b41ac5a13bb1a23777415",
+    "base": "4a93df85ed70a6368e5a8bc944f5e33a800b6411",
+    "ref": "#51"
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

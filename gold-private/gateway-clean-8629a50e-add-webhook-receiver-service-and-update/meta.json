@@ -1,0 +1,15 @@
+{
+  "id": "gateway-clean-8629a50e-add-webhook-receiver-service-and-update",
+  "type": "clean",
+  "description": " «Add Webhook Receiver service and update configurations» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "8629a50e32a6448be984823a29a242c0461acc0a",
+    "base": "80e611e09a450225f21ea09bf73eb72bac09b1c1",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "id": "restate-140-chore-ci-report-table-fix-local-artifact",
+  "type": "tp",
+  "tags": [],
+  "description": "!140 «chore(ci): report table fix + local-artifact gitignores + dev hook» — дефект, который потом исправил !182",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "3afe22d8901404cb92c5d4a8520ea163ec143c71",
+    "base": "5d5f7e183e30b82db38102c6b4c457298ae19255",
+    "ref": "!140",
+    "fixes": [
+      {
+        "sha": "cafada8e966adc4906785e5eb9f85e71d8837dd8",
+        "ref": "!182",
+        "title": "fix(ci): report the real change scope in the Telegram CI report"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 83 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "tools/ci/generate-test-report.mjs",
+        "lines": [
+          245,
+          245
+        ]
+      },
+      {
+        "file": "tools/ci/generate-test-report.mjs",
+        "lines": [
+          251,
+          251
+        ]
+      },
+      {
+        "file": "tools/ci/generate-test-report.mjs",
+        "lines": [
+          354,
+          354
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "id": "gateway-7bcddc99-feat-wizard-implement-transform-canvas-n",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(wizard): implement Transform canvas node — full domain + UI» — дефект, который потом исправил 47169974, 701fadc0",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "7bcddc999f181a73138fe30a7cb48ba87a7cf853",
+    "base": "5a0aec56ff47e15cc9500832b3aca856c0d70eef",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "471699743a1caf4e2930e4240efe6124a32a1f99",
+        "ref": null,
+        "title": "fix(audit): Transform node UI + backend hardening + bug fixes"
+      },
+      {
+        "sha": "701fadc09945ed981884f84171e72f6974e1321c",
+        "ref": null,
+        "title": "fix(wizard): 5 edge-case bugs in register map / transform pipeline"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 568 строк в 10 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "wizard/src/components/Inspector.tsx",
+        "lines": [
+          286,
+          286
+        ]
+      },
+      {
+        "file": "wizard/src/components/Inspector.tsx",
+        "lines": [
+          323,
+          324
+        ]
+      },
+      {
+        "file": "wizard/src/components/RegistersWorkspace.tsx",
+        "lines": [
+          349,
+          349
+        ]
+      },
+      {
+        "file": "wizard/src/components/RegistersWorkspace.tsx",
+        "lines": [
+          356,
+          356
+        ]
+      },
+      {
+        "file": "wizard/src/domain/registerMapToProfile.ts",
+        "lines": [
+          53,
+          54
+        ]
+      },
+      {
+        "file": "wizard/src/domain/registerMapToProfile.ts",
+        "lines": [
+          61,
+          68
+        ]
+      },
+      {
+        "file": "wizard/src/domain/registerMapToProfile.ts",
+        "lines": [
+          71,
+          71
+        ]
+      }
+    ]
+  }
+}

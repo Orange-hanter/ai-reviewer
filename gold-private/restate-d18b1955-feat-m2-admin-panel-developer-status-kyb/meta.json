@@ -1,0 +1,56 @@
+{
+  "id": "restate-d18b1955-feat-m2-admin-panel-developer-status-kyb",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(M2): admin panel developer status, KYB codes, audit tabs (DEV-080..083)» — дефект, который потом исправил !133",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "d18b19553ca347d4d362dcf076cf6dac5b1de088",
+    "base": "fb0495f16c82a09395840c8292c28e282f539994",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "98d3ac7287b94e0de351dd05e5a327e1a668d5f3",
+        "ref": "!133",
+        "title": "fix(admin): developer KYB verify/reject UI reads verification_status"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 439 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "admin-panel/src/views/developers/DeveloperDetailView.vue",
+        "lines": [
+          6,
+          6
+        ]
+      },
+      {
+        "file": "admin-panel/src/views/developers/DeveloperDetailView.vue",
+        "lines": [
+          34,
+          39
+        ]
+      },
+      {
+        "file": "admin-panel/src/views/developers/DevelopersListView.vue",
+        "lines": [
+          23,
+          23
+        ]
+      },
+      {
+        "file": "admin-panel/src/views/developers/DevelopersListView.vue",
+        "lines": [
+          34,
+          36
+        ]
+      }
+    ]
+  }
+}

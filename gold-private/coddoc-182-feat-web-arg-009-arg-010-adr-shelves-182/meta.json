@@ -1,0 +1,68 @@
+{
+  "id": "coddoc-182-feat-web-arg-009-arg-010-adr-shelves-182",
+  "type": "tp",
+  "tags": [],
+  "description": "#182 «feat(web): ARG-009, ARG-010 — список ADR по полкам, страница «Shelves», выбор полки (#182)» — дефект, который потом исправил #186, #188",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "5725ab6ae5335aa8d7d77926a5865ba985cbbb4a",
+    "base": "7512c39bb3379ddbe1dd47199794f3ece0ecdda7",
+    "ref": "#182",
+    "fixes": [
+      {
+        "sha": "42d4c9f08c17b73e701a30ae5cc165927506ca0f",
+        "ref": "#186",
+        "title": "fix(adr): ARG-008, ARG-009 — остаток замечаний AI-ревью #181/#182 (#186)"
+      },
+      {
+        "sha": "ab74fe804324d45019c7bda70f1c1562fa032d25",
+        "ref": "#188",
+        "title": "fix(web): ARG-010 — фокус на «Shelves», кириллица в ревизиях; аудит секции B (#188)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 668 строк в 13 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/adr_service.py",
+        "lines": [
+          748,
+          754
+        ]
+      },
+      {
+        "file": "cod_doc/api/web/pages/adr.py",
+        "lines": [
+          183,
+          183
+        ]
+      },
+      {
+        "file": "cod_doc/api/web/pages/adr.py",
+        "lines": [
+          718,
+          718
+        ]
+      },
+      {
+        "file": "cod_doc/api/web/pages/adr.py",
+        "lines": [
+          768,
+          768
+        ]
+      },
+      {
+        "file": "cod_doc/api/web/pages/adr.py",
+        "lines": [
+          782,
+          782
+        ]
+      }
+    ]
+  }
+}

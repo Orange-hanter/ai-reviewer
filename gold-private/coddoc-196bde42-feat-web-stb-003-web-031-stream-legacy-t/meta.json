@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-196bde42-feat-web-stb-003-web-031-stream-legacy-t",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(web): STB-003 (WEB-031) — stream legacy-tasks import progress over WebSocket» — дефект, который потом исправил d58f4d00",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "196bde4274b1de8af08c0ebe4e8dc3d43fbb2153",
+    "base": "c310503c235d8d67b9dab7f6e5ff00f3dfcd0e2c",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "d58f4d00505fc76afdfb49bc153a1dab046bb972",
+        "ref": null,
+        "title": "fix(services): ADO-166/ADO-190 — один словарь статусов задач + миграции 0035/0037 (#84, #68)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 275 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/restate_importer.py",
+        "lines": [
+          336,
+          336
+        ]
+      }
+    ]
+  }
+}

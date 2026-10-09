@@ -1,0 +1,42 @@
+{
+  "id": "restate-9d563acb-fix-cors-allow-remote-admin-origin-allow",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(cors): allow remote admin origin allowlist» — дефект, который потом исправил !16",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "9d563acb4d19d7f1920844360ff4c70326bc12fe",
+    "base": "50c083a869e0cf603e072ba139c4a34e62e9edbd",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "80a8954a605a9353a71dc823cc489e717eca3887",
+        "ref": "!16",
+        "title": "fix(cors): harden CORS config, refresh cookie path, env guards"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 45 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "docker-compose.yml",
+        "lines": [
+          117,
+          117
+        ]
+      },
+      {
+        "file": "restate-api/src/main.ts",
+        "lines": [
+          16,
+          16
+        ]
+      }
+    ]
+  }
+}

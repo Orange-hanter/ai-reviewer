@@ -1,0 +1,35 @@
+{
+  "id": "restate-4caf9fc2-fix-migration-add-null-guard-updates-bef",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(migration): add NULL guard UPDATEs before SET NOT NULL in 039» — дефект, который потом исправил 0483e9e7",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "4caf9fc26629d3e0ac05428a578fc9f234ad2e04",
+    "base": "96ad92000671d858d209b445ef93938fe704f0e0",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "0483e9e77306b401f7ee0610c63f92433fc59412",
+        "ref": null,
+        "title": "fix(migrations): remove NULL guard for actor_type columns and add backfill migration"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 10 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/database/migrations/039_drop_polymorphic_actor_triggers.sql",
+        "lines": [
+          53,
+          58
+        ]
+      }
+    ]
+  }
+}

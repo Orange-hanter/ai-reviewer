@@ -1,0 +1,35 @@
+{
+  "id": "orakul-521-fix-ai-review-status-pr-merge",
+  "type": "tp",
+  "tags": [],
+  "description": "#521 «fix(ai-review-status): влитый PR больше не выдаётся за красный merge-гейт» — дефект, который потом исправил #543",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "b57acc17284cdeb8b0261dfdece11d1938062efe",
+    "base": "c277fe0642316ef5278e2a141c262f2138940e5b",
+    "ref": "#521",
+    "fixes": [
+      {
+        "sha": "66c80c36742d3755f5f25e8151495db6a83635cb",
+        "ref": "#543",
+        "title": "fix(ops): генератор api-endpoints-index сам ведёт `Версия:` — минор +1 только при изменении тела"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 383 строк в 10 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          133,
+          133
+        ]
+      }
+    ]
+  }
+}

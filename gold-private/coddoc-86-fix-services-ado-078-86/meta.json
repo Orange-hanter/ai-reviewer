@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-86-fix-services-ado-078-86",
+  "type": "tp",
+  "tags": [],
+  "description": "#86 «fix(services): ADO-078 — отменённый блокер больше не держит зависимые задачи (#86)» — дефект, который потом исправил #139",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "d26830dc40312439b65b425e29719f66057c85bf",
+    "base": "b71b84fd7904f9bacba96861683b63222bee53ea",
+    "ref": "#86",
+    "fixes": [
+      {
+        "sha": "40b92b9b52037b353bb658ac926ddcf6e59f8269",
+        "ref": "#139",
+        "title": "fix(tasks): ADO-225 — задача с blocked_reason выходит из ready-выборки (#139)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 288 строк в 8 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/plan_service/graph.py",
+        "lines": [
+          169,
+          169
+        ]
+      }
+    ]
+  }
+}

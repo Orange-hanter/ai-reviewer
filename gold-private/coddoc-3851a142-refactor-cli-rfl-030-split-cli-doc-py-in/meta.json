@@ -1,0 +1,42 @@
+{
+  "id": "coddoc-3851a142-refactor-cli-rfl-030-split-cli-doc-py-in",
+  "type": "tp",
+  "tags": [],
+  "description": " «refactor(cli): RFL-030 — split cli/doc.py into a per-command package» — дефект, который потом исправил 3c78f61e",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "3851a142aa2ebbf9bbcd5d6358298a011fb35255",
+    "base": "b2c30fc913721b314bc91e7160b70d30e373aea4",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "3c78f61e2a6d628241329261f423ed3c2834e1cc",
+        "ref": null,
+        "title": "fix(projection): ADO-010 (F7) — doc export больше не портит документ"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 619 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/cli/doc/cmd_export.py",
+        "lines": [
+          22,
+          23
+        ]
+      },
+      {
+        "file": "cod_doc/cli/doc/cmd_export.py",
+        "lines": [
+          37,
+          37
+        ]
+      }
+    ]
+  }
+}

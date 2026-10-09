@@ -1,0 +1,35 @@
+{
+  "id": "orakul-297-feat-pricing-unit-aware-p2-297",
+  "type": "tp",
+  "tags": [],
+  "description": "#297 «feat(pricing): движок unit-aware за флагом + бэкафилл ставок (P2) (#297)» — дефект, который потом исправил #516",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "5660cc6fe508e14b5732ef72d5b4a6442e340560",
+    "base": "f7b316e6126584717fcb7fe17dcd422113b9d3c1",
+    "ref": "#297",
+    "fixes": [
+      {
+        "sha": "43b9e27ef2cda227a3b8c3cf5212e026419dd6f9",
+        "ref": "#516",
+        "title": "fix(pricing): довести unit-aware до серверных вызовов + точка запуска бэкафилла"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 237 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/server/config.ts",
+        "lines": [
+          148,
+          149
+        ]
+      }
+    ]
+  }
+}

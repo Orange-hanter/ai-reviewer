@@ -1,0 +1,42 @@
+{
+  "id": "restate-155-feat-developer-aggregate-available-unit",
+  "type": "tp",
+  "tags": [],
+  "description": "!155 «feat(developer): aggregate available unit types per project» — дефект, который потом исправил !176",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "de0b9f3b83c5a4727cf1cd3aa0b42dcbcde7a3fe",
+    "base": "6b2134cd3ff9ffb04991471a469e07b650cea6a0",
+    "ref": "!155",
+    "fixes": [
+      {
+        "sha": "7a0a28b2665a1c7226bedd05336fb80013c0f964",
+        "ref": "!176",
+        "title": "fix(projects): compute unit counters from listings, mig 112 (#75)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 106 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/listings/repositories/listings.repository.ts",
+        "lines": [
+          286,
+          286
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listings.repository.ts",
+        "lines": [
+          289,
+          294
+        ]
+      }
+    ]
+  }
+}

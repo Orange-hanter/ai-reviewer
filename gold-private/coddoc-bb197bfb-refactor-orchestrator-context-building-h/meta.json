@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-bb197bfb-refactor-orchestrator-context-building-h",
+  "type": "tp",
+  "tags": [],
+  "description": " «refactor: orchestrator — context building helpers, prerequisites, MASTER ref extraction» — дефект, который потом исправил c1071d75",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "bb197bfbff504a7ec295093c4b96651a038627c6",
+    "base": "4441ce2b7deecaac6c65642be96a8bb1b2ee47a3",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "c1071d75b63594e18571deaa8cfe8ef1195fe653",
+        "ref": null,
+        "title": "fix: orchestrator — undefined `iterations` in token-budget log"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 301 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/agent/orchestrator.py",
+        "lines": [
+          398,
+          399
+        ]
+      }
+    ]
+  }
+}

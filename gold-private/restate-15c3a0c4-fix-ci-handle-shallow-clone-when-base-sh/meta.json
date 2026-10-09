@@ -1,0 +1,42 @@
+{
+  "id": "restate-15c3a0c4-fix-ci-handle-shallow-clone-when-base-sh",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(ci): handle shallow clone when BASE_SHA not in git history» — дефект, который потом исправил 91eec992",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "15c3a0c403b4a4e487135c74ce026f32749b13fa",
+    "base": "e437d2a3027372c260378c1f32ab66b62f5c9098",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "91eec992b4d51603fbc3ad8a4f68541afa03fae7",
+        "ref": null,
+        "title": "fix(ci): strip restate-api/ prefix from git diff paths before passing to Jest"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 34 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".gitlab-ci.yml",
+        "lines": [
+          388,
+          388
+        ]
+      },
+      {
+        "file": ".gitlab-ci.yml",
+        "lines": [
+          393,
+          395
+        ]
+      }
+    ]
+  }
+}

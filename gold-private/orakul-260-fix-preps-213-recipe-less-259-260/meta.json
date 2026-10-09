@@ -1,0 +1,42 @@
+{
+  "id": "orakul-260-fix-preps-213-recipe-less-259-260",
+  "type": "tp",
+  "tags": [],
+  "description": "#260 «fix(preps): штучные заготовки списываются поштучно (#213) + recipe-less связь списывается (#259) (#260)» — дефект, который потом исправил #281",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "47afc096ee42272c575008324ca26b5d4c926656",
+    "base": "5ecd256037a8289c03e69659a5e896e6c6ed861a",
+    "ref": "#260",
+    "fixes": [
+      {
+        "sha": "bec17ecf8f3526e67968ec59a95462fb68727abd",
+        "ref": "#281",
+        "title": "fix(client): инференс/декомпозиция разворачивает вложенную заготовку (prep-in-prep) (#281)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 49 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/utils/preps.ts",
+        "lines": [
+          187,
+          188
+        ]
+      },
+      {
+        "file": "app/client/src/utils/preps.ts",
+        "lines": [
+          197,
+          197
+        ]
+      }
+    ]
+  }
+}
