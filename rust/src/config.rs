@@ -21,7 +21,7 @@ pub const DEFAULT_MOA_SPECIALIST_MODELS: &str =
     "security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3";
 pub const DEFAULT_MOA_AGGREGATOR: &str = "minimax-m3";
 pub const DEFAULT_REVIEW_VERIFIER_MODEL: &str = "deepseek-v4-pro";
-pub const DEFAULT_OLLAMA_MODELS_FALLBACK: &str = "deepseek-v4-flash";
+pub const DEFAULT_OLLAMA_MODELS_FALLBACK: &str = "deepseek-v4.1-flash";
 pub const DEFAULT_STRUCTURE_TRUST_TIER: &str = "trusted_local";
 pub const SPECIALIST_ROLES: [&str; 3] = ["security", "correctness", "architecture"];
 /// Вес сигнала `verified` из ACTIONABILITY_SIGNALS (lib/actionability.mjs): на него
@@ -1091,7 +1091,7 @@ mod tests {
         assert_eq!(parts["ollama"]["model"], "kimi-k2.7-code");
         assert_eq!(parts["ollama"]["requestTimeoutMs"], 420000);
         assert_eq!(parts["moa"]["label"], "moa-specialist(minimax-m3←security+correctness+architecture)");
-        assert_eq!(parts["models"]["fallback"], json!(["deepseek-v4-flash"]));
+        assert_eq!(parts["models"]["fallback"], json!(["deepseek-v4.1-flash"]));
         assert_eq!(parts["gate"]["blockOn"], json!(["critical", "major"]));
         assert_eq!(parts["gate"]["consensusMin"], 1);
         assert_eq!(parts["gate"]["confidenceMin"], 0.8);
@@ -1299,9 +1299,9 @@ mod tests {
         let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
         assert_eq!(parts["reviewMode"], "consensus", "trim + lowercase");
         assert_eq!(parts["models"]["list"], json!(["m1", "m2"]));
-        assert_eq!(parts["models"]["fallback"], json!(["deepseek-v4-flash"]));
+        assert_eq!(parts["models"]["fallback"], json!(["deepseek-v4.1-flash"]));
         // fallback исключает модели списка.
-        let e = env(&[("REVIEW_MODE", "consensus"), ("OLLAMA_MODELS", "deepseek-v4-flash,m9")]);
+        let e = env(&[("REVIEW_MODE", "consensus"), ("OLLAMA_MODELS", "deepseek-v4.1-flash,m9")]);
         let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
         assert_eq!(parts["models"]["fallback"], json!([]));
     }
