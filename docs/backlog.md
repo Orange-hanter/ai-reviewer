@@ -66,6 +66,13 @@ FP-learning-loop» пуста — конкурентов в ней нет; ри�
    → **частично**: `REVIEW_REASONING_EFFORT` в конфиге, каскад ретраев в пайплайне;
    эксперимент на gold не прогнан, дефолт остаётся консервативным (`low`).
 
+7. **Auto-triage и доверенный автор.** `lib/triage.mjs` сверяет автора треда по GraphQL
+   `author.login`, а GraphQL отдаёт логин бота без суффикса `[bot]` (`github-actions`), и
+   `user.type` в треде нет. С дефолтом `github-actions[bot]` проверка, вероятно, не проходит
+   никогда — auto-triage молча пропускает все треды (`untrusted_author`). Плюс пустой
+   `REVIEW_TRUSTED_AUTHORS=` там не откатывает, а подставляет дефолт. Проверить на живом PR,
+   нормализовать суффикс в одном месте (`isTrustedReviewAuthor`) и в Rust-порте `triage.rs`.
+
 ## B. Качество вердикта
 
 7. **Whole-repo retrieval каскадом**: только когда blast-radius пуст, а suspicious-зона

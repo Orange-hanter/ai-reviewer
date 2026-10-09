@@ -65,6 +65,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `GITHUB_REPOSITORY` | — | `owner/repo` |
 | `PR_NUMBER` | — | Номер PR |
 | `GITHUB_API_URL` | `https://api.github.com` | Enterprise API |
+| `REVIEW_TRUSTED_AUTHORS` | `github-actions[bot]` | Логины через запятую, от которых движок пишет sticky и inline. Свой комментарий = маркер **и** автор из списка (при наличии `user.type` — только `Bot`); комментарий с маркером от другого автора не читается как прошлый прогон, не перезаписывается и не удаляется. Если отчёты пишет PAT или GitHub App — укажите его логин. Пустое значение — доверять любому автору (прежнее поведение, откат). Алиас — `REVIEW_FEEDBACK_TRUSTED_AUTHORS` |
 | `GH_TOKEN` | — | Только gold-загрузчик ([`lib/gold-fetch.mjs`](../lib/gold-fetch.mjs)): после `GITHUB_TOKEN`, перед `gh auth token`; без токена — анонимно |
 
 ## Ollama / LLM
@@ -361,7 +362,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_FEEDBACK_MD_APPEND` | `0` | Дописывать журнал автоматически |
 | `REVIEW_FEEDBACK_CANDIDATES` | `1` | Писать кандидатов |
 | `REVIEW_FEEDBACK_WRITE` | `1` | `0` — dry-run harvest |
-| `REVIEW_FEEDBACK_TRUSTED_AUTHORS` | `github-actions[bot]` | Чьи inline считаем своими |
+| `REVIEW_FEEDBACK_TRUSTED_AUTHORS` | `github-actions[bot]` | Алиас `REVIEW_TRUSTED_AUTHORS` (см. [GitHub](#github)); при обоих заданных побеждает `REVIEW_TRUSTED_AUTHORS` |
 | `REVIEW_FEEDBACK_CONCURRENCY` | `6` | Параллельных запросов реакций |
 | `REVIEW_FEEDBACK_SINCE_DAYS` | `14` | `pr-review-feedback-batch`: PR, обновлённые за последние N дней |
 | `REVIEW_FEEDBACK_PR_LIMIT` | `30` | `pr-review-feedback-batch`: максимум PR за прогон (из последних 100 по `updated`) |
@@ -377,6 +378,12 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `REVIEW_AUTO_TRIAGE` | `1` | Авто-ответ и resolve на своих тредах с известным FP |
+
+## Оформление комментариев
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_ICON_BASE_URL` | — | База URL пиктограмм: задана — sticky, шапка review-сводки и inline показывают SVG вместо эмодзи (🤖 ⛔ ✅ 🔴 🟠 🟡 🔵 🔄 🔎 ⚖️ 🔧), эмодзи остаётся в `alt`. Пусто — эмодзи, как раньше. Набор — публичный [Orange-hanter/ai-reviewer-icons](https://github.com/Orange-hanter/ai-reviewer-icons); база с пином на тег: `https://raw.githubusercontent.com/Orange-hanter/ai-reviewer-icons/v1.0.0/icons`. HTML-комментарии (футер), код и ответы auto-triage не меняются; логи, dry-run и Telegram — с эмодзи |
 
 ## Уведомления
 

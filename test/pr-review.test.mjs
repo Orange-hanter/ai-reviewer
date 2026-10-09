@@ -8,7 +8,9 @@ process.env.OLLAMA_MODELS = 'm1,m2';
 import './helpers/reference-profile.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, rm, readFile } from 'node:fs/promises';
+import { writeFile, rm, readFile, mkdtemp, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MARKERS, extractStickyFooterRaw } from '../lib/constants.mjs';
 
 const {
@@ -559,6 +561,47 @@ test('readChangedFiles: бинарный файл (NUL byte) пропускае�
     assert.equal(map.size, 0, 'бинарь не попадает в контекст модели');
   } finally {
     await rm(tmp, { force: true });
+  }
+});
+
+test('readChangedFiles: symlink наружу репозитория не читается (realpath, не resolve)', async () => {
+  // Изменённый (не добавленный) путь — symlink, существующий в базе: его цель вне репо.
+  const outsideDir = await mkdtemp(join(tmpdir(), 'pr-review-outside-'));
+  const secret = join(outsideDir, 'secret.txt');
+  await writeFile(secret, 'TOP-SECRET-CONTENT\n');
+  const link = `.tmp-pr-review-link-${process.pid}`;
+  await symlink(secret, link);
+  try {
+    const logs = [];
+    const files = new Map([[link, { validLines: new Set([1]), changed: [] }]]);
+    const map = await readChangedFiles(files, { maxFileLines: 100 }, (m) => logs.push(m));
+    assert.equal(map.size, 0, 'содержимое цели вне репо не уходит в контекст модели');
+    assert.ok(logs.some((m) => m.includes(`пропуск файла вне репо: ${link}`)), logs.join('\n'));
+  } finally {
+    await rm(link, { force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test('readChangedFiles: symlink внутри репозитория читается, удалённый файл — тихий пропуск', async () => {
+  const target = `.tmp-pr-review-target-${process.pid}.ts`;
+  const link = `.tmp-pr-review-inlink-${process.pid}.ts`;
+  const gone = `.tmp-pr-review-gone-${process.pid}.ts`;
+  await writeFile(target, 'export const inside = 1;\n');
+  await symlink(target, link);
+  try {
+    const logs = [];
+    const files = new Map([
+      [link, { validLines: new Set([1]), changed: [] }],
+      [gone, { validLines: new Set([1]), changed: [] }],
+    ]);
+    const map = await readChangedFiles(files, { maxFileLines: 100 }, (m) => logs.push(m));
+    assert.match(map.get(link) || '', /export const inside = 1;/, 'легитимная ссылка внутри репо работает');
+    assert.ok(!map.has(gone));
+    assert.ok(!logs.some((m) => m.includes(gone)), 'удалённый в PR файл — не «вне репо»');
+  } finally {
+    await rm(link, { force: true });
+    await rm(target, { force: true });
   }
 });
 

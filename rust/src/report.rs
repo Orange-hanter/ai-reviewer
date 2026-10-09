@@ -676,18 +676,32 @@ fn verdict_mark(blocked: Option<&Value>) -> &'static str {
     }
 }
 
+/// escapeMdInline: заголовок/модель находки — инлайн-текст, разметка экранируется.
+fn escape_md_inline(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len() + 8);
+    for c in raw.chars() {
+        if matches!(c, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '|') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// escapeMdBlock: тело находки — гасим только `<` (не закрыть `<details>`, не открыть комментарий).
+fn escape_md_block(raw: &str) -> String {
+    raw.replace('<', "&lt;")
+}
+
+/// codePath: путь в backticks без backtick внутри.
+fn code_path(raw: &str) -> String {
+    raw.chars().filter(|c| *c != '`').collect()
+}
+
 /// Строка Δ-блока по одной находке (deltaLine): severity, путь в backticks,
 /// заголовок с экранированием markdown, обрезанный до 110 UTF-16 юнитов.
 pub fn delta_line(f: &Value) -> String {
-    let raw_title = str_coalesce(f.get("title"), "замечание");
-    let mut safe_title = String::with_capacity(raw_title.len() + 8);
-    for c in raw_title.chars() {
-        if matches!(c, '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '|') {
-            safe_title.push('\\');
-        }
-        safe_title.push(c);
-    }
-    let safe_title = js_slice_utf16(&safe_title, 110);
+    let safe_title = js_slice_utf16(&escape_md_inline(&str_coalesce(f.get("title"), "замечание")), 110);
     let severity = f.get("severity").and_then(Value::as_str).unwrap_or("");
     let loc = match f.get("file") {
         Some(v) if js_truthy(v) => {
@@ -1405,7 +1419,7 @@ pub fn build_summary(
                     } else {
                         String::new()
                     };
-                    format!(" (`{}`{line_part})", js_to_string(v))
+                    format!(" (`{}`{line_part})", code_path(&js_to_string(v)))
                 }
                 _ => String::new(),
             };
@@ -1417,8 +1431,8 @@ pub fn build_summary(
             md.push_str(&format!(
                 "- {} **{}**¹{dup}{loc} — {}\n",
                 sev_label(f.get("severity").and_then(Value::as_str).unwrap_or("")),
-                str_coalesce(f.get("title"), "замечание"),
-                str_coalesce(f.get("body"), ""),
+                escape_md_inline(&str_coalesce(f.get("title"), "замечание")),
+                escape_md_block(&str_coalesce(f.get("body"), "")),
             ));
         }
         if !tail.is_empty() {
@@ -1432,7 +1446,7 @@ pub fn build_summary(
                             } else {
                                 String::new()
                             };
-                            format!(" (`{}`{line_part})", js_to_string(v))
+                            format!(" (`{}`{line_part})", code_path(&js_to_string(v)))
                         }
                         _ => String::new(),
                     };
@@ -1441,7 +1455,7 @@ pub fn build_summary(
                     } else {
                         String::new()
                     };
-                    format!("- {} **{}**{dup}{loc}", sev_label(f.get("severity").and_then(Value::as_str).unwrap_or("")), str_coalesce(f.get("title"), "замечание"))
+                    format!("- {} **{}**{dup}{loc}", sev_label(f.get("severity").and_then(Value::as_str).unwrap_or("")), escape_md_inline(&str_coalesce(f.get("title"), "замечание")))
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -1467,15 +1481,15 @@ pub fn build_summary(
                             String::new()
                         };
                         // fpRemoved: `:line` ВНУТРИ backticks (в отличие от outside-секции).
-                        format!(" (`{}{}`)", js_to_string(v), line_part)
+                        format!(" (`{}{}`)", code_path(&js_to_string(v)), line_part)
                     }
                     _ => String::new(),
                 };
                 format!(
                     "- {} **{}** _({})_{loc}",
                     sev_label(f.get("severity").and_then(Value::as_str).unwrap_or("")),
-                    str_coalesce(f.get("title"), "замечание"),
-                    tmpl(f.get("model")),
+                    escape_md_inline(&str_coalesce(f.get("title"), "замечание")),
+                    escape_md_inline(&tmpl(f.get("model"))),
                 )
             })
             .collect::<Vec<_>>()

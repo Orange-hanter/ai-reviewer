@@ -249,6 +249,10 @@ const envCases = [
   ['export off', { REVIEW_EXPORT: '0' }, CLI_A],
   ['feedback off', { REVIEW_FEEDBACK: '0' }, CLI_A],
   ['triage off', { REVIEW_AUTO_TRIAGE: '0' }, CLI_A],
+  // Доверенные авторы: новое имя главнее алиаса; пустая строка — откат «доверять всем».
+  ['trusted authors new name', { REVIEW_TRUSTED_AUTHORS: ' a[bot] , b ,', REVIEW_FEEDBACK_TRUSTED_AUTHORS: 'old[bot]' }, CLI_A],
+  ['trusted authors empty rollback', { REVIEW_TRUSTED_AUTHORS: '' }, CLI_A],
+  ['trusted authors alias empty', { REVIEW_FEEDBACK_TRUSTED_AUTHORS: '' }, CLI_A],
 
   // Price map.
   ['price json valid', { REVIEW_PRICE_JSON: '{"m1":{"in":1.5,"out":2}}' }, CLI_A],
@@ -263,6 +267,7 @@ const envCases = [
   ['graphify depth 0 → default 2', { REVIEW_GRAPHIFY_DEPTH: '0' }, CLI_A],
   ['graphify drop ambiguous off', { REVIEW_GRAPHIFY_DROP_AMBIGUOUS: 'no' }, CLI_A],
   ['telegram', { TELEGRAM_BOT_TOKEN: 'tt', TELEGRAM_CHAT_ID: 'cc' }, CLI_A],
+  ['render: iconBaseUrl', { REVIEW_ICON_BASE_URL: 'https://icons.example/v1/icons' }, CLI_A],
   ['seed valid / effort', { REVIEW_SEED: '42', REVIEW_REASONING_EFFORT: 'none' }, CLI_A],
   ['seed non-integer → 7', { REVIEW_SEED: '3.5' }, CLI_A],
   ['review temperature empty → 0', { REVIEW_TEMPERATURE: '' }, CLI_A],

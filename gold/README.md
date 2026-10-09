@@ -41,7 +41,7 @@ Env пайплайна переопределяется как обычно (`MO
 |----|-----|---------------|
 | `tp-real-bugs-unescape` | tp | recall по локациям: 2 реальных major (unescape quoted-путей) среди FP-шума → блок |
 | `tp-structure-real-defects` | tp | recall по локациям: 4 реальных дефекта structure-контура среди 29 FP |
-| `fp-noise-no-real-blockers` | fp | precision: все major — подтверждённые FP → без блока |
+| `fp-noise-no-real-blockers` | tp | recall: sticky по маркеру без автора (`github.mjs:81`) → блок; precision: старые FP PR #477 (ESM, whitespace, контейнеры) не всплывают. До 2026-10-09 размечен `fp` «без блока» — разметка устарела, находка была настоящей |
 | `clean-code-carryover-fingerprint` | clean | precision: смерженный PR без critical/major |
 | `clean-code-footer-last-marker` | clean | футер по последнему маркеру; цитаты маркера в тексте |
 | `fp-absence-consumer-out-of-chunk` | fp | absence-claim при consumer в другом чанке |
