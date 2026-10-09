@@ -26,13 +26,21 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use anyhow::{anyhow, Result};
 use regex::Regex;
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderValue, USER_AGENT};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use crate::llm::{backoff_ms, is_transient};
+use crate::constants::{extract_sticky_footer_raw, has_marker};
+use crate::json_repair::extract_json_object;
+use crate::llm::{backoff_ms, is_transient, LogSink};
+use crate::profile::Markers;
+use crate::traits::{
+    DeleteStaleOpts, GhCallOpts, GithubApi, LoadedDiff, PostReviewParams, PostReviewResult,
+    PullRequestRef, StickyData, ThreadComment, ThreadRef,
+};
 
 /// X-GitHub-Api-Version из ghRaw.
 pub const API_VERSION: &str = "2022-11-28";
@@ -100,14 +108,41 @@ fn header_or(value: &str, fallback: &'static str) -> HeaderValue {
     HeaderValue::from_str(value).unwrap_or_else(|_| HeaderValue::from_static(fallback))
 }
 
-/// `ghRaw` из lib/github.mjs целиком (HTTP + ретраи).
-pub fn gh_raw(req: &GhRequest) -> Result<GhResponse, GhError> {
+/// HTTP-клиент транспорта: per-op таймаут 30с — аналог `AbortController(30_000)`
+/// вокруг каждой попытки в `ghRaw`.
+///
+/// Отдельная функция, потому что клиентов теперь два вида: одноразовый (бинарь-мост
+/// `bin/github.rs` живёт один op) и долгоживущий у [`RealGithubClient`] — пул
+/// соединений на весь прогон, как у `RealLlmClient`.
+pub fn build_http_client() -> Result<Client, GhError> {
     let timeout = Duration::from_millis(REQUEST_TIMEOUT_MS);
-    let client = Client::builder()
+    Client::builder()
         .connect_timeout(timeout)
         .timeout(timeout)
         .build()
-        .map_err(|e| gh_error(e.to_string(), None, true))?;
+        .map_err(|e| gh_error(e.to_string(), None, true))
+}
+
+/// `ghRaw` из lib/github.mjs целиком (HTTP + ретраи) на одноразовом клиенте.
+pub fn gh_raw(req: &GhRequest) -> Result<GhResponse, GhError> {
+    gh_raw_with(&build_http_client()?, req, None)
+}
+
+/// `ghRaw` на готовом клиенте и с логом ретраев.
+///
+/// `log` — точный порт двух строк JS-ветки (`lib/github.mjs:391`, `lib/github.mjs:402`):
+/// бинарь-мост их не пишет (лог живёт в JS-процессе), а [`RealGithubClient`] обязан,
+/// иначе после cutover исчезнет единственный след деградации сети в CI-логе.
+pub fn gh_raw_with(
+    client: &Client,
+    req: &GhRequest,
+    log: Option<&(dyn Fn(&str) + Send + Sync)>,
+) -> Result<GhResponse, GhError> {
+    let say = |msg: String| {
+        if let Some(log) = log {
+            log(&msg);
+        }
+    };
     let method = req
         .method
         .parse::<reqwest::Method>()
@@ -136,7 +171,17 @@ pub fn gh_raw(req: &GhRequest) -> Result<GhResponse, GhError> {
             Err(e) => {
                 // Сетевой сбой (включая per-op таймаут): ретрай при остатке попыток.
                 if attempt < req.http_retries {
-                    std::thread::sleep(Duration::from_secs_f64(backoff_ms(attempt, None) / 1000.0));
+                    let wait = backoff_ms(attempt, None);
+                    say(format!(
+                        "GitHub {} {} сетевой сбой ({}) → повтор через {}мс ({}/{})",
+                        req.method,
+                        req.path,
+                        e,
+                        wait,
+                        attempt + 1,
+                        req.http_retries
+                    ));
+                    std::thread::sleep(Duration::from_secs_f64(wait / 1000.0));
                     attempt += 1;
                     continue;
                 }
@@ -159,6 +204,15 @@ pub fn gh_raw(req: &GhRequest) -> Result<GhResponse, GhError> {
         if !(200..=299).contains(&status) {
             if is_transient(status) && attempt < req.http_retries {
                 let wait = backoff_ms(attempt, retry_after.as_deref());
+                say(format!(
+                    "GitHub {} {} → {}, повтор через {}мс ({}/{})",
+                    req.method,
+                    req.path,
+                    status,
+                    wait,
+                    attempt + 1,
+                    req.http_retries
+                ));
                 std::thread::sleep(Duration::from_secs_f64(wait / 1000.0));
                 attempt += 1;
                 continue;
@@ -189,6 +243,15 @@ fn next_link(link: &str) -> Option<String> {
 /// `ghList` из lib/github.mjs: склейка страниц по Link rel="next".
 /// Возвращает массив-склейку; первая не-массивная страница — как есть (квирк JS).
 pub fn gh_list(req: &GhRequest) -> Result<Value, GhError> {
+    gh_list_with(&build_http_client()?, req, None)
+}
+
+/// `ghList` на готовом клиенте и с логом ретраев (см. [`gh_raw_with`]).
+pub fn gh_list_with(
+    client: &Client,
+    req: &GhRequest,
+    log: Option<&(dyn Fn(&str) + Send + Sync)>,
+) -> Result<Value, GhError> {
     let mut url = req.path.clone();
     let mut out: Vec<Value> = Vec::new();
     let mut guard = 0;
@@ -201,7 +264,7 @@ pub fn gh_list(req: &GhRequest) -> Result<Value, GhError> {
             accept: None,
             ..req.clone()
         };
-        let res = gh_raw(&page_req)?;
+        let res = gh_raw_with(client, &page_req, log)?;
         // JS: `const page = text ? JSON.parse(text) : []` — пустой текст → [].
         let page: Value = if res.text.is_empty() {
             Value::Array(vec![])
@@ -217,6 +280,569 @@ pub fn gh_list(req: &GhRequest) -> Result<Value, GhError> {
         url = next_link(&res.link).unwrap_or_default();
     }
     Ok(Value::Array(out))
+}
+
+// ===========================================================================
+// Клиент GitHub — порт createGithubClient (lib/github.mjs:55-275)
+// ===========================================================================
+
+/// GraphQL-запрос незакрытых review-тредов (`lib/github.mjs:279-296`).
+/// Текст запроса — часть контракта с API, поэтому скопирован дословно.
+pub const THREADS_QUERY: &str = r#"query($owner: String!, $name: String!, $pr: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      reviewThreads(first: 100, after: $after) {
+        nodes {
+          id
+          isResolved
+          path
+          line
+          comments(first: 10) {
+            nodes { body author { login } }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}"#;
+
+/// Мутация ответа в тред (`lib/github.mjs:298-302`).
+pub const REPLY_MUTATION: &str = r#"mutation($threadId: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
+    comment { id }
+  }
+}"#;
+
+/// Мутация закрытия треда (`lib/github.mjs:304-306`).
+pub const RESOLVE_MUTATION: &str = r#"mutation($threadId: ID!) {
+  resolveReviewThread(input: { threadId: $threadId }) { thread { isResolved } }
+}"#;
+
+/// `maxPages` пагинации review-тредов (`lib/github.mjs:229`).
+pub const MAX_THREAD_PAGES: usize = 50;
+
+/// Поля замороженного конфига, которые читает `createGithubClient`
+/// (`lib/github.mjs:59-60`: `cfg.github`, `cfg.httpRetries`, `cfg.profile.toolName`).
+///
+/// Отдельная структура, а не `&Value`, по тем же соображениям, что
+/// [`crate::llm::LlmConfig`]: клиент живёт весь прогон, и разбирать JSON на каждый
+/// запрос незачем.
+#[derive(Debug, Clone)]
+pub struct GithubConfig {
+    /// `github.api` — база REST без хвостового слэша (`GITHUB_API_URL`).
+    pub api: String,
+    /// `github.token` — Bearer (`GITHUB_TOKEN`). Пустой = «GitHub не сконфигурирован».
+    pub token: String,
+    /// `github.repo` — `owner/name` из CLI. Пустой = «GitHub не сконфигурирован».
+    pub repo: String,
+    /// `github.prNumber` из CLI. `0` — тот же falsy, что `undefined` в JS-проверках
+    /// `if (!repo || !prNumber || !token)`.
+    pub pr_number: u64,
+    /// `cfg.profile.toolName` — значение заголовка `User-Agent` (`lib/github.mjs:377`).
+    pub tool_name: String,
+    /// `cfg.httpRetries` (`REVIEW_HTTP_RETRIES`, дефолт 3). `0` — валидное значение
+    /// «без ретраев», поэтому дефолт подставляется только при отсутствии поля.
+    pub http_retries: u32,
+}
+
+impl Default for GithubConfig {
+    /// Дефолты движка (`lib/config.mjs:230-233`, `lib/profile.mjs` toolName),
+    /// а не «пустой» объект: клиент, собранный вручную в тесте, обязан вести себя
+    /// как боевой.
+    fn default() -> Self {
+        GithubConfig {
+            api: "https://api.github.com".to_string(),
+            token: String::new(),
+            repo: String::new(),
+            pr_number: 0,
+            tool_name: "ai-review".to_string(),
+            http_retries: 3,
+        }
+    }
+}
+
+/// JS `Number(v)` для `prNumber`: число или числовая строка, иначе `0` (falsy).
+fn as_pr_number(v: Option<&Value>) -> u64 {
+    match v {
+        Some(Value::String(s)) => s.trim().parse::<u64>().unwrap_or(0),
+        Some(other) => other.as_u64().unwrap_or(0),
+        None => 0,
+    }
+}
+
+impl GithubConfig {
+    /// Читает поля из замороженного конфига ([`crate::config::load_review_config_parts`]
+    /// плюс `cli`/`profile`, которые JS домешивает при сборке).
+    ///
+    /// Отсутствующие поля дают дефолты движка, а не панику: клиент обязан пережить
+    /// урезанный конфиг так же, как JS переживает `undefined` через `||`.
+    pub fn from_cfg(cfg: &Value) -> Self {
+        let d = GithubConfig::default();
+        let str_or = |v: Option<&Value>, def: String| {
+            v.and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string).unwrap_or(def)
+        };
+        GithubConfig {
+            api: str_or(cfg.pointer("/github/api"), d.api),
+            token: str_or(cfg.pointer("/github/token"), String::new()),
+            repo: str_or(cfg.pointer("/github/repo"), String::new()),
+            pr_number: as_pr_number(cfg.pointer("/github/prNumber")),
+            tool_name: str_or(cfg.pointer("/profile/toolName"), d.tool_name),
+            http_retries: cfg
+                .get("httpRetries")
+                .and_then(Value::as_u64)
+                .map(|n| n as u32)
+                .unwrap_or(d.http_retries),
+        }
+    }
+}
+
+/// Боевой клиент GitHub: транспорт [`gh_raw_with`]/[`gh_list_with`] плюс вся
+/// оркестрация, которая до cutover оставалась в JS-обёртке (`lib/github.mjs:55-275`).
+///
+/// Что здесь важно и легко потерять при перечитывании:
+///
+/// - **sticky ищется с конца** (`[...comments].reverse().find`), а маркер сверяется
+///   по НАЧАЛУ тела ([`has_marker`]): процитированный маркер в чужом комментарии не
+///   должен делать его нашим;
+/// - **post-then-delete**: `post_review` идёт раньше `delete_stale_inline`, и id
+///   свежего review приходит сюда через `except_review_id` — при сбое постинга старые
+///   инлайны остаются на месте;
+/// - **два метода глушат ошибку сами** — `read_prior_sticky_data` (нет sticky и битый
+///   футер равны «прошлого прогона не было») и `delete_stale_inline` (чистка не
+///   критична). Остальные отдают `Err`, а решение принимает пайплайн.
+///
+/// Отличия от JS, все технические:
+///
+/// - HTTP-клиент один на весь прогон (в JS `fetch` держит пул сам);
+/// - `Err` вместо брошенного `Error`, текст сообщения сохранён дословно — по нему
+///   сверяются golden-логи;
+/// - не-массивный ответ `ghList` (квирк JS, где он возвращался как есть и падал у
+///   вызывающего на `[...x]`) здесь сразу `Err` с внятным текстом.
+pub struct RealGithubClient {
+    cfg: GithubConfig,
+    markers: Markers,
+    http: Client,
+    log: Option<LogSink>,
+}
+
+impl std::fmt::Debug for RealGithubClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RealGithubClient")
+            .field("api", &self.cfg.api)
+            .field("repo", &self.cfg.repo)
+            .field("pr_number", &self.cfg.pr_number)
+            .field("markers", &self.markers.ns)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RealGithubClient {
+    /// Собирает клиента и HTTP-пул. Маркеры приходят снимком профиля: в JS это
+    /// живые getters `MARKERS`, потому что профиль там process-wide синглтон.
+    pub fn new(cfg: &GithubConfig, markers: Markers) -> Result<Self> {
+        let http = build_http_client().map_err(|e| anyhow!("{}", e.error))?;
+        Ok(RealGithubClient { cfg: cfg.clone(), markers, http, log: None })
+    }
+
+    /// Логгер — второй аргумент `createGithubClient`.
+    pub fn with_log(mut self, log: LogSink) -> Self {
+        self.log = Some(log);
+        self
+    }
+
+    fn log(&self, message: &str) {
+        if let Some(log) = &self.log {
+            log(message);
+        }
+    }
+
+    fn log_sink(&self) -> Option<&(dyn Fn(&str) + Send + Sync)> {
+        self.log.as_ref().map(|l| l.as_ref())
+    }
+
+    /// `github.repo && github.prNumber && github.token` — сконфигурирован ли GitHub.
+    fn configured(&self) -> bool {
+        !self.cfg.repo.is_empty() && self.cfg.pr_number != 0 && !self.cfg.token.is_empty()
+    }
+
+    fn request(&self, method: &str, path: &str, body: Option<Value>, accept: Option<&str>) -> GhRequest {
+        GhRequest {
+            api: self.cfg.api.clone(),
+            token: self.cfg.token.clone(),
+            tool_name: self.cfg.tool_name.clone(),
+            http_retries: self.cfg.http_retries,
+            method: method.to_string(),
+            path: path.to_string(),
+            body,
+            accept: accept.map(str::to_string),
+        }
+    }
+
+    /// `gh(path, opts)` (`lib/github.mjs:411-415`): текст для diff-accept, иначе JSON;
+    /// пустое тело — `{}`.
+    fn gh_call(&self, method: &str, path: &str, body: Option<Value>, accept: Option<&str>) -> Result<Value> {
+        let req = self.request(method, path, body, accept);
+        let accept = req.accept().to_string();
+        let res = gh_raw_with(&self.http, &req, self.log_sink()).map_err(|e| anyhow!("{}", e.error))?;
+        if accept.contains("diff") {
+            return Ok(Value::String(res.text));
+        }
+        if res.text.is_empty() {
+            return Ok(json!({}));
+        }
+        serde_json::from_str(&res.text)
+            .map_err(|e| anyhow!("GitHub {} {} → не-JSON ответ: {}", req.method, req.path, e))
+    }
+
+    /// `ghList(path)` (`lib/github.mjs:417-427`) со свёрткой квирка не-массива в `Err`.
+    fn gh_list_call(&self, path: &str) -> Result<Vec<Value>> {
+        let req = self.request("GET", path, None, None);
+        let value =
+            gh_list_with(&self.http, &req, self.log_sink()).map_err(|e| anyhow!("{}", e.error))?;
+        match value {
+            Value::Array(items) => Ok(items),
+            _ => Err(anyhow!("GitHub GET {path} → ожидался массив, пришёл объект")),
+        }
+    }
+
+    /// `[...comments].reverse().find((c) => hasMarker(c.body, MARKERS.review))`.
+    fn find_sticky<'a>(&self, comments: &'a [Value]) -> Option<&'a Value> {
+        comments
+            .iter()
+            .rev()
+            .find(|c| has_marker(c.get("body").and_then(Value::as_str).unwrap_or(""), &self.markers.review))
+    }
+
+    /// Лента issue-комментариев PR — общий источник sticky для трёх методов.
+    fn issue_comments(&self) -> Result<Vec<Value>> {
+        self.gh_list_call(&format!(
+            "/repos/{}/issues/{}/comments?per_page=100",
+            self.cfg.repo, self.cfg.pr_number
+        ))
+    }
+
+    /// `graphql(query, variables)` (`lib/github.mjs:534-541`): `errors` из ответа —
+    /// это ошибка вызова, склеенная через `; `, а не «пустые данные».
+    fn graphql(&self, query: &str, variables: Value) -> Result<Value> {
+        let body = json!({ "query": query, "variables": variables });
+        let req = self.request("POST", "/graphql", Some(body), None);
+        let res = gh_raw_with(&self.http, &req, self.log_sink()).map_err(|e| anyhow!("{}", e.error))?;
+        let parsed: Value = if res.text.is_empty() {
+            json!({})
+        } else {
+            serde_json::from_str(&res.text)
+                .map_err(|e| anyhow!("GitHub POST /graphql → не-JSON ответ: {}", e))?
+        };
+        if let Some(errors) = parsed.get("errors").and_then(Value::as_array) {
+            if !errors.is_empty() {
+                let joined = errors
+                    .iter()
+                    .map(|e| e.get("message").and_then(Value::as_str).unwrap_or("").to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(anyhow!("{joined}"));
+            }
+        }
+        Ok(parsed.get("data").cloned().unwrap_or(Value::Null))
+    }
+
+    /// `repoParts()` (`lib/github.mjs:543-547`).
+    fn repo_parts(&self) -> Result<(String, String)> {
+        let mut it = self.cfg.repo.split('/');
+        let owner = it.next().unwrap_or("");
+        let name = it.next().unwrap_or("");
+        if owner.is_empty() || name.is_empty() {
+            return Err(anyhow!("github.repo not configured"));
+        }
+        Ok((owner.to_string(), name.to_string()))
+    }
+
+    /// Тело `read_prior_sticky_data` без глушения — вся обработка ошибок снаружи,
+    /// одним `catch`, как в JS.
+    fn read_prior_sticky_data_inner(&self) -> Result<StickyData> {
+        let comments = self.issue_comments()?;
+        let Some(mine) = self.find_sticky(&comments) else {
+            return Ok(StickyData::default());
+        };
+        let body = mine.get("body").and_then(Value::as_str).unwrap_or("");
+        let Some(raw) = extract_sticky_footer_raw(body, &self.markers) else {
+            return Ok(StickyData::default());
+        };
+        // Обрезанный под лимит GitHub футер чиним ремонтом JSON (P2-12), иначе
+        // prior findings молча теряются.
+        let data: Value = match serde_json::from_str::<Value>(raw.trim()) {
+            Ok(v) => v,
+            Err(_) => extract_json_object(&raw).map_err(|e| anyhow!("{}", e.message))?.value,
+        };
+        // Футер пишет наш же движок, но читаем мы его из чужого текста (комментарий
+        // могли отредактировать руками) — проверяем форму элементов, а не только массива.
+        let findings = data
+            .get("findings")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter(|f| f.get("file").and_then(Value::as_str).is_some())
+                    .take(40)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let runs_all = data
+            .get("runs")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter(|r| r.get("sha").and_then(Value::as_str).is_some())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        // `slice(-5)` — последние пять прогонов.
+        let runs = runs_all[runs_all.len().saturating_sub(5)..].to_vec();
+        let sha = data.get("sha").and_then(Value::as_str).unwrap_or("").to_string();
+        Ok(StickyData { findings, runs, sha })
+    }
+}
+
+impl GithubApi for RealGithubClient {
+    fn gh(&self, path: &str, opts: &GhCallOpts) -> Result<Value> {
+        let method = if opts.method.is_empty() { "GET" } else { &opts.method };
+        self.gh_call(method, path, opts.body.clone(), opts.accept.as_deref())
+    }
+
+    fn load_diff(&self) -> Result<Option<LoadedDiff>> {
+        if !self.configured() {
+            return Ok(None);
+        }
+        let path = format!("/repos/{}/pulls/{}", self.cfg.repo, self.cfg.pr_number);
+        let pr = self.gh_call("GET", &path, None, None)?;
+        let head_sha =
+            pr.pointer("/head/sha").and_then(Value::as_str).unwrap_or("").to_string();
+        // Черновик: второй запрос (за диффом) не делаем, pr/headSha не отдаём —
+        // ровно как `return { draft: true }` в JS.
+        if pr.get("draft").and_then(Value::as_bool).unwrap_or(false) {
+            return Ok(Some(LoadedDiff { draft: true, ..LoadedDiff::default() }));
+        }
+        let diff = self.gh_call("GET", &path, None, Some("application/vnd.github.v3.diff"))?;
+        // Поля читаются по одному, а не через `from_value`: JS берёт их лениво, и
+        // неожиданный `null` в чужом поле PR не должен обнулять весь объект.
+        let pr_ref = PullRequestRef {
+            number: pr.get("number").and_then(Value::as_u64).unwrap_or(0),
+            title: pr.get("title").and_then(Value::as_str).unwrap_or("").to_string(),
+            html_url: pr.get("html_url").and_then(Value::as_str).unwrap_or("").to_string(),
+        };
+        Ok(Some(LoadedDiff {
+            draft: false,
+            pr: pr_ref,
+            head_sha,
+            diff: diff.as_str().unwrap_or("").to_string(),
+        }))
+    }
+
+    fn read_prior_sticky_data(&self) -> Result<StickyData> {
+        if !self.configured() {
+            return Ok(StickyData::default());
+        }
+        // Форма возврата одна во ВСЕХ ветках: на первом прогоне PR sticky ещё нет,
+        // и «пусто» здесь роняло пайплайн на `priorSticky.findings.length`.
+        Ok(self.read_prior_sticky_data_inner().unwrap_or_default())
+    }
+
+    fn read_prior_findings(&self) -> Result<Vec<Value>> {
+        Ok(self.read_prior_sticky_data()?.findings)
+    }
+
+    fn upsert_sticky(&self, body: &str) -> Result<String> {
+        let comments = self.issue_comments()?;
+        if let Some(mine) = self.find_sticky(&comments) {
+            let id = mine.get("id").cloned().unwrap_or(Value::Null);
+            let path = format!("/repos/{}/issues/comments/{}", self.cfg.repo, id);
+            self.gh_call("PATCH", &path, Some(json!({ "body": body })), None)?;
+            return Ok("updated".to_string());
+        }
+        let path = format!("/repos/{}/issues/{}/comments", self.cfg.repo, self.cfg.pr_number);
+        self.gh_call("POST", &path, Some(json!({ "body": body })), None)?;
+        Ok("created".to_string())
+    }
+
+    fn delete_stale_inline(&self, opts: &DeleteStaleOpts) -> Result<usize> {
+        let mut removed = 0usize;
+        let mut kept = 0usize;
+        // Весь блок под одним «catch»: чистка не критична (`lib/github.mjs:178`).
+        let outcome = (|| -> Result<()> {
+            let comments = self.gh_list_call(&format!(
+                "/repos/{}/pulls/{}/comments?per_page=100",
+                self.cfg.repo, self.cfg.pr_number
+            ))?;
+            let has_replies: std::collections::HashSet<u64> = comments
+                .iter()
+                .filter_map(|c| c.get("in_reply_to_id").and_then(Value::as_u64))
+                .collect();
+            for c in &comments {
+                let body = c.get("body").and_then(Value::as_str).unwrap_or("");
+                if !has_marker(body, &self.markers.inline) {
+                    continue;
+                }
+                // Только что запощенный review (post-then-delete: при сбое постинга
+                // старые не теряем).
+                let review_id = c.get("pull_request_review_id").and_then(Value::as_u64);
+                if opts.except_review_id.is_some() && review_id == opts.except_review_id {
+                    continue;
+                }
+                // Тред с ответами не трогаем — удаление корня рвёт обсуждение
+                // (разрулит auto-triage).
+                let id = c.get("id").and_then(Value::as_u64);
+                if id.is_some_and(|id| has_replies.contains(&id)) {
+                    kept += 1;
+                    continue;
+                }
+                let path = format!(
+                    "/repos/{}/pulls/comments/{}",
+                    self.cfg.repo,
+                    c.get("id").cloned().unwrap_or(Value::Null)
+                );
+                self.gh_call("DELETE", &path, None, None)?;
+                removed += 1;
+            }
+            Ok(())
+        })();
+        if let Err(e) = outcome {
+            self.log(&format!("очистка старых инлайнов не удалась (не критично): {e}"));
+        }
+        if kept > 0 {
+            self.log(&format!("старых инлайн-тредов с ответами оставлено: {kept}"));
+        }
+        Ok(removed)
+    }
+
+    fn post_review(&self, params: &PostReviewParams) -> Result<PostReviewResult> {
+        let body = if params.inline.is_empty() {
+            "🤖 Авто-ревью: инлайн-замечаний нет, общий вывод — в закреплённом комментарии."
+        } else {
+            "🤖 Авто-ревью: инлайн-замечания ниже, общий вывод — в закреплённом комментарии."
+        };
+        let mut payload = json!({
+            "event": "COMMENT",
+            "body": body,
+            "comments": params.inline,
+        });
+        if !params.head_sha.is_empty() {
+            payload["commit_id"] = json!(params.head_sha);
+        }
+        let path = format!("/repos/{}/pulls/{}/reviews", self.cfg.repo, self.cfg.pr_number);
+        let res = self.gh_call("POST", &path, Some(payload), None)?;
+        // `res?.id || null`: нулевой id для JS тоже falsy.
+        let review_id = res.get("id").and_then(Value::as_u64).filter(|id| *id != 0);
+        Ok(PostReviewResult { review_id })
+    }
+
+    fn list_inline_comments(&self) -> Result<Vec<Value>> {
+        if !self.configured() {
+            return Ok(vec![]);
+        }
+        self.gh_list_call(&format!(
+            "/repos/{}/pulls/{}/comments?per_page=100",
+            self.cfg.repo, self.cfg.pr_number
+        ))
+    }
+
+    fn list_issue_labels(&self) -> Result<Vec<Value>> {
+        if !self.configured() {
+            return Ok(vec![]);
+        }
+        self.gh_list_call(&format!(
+            "/repos/{}/issues/{}/labels?per_page=100",
+            self.cfg.repo, self.cfg.pr_number
+        ))
+    }
+
+    fn read_sticky_review(&self) -> Result<Option<Value>> {
+        if !self.configured() {
+            return Ok(None);
+        }
+        let comments = self.issue_comments()?;
+        Ok(self.find_sticky(&comments).cloned())
+    }
+
+    fn list_pull_comment_reactions(&self, comment_id: u64) -> Result<Vec<Value>> {
+        // Здесь проверка БЕЗ prNumber: реакции читаются по id комментария
+        // (`lib/github.mjs:588`), в том числе вне контекста конкретного PR.
+        if self.cfg.repo.is_empty() || self.cfg.token.is_empty() {
+            return Ok(vec![]);
+        }
+        self.gh_list_call(&format!(
+            "/repos/{}/pulls/comments/{}/reactions?per_page=100",
+            self.cfg.repo, comment_id
+        ))
+    }
+
+    fn list_unresolved_review_threads(&self) -> Result<Vec<ThreadRef>> {
+        let (owner, name) = self.repo_parts()?;
+        let mut nodes: Vec<Value> = Vec::new();
+        let mut after = Value::Null;
+        let mut done = false;
+        for _ in 0..MAX_THREAD_PAGES {
+            let data = self.graphql(
+                THREADS_QUERY,
+                json!({ "owner": owner, "name": name, "pr": self.cfg.pr_number, "after": after }),
+            )?;
+            let conn = data.pointer("/repository/pullRequest/reviewThreads");
+            if let Some(page) = conn.and_then(|c| c.get("nodes")).and_then(Value::as_array) {
+                nodes.extend(page.iter().cloned());
+            }
+            let has_next = conn
+                .and_then(|c| c.pointer("/pageInfo/hasNextPage"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if !has_next {
+                done = true;
+                break;
+            }
+            after = conn
+                .and_then(|c| c.pointer("/pageInfo/endCursor"))
+                .cloned()
+                .unwrap_or(Value::Null);
+        }
+        if !done {
+            // Молчаливая обрезка ленты тредов дала бы auto-triage неполную картину.
+            return Err(anyhow!("reviewThreads pagination exceeded {MAX_THREAD_PAGES} pages"));
+        }
+        Ok(nodes
+            .iter()
+            .filter(|t| !t.get("isResolved").and_then(Value::as_bool).unwrap_or(false))
+            .map(|t| ThreadRef {
+                id: t.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
+                path: t.get("path").and_then(Value::as_str).unwrap_or("").to_string(),
+                line: t.get("line").and_then(Value::as_u64),
+                comments: t
+                    .pointer("/comments/nodes")
+                    .and_then(Value::as_array)
+                    .map(|arr| {
+                        arr.iter()
+                            .map(|c| ThreadComment {
+                                body: c.get("body").and_then(Value::as_str).unwrap_or("").to_string(),
+                                author: c
+                                    .pointer("/author/login")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_string),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    fn reply_review_thread(&self, thread_id: &str, body: &str) -> Result<()> {
+        self.graphql(REPLY_MUTATION, json!({ "threadId": thread_id, "body": body }))?;
+        Ok(())
+    }
+
+    fn resolve_review_thread(&self, thread_id: &str) -> Result<()> {
+        self.graphql(RESOLVE_MUTATION, json!({ "threadId": thread_id }))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

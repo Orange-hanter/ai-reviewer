@@ -1,9 +1,14 @@
-//! Тесты rust/src/github.rs: контракт ghRaw/ghList против фейкового HTTP-сервера
-//! на std::net (прецедент rust/src/llm/tests.rs): Link-пагинация (абсолютные и
-//! относительные URL), не-массивная страница, guard 50 страниц, upsert-матрица
-//! (create/edit/маркер на второй странице), post-then-delete порядок вызовов,
-//! коды ошибок (transient 500 + retry-after, non-transient 400 без ретрая,
-//! обрыв соединения, connection refused), заголовки запроса.
+//! Тесты rust/src/github.rs против фейкового HTTP-сервера на std::net
+//! (прецедент rust/src/llm/tests.rs). Два слоя:
+//!
+//! 1. транспорт (`gh_raw`/`gh_list`): Link-пагинация (абсолютные и относительные
+//!    URL), не-массивная страница, guard 50 страниц, upsert-матрица вручную,
+//!    post-then-delete порядок вызовов, коды ошибок (transient 500 + retry-after,
+//!    non-transient 400 без ретрая, обрыв соединения, connection refused), заголовки;
+//! 2. клиент [`RealGithubClient`] (задача T11) — порт девяти кейсов
+//!    `test/github.test.mjs` плюс то, чего в JS-тестах не было: курсорная
+//!    пагинация review-тредов, превышение лимита страниц, `loadDiff` для
+//!    черновика и обычного PR, ранние возвраты при несконфигурированном GitHub.
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -13,7 +18,13 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::{gh_list, gh_raw, GhRequest, MAX_LIST_PAGES};
+use super::{
+    gh_list, gh_raw, GhRequest, GithubConfig, RealGithubClient, MAX_LIST_PAGES, MAX_THREAD_PAGES,
+};
+use crate::profile::Markers;
+use crate::traits::{
+    DeleteStaleOpts, GhCallOpts, GithubApi, InlineComment, PostReviewParams, ThreadComment,
+};
 
 const MARKER: &str = "<!-- ai-review -->";
 const INLINE_MARKER: &str = "<!-- ai-review-inline -->";
@@ -48,8 +59,19 @@ where
                     break;
                 }
                 seen.extend_from_slice(&buf[..n]);
-                if seen.windows(4).any(|w| w == b"\r\n\r\n") {
-                    break;
+                // Заголовки дочитаны — добираем тело по Content-Length: клиент
+                // вправе прислать его отдельным сегментом, и без дочитывания
+                // проверки JSON-тела были бы флаки.
+                if let Some(end) = seen.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&seen[..end]).to_lowercase();
+                    let want = head
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:"))
+                        .and_then(|v| v.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if seen.len() >= end + 4 + want {
+                        break;
+                    }
                 }
             }
             if seen.is_empty() {
@@ -433,4 +455,629 @@ fn transient_исчерпание_попыток_отдаёт_ошибку_со_
     assert_eq!(err.status, Some(503));
     assert!(!err.networky, "исчерпанные ретраи отдают НЕ-сетевую ошибку со статусом");
     assert_eq!(reqs(&server).len(), 3, "попытка + httpRetries=2");
+}
+
+// ===========================================================================
+// RealGithubClient — порт кейсов test/github.test.mjs (задача T11)
+// ===========================================================================
+
+const DATA_KEY: &str = "ai-review-data:";
+
+/// Клиент против фейкового сервера: те же поля конфига, что у CFG в
+/// test/github.test.mjs (repo o/r, PR 7, httpRetries 2).
+fn client(api: &str) -> RealGithubClient {
+    RealGithubClient::new(
+        &GithubConfig {
+            api: api.to_string(),
+            token: "t".to_string(),
+            repo: "o/r".to_string(),
+            pr_number: 7,
+            tool_name: "ai-reviewer-test".to_string(),
+            http_retries: 2,
+        },
+        Markers::default(),
+    )
+    .expect("HTTP-клиент собирается")
+}
+
+/// Клиент с журналом лога: тексты строк — часть наблюдаемого поведения прогона.
+fn client_with_log(api: &str) -> (RealGithubClient, Arc<Mutex<Vec<String>>>) {
+    let logged = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&logged);
+    let c = client(api).with_log(Box::new(move |m: &str| sink.lock().unwrap().push(m.to_string())));
+    (c, logged)
+}
+
+/// `stickyBody` из test/github.test.mjs: маркер + текст + машинный футер.
+fn sticky_body(data: &Value) -> String {
+    format!("{MARKER}\n## Вердикт\nok\n<!-- {DATA_KEY}{data} -->")
+}
+
+fn logs(sink: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+    sink.lock().unwrap().clone()
+}
+
+// --- readPriorStickyData ---
+
+#[test]
+fn client_sticky_data_нет_sticky_это_пустая_форма() {
+    let server = fake_server(|_| Some(json_res(json!([]))));
+    let data = client(&server.api).read_prior_sticky_data().unwrap();
+    // Форма одна во ВСЕХ ветках: на первом прогоне PR sticky ещё нет, и «пусто»
+    // не должно ронять чтение findings у вызывающего.
+    assert!(data.findings.is_empty());
+    assert!(data.runs.is_empty());
+    assert_eq!(data.sha, "");
+}
+
+#[test]
+fn client_sticky_data_берёт_последний_футер_игнорируя_цитату() {
+    let real = json!({
+        "findings": [{"file": "a.ts", "line": 1, "title": "x"}],
+        "runs": [{"sha": "abc"}],
+        "sha": "abc",
+    });
+    let quoted = format!("<!-- {DATA_KEY}{} -->", json!({"findings": []}));
+    let body = format!("{MARKER}\nПример: {quoted}\n\n<!-- {DATA_KEY}{real} -->");
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "body": body}]))));
+    let data = client(&server.api).read_prior_sticky_data().unwrap();
+    assert_eq!(data.sha, "abc");
+    assert_eq!(data.findings.len(), 1, "цитата маркера в теле не перебивает настоящий футер");
+    assert_eq!(data.findings[0]["file"], json!("a.ts"));
+    assert_eq!(data.runs.len(), 1);
+}
+
+#[test]
+fn client_sticky_data_обрезанный_футер_чинится_ремонтом_json() {
+    // Футер обрезан лимитом GitHub: закрывающего `-->` нет вовсе.
+    let body = format!(
+        "{MARKER}\n<!-- {DATA_KEY}{{\"findings\":[{{\"file\":\"b.ts\",\"line\":2,\"title\":\"t\"}}],\"runs\":[],\"sha\":\"dead"
+    );
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 9, "body": body}]))));
+    let data = client(&server.api).read_prior_sticky_data().unwrap();
+    assert_eq!(data.findings[0]["file"], json!("b.ts"));
+    assert_eq!(data.sha, "dead");
+}
+
+#[test]
+fn client_sticky_data_мусор_в_футере_это_пустая_форма() {
+    // Единственный catch JS-версии: битый футер = «прошлого прогона не было».
+    let body = format!("{MARKER}\n<!-- {DATA_KEY} не json -->");
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "body": body}]))));
+    let data = client(&server.api).read_prior_sticky_data().unwrap();
+    assert!(data.findings.is_empty());
+    assert_eq!(data.sha, "");
+}
+
+#[test]
+fn client_sticky_data_фильтрует_форму_элементов_и_режет_историю() {
+    // Комментарий мог быть отредактирован руками — проверяем форму элементов.
+    let runs: Vec<Value> = (0..7).map(|i| json!({"sha": format!("s{i}")})).collect();
+    let data = json!({
+        "findings": [{"file": "a.ts"}, {"line": 3}, "строка"],
+        "runs": runs,
+        "sha": 42,
+    });
+    let body = sticky_body(&data);
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "body": body}]))));
+    let got = client(&server.api).read_prior_sticky_data().unwrap();
+    assert_eq!(got.findings.len(), 1, "без строкового file элемент не находка");
+    assert_eq!(got.runs.len(), 5, "slice(-5): последние пять прогонов");
+    assert_eq!(got.runs[0]["sha"], json!("s2"));
+    assert_eq!(got.sha, "", "нестроковый sha читается как пустой");
+}
+
+#[test]
+fn client_read_prior_findings_это_находки_футера() {
+    let data = json!({"findings": [{"file": "a.ts"}], "runs": [], "sha": "x"});
+    let body = sticky_body(&data);
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "body": body}]))));
+    let findings = client(&server.api).read_prior_findings().unwrap();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0]["file"], json!("a.ts"));
+}
+
+// --- upsertSticky ---
+
+#[test]
+fn client_upsert_sticky_нет_prior_это_created() {
+    let server = fake_server(|raw| {
+        if request_line(raw).starts_with("GET ") {
+            return Some(json_res(json!([])));
+        }
+        Some(json_res(json!({"id": 1})))
+    });
+    let body = sticky_body(&json!({"findings": [], "runs": [], "sha": "1"}));
+    let res = client(&server.api).upsert_sticky(&body).unwrap();
+    assert_eq!(res, "created");
+    let seen = reqs(&server);
+    assert_eq!(method_and_path(&seen[0]), "GET /repos/o/r/issues/7/comments");
+    assert_eq!(method_and_path(&seen[1]), "POST /repos/o/r/issues/7/comments");
+    assert_eq!(body_of(&seen[1])["body"], json!(body));
+}
+
+#[test]
+fn client_upsert_sticky_есть_маркер_это_updated_патчем() {
+    let existing = sticky_body(&json!({"findings": [], "runs": [], "sha": "old"}));
+    let server = fake_server(move |raw| {
+        if request_line(raw).starts_with("GET ") {
+            return Some(json_res(json!([{"id": 42, "body": existing}])));
+        }
+        Some(json_res(json!({"id": 42})))
+    });
+    let fresh = sticky_body(&json!({"findings": [], "runs": [], "sha": "new"}));
+    let res = client(&server.api).upsert_sticky(&fresh).unwrap();
+    assert_eq!(res, "updated");
+    let seen = reqs(&server);
+    assert_eq!(method_and_path(&seen[1]), "PATCH /repos/o/r/issues/comments/42");
+    let patched = body_of(&seen[1])["body"].as_str().unwrap().to_string();
+    assert!(patched.contains(r#""sha":"new""#), "{patched}");
+}
+
+#[test]
+fn client_upsert_sticky_чужой_комментарий_не_перезаписывается() {
+    // Маркер в СЕРЕДИНЕ чужого тела: hasMarker смотрит на начало, иначе цитата
+    // маркера сделала бы чужой комментарий нашим sticky.
+    let server = fake_server(|raw| {
+        if request_line(raw).starts_with("GET ") {
+            return Some(json_res(json!([{"id": 5, "body": format!("цитирую {MARKER} вот так")}])));
+        }
+        Some(json_res(json!({"id": 6})))
+    });
+    assert_eq!(client(&server.api).upsert_sticky("тело").unwrap(), "created");
+    assert_eq!(method_and_path(&reqs(&server)[1]), "POST /repos/o/r/issues/7/comments");
+}
+
+#[test]
+fn client_список_комментариев_ходит_по_link_next() {
+    let server = fake_server(|raw| {
+        let line = request_line(raw);
+        if line.starts_with("GET ") {
+            if line.contains("page=2") {
+                return Some(json_res(json!([{"id": 2, "body": "x"}])));
+            }
+            let link =
+                r#"</repos/o/r/issues/7/comments?page=2&per_page=100>; rel="next""#.to_string();
+            return Some((
+                200,
+                vec![("Link".to_string(), link)],
+                serde_json::to_vec(&json!([{"id": 1, "body": "x"}])).unwrap(),
+            ));
+        }
+        Some(json_res(json!({"id": 1})))
+    });
+    let res = client(&server.api).upsert_sticky(&format!("{MARKER}\nhi")).unwrap();
+    assert_eq!(res, "created", "своего sticky ни на одной странице нет");
+    let seen = reqs(&server);
+    assert_eq!(seen.len(), 3, "list page1 + page2 + POST");
+    assert!(request_line(&seen[1]).contains("page=2"), "{}", seen[1]);
+}
+
+// --- ретраи на уровне клиента ---
+
+#[test]
+fn client_transient_500_ретрай_затем_успех() {
+    let n = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let n2 = Arc::clone(&n);
+    let server = fake_server(move |_| {
+        if n2.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return Some((
+                500,
+                vec![("retry-after".to_string(), "0".to_string())],
+                b"boom".to_vec(),
+            ));
+        }
+        Some(json_res(json!([])))
+    });
+    let (c, logged) = client_with_log(&server.api);
+    let data = c.read_prior_sticky_data().unwrap();
+    assert!(data.findings.is_empty());
+    assert_eq!(reqs(&server).len(), 2);
+    assert_eq!(
+        logs(&logged),
+        vec![
+            "GitHub GET /repos/o/r/issues/7/comments?per_page=100 → 500, повтор через 1000мс (1/2)"
+        ],
+        "строка ретрая — дословный порт lib/github.mjs:391"
+    );
+}
+
+#[test]
+fn client_non_transient_400_сразу_ошибка_без_ретрая() {
+    let server = fake_server(|_| Some((400, vec![], b"bad".to_vec())));
+    let err = client(&server.api)
+        .post_review(&PostReviewParams { inline: vec![], head_sha: "abc".to_string() })
+        .unwrap_err();
+    assert_eq!(err.to_string(), "GitHub POST /repos/o/r/pulls/7/reviews → 400: bad");
+    assert_eq!(reqs(&server).len(), 1);
+}
+
+// --- postReview ---
+
+#[test]
+fn client_post_review_commit_id_и_id_ревью() {
+    let server = fake_server(|_| Some(json_res(json!({"id": 555}))));
+    let params = PostReviewParams {
+        inline: vec![InlineComment::new("a.ts", 1, "x")],
+        head_sha: "deadbeef".to_string(),
+    };
+    let res = client(&server.api).post_review(&params).unwrap();
+    assert_eq!(res.review_id, Some(555));
+    let sent = body_of(&reqs(&server)[0]);
+    assert_eq!(sent["event"], json!("COMMENT"));
+    assert_eq!(sent["commit_id"], json!("deadbeef"));
+    assert_eq!(sent["comments"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        sent["comments"][0],
+        json!({"path": "a.ts", "line": 1, "side": "RIGHT", "body": "x"})
+    );
+    assert_eq!(
+        sent["body"],
+        json!("🤖 Авто-ревью: инлайн-замечания ниже, общий вывод — в закреплённом комментарии.")
+    );
+}
+
+#[test]
+fn client_post_review_без_инлайнов_меняет_текст_и_не_шлёт_commit_id() {
+    let server = fake_server(|_| Some(json_res(json!({}))));
+    let res = client(&server.api)
+        .post_review(&PostReviewParams { inline: vec![], head_sha: String::new() })
+        .unwrap();
+    assert_eq!(res.review_id, None, "нет id → чистку старых инлайнов пропускаем");
+    let sent = body_of(&reqs(&server)[0]);
+    assert!(sent.get("commit_id").is_none(), "пустой headSha — поля нет: {sent}");
+    assert_eq!(sent["comments"], json!([]));
+    assert_eq!(
+        sent["body"],
+        json!("🤖 Авто-ревью: инлайн-замечаний нет, общий вывод — в закреплённом комментарии.")
+    );
+}
+
+// --- deleteStaleInline ---
+
+#[test]
+fn client_delete_stale_inline_фильтры_и_лог() {
+    let server = fake_server(|raw| {
+        if request_line(raw).starts_with("GET ") {
+            return Some(json_res(json!([
+                {"id": 10, "body": format!("{INLINE_MARKER}\nold"), "pull_request_review_id": 1},
+                {"id": 11, "body": format!("{INLINE_MARKER}\nfresh"), "pull_request_review_id": 99},
+                {"id": 12, "body": format!("{INLINE_MARKER}\nroot"), "pull_request_review_id": 1},
+                {"id": 13, "body": "reply", "in_reply_to_id": 12, "pull_request_review_id": 2},
+                {"id": 14, "body": "чужой комментарий"}
+            ])));
+        }
+        Some(json_res(json!({})))
+    });
+    let (c, logged) = client_with_log(&server.api);
+    let removed = c.delete_stale_inline(&DeleteStaleOpts { except_review_id: Some(99) }).unwrap();
+    assert_eq!(removed, 1, "только id=10: 11 excepted, 12 has replies, 14 чужой");
+    let seq: Vec<String> = reqs(&server).iter().map(|r| method_and_path(r)).collect();
+    assert_eq!(seq, vec!["GET /repos/o/r/pulls/7/comments", "DELETE /repos/o/r/pulls/comments/10"]);
+    assert_eq!(logs(&logged), vec!["старых инлайн-тредов с ответами оставлено: 1"]);
+}
+
+#[test]
+fn client_delete_stale_inline_без_except_чистит_всё_своё() {
+    let server = fake_server(|raw| {
+        if request_line(raw).starts_with("GET ") {
+            return Some(json_res(json!([
+                {"id": 10, "body": format!("{INLINE_MARKER}\na"), "pull_request_review_id": 1},
+                {"id": 11, "body": format!("{INLINE_MARKER}\nb"), "pull_request_review_id": 99}
+            ])));
+        }
+        Some(json_res(json!({})))
+    });
+    let removed = client(&server.api).delete_stale_inline(&DeleteStaleOpts::default()).unwrap();
+    assert_eq!(removed, 2, "exceptReviewId=None — свежего review нет, чистим оба");
+}
+
+#[test]
+fn client_delete_stale_inline_глушит_ошибку_api() {
+    let server = fake_server(|_| Some((400, vec![], b"nope".to_vec())));
+    let (c, logged) = client_with_log(&server.api);
+    // Fail-open: чистка не критична, прогон продолжается.
+    let removed = c.delete_stale_inline(&DeleteStaleOpts::default()).unwrap();
+    assert_eq!(removed, 0);
+    assert_eq!(
+        logs(&logged),
+        vec![
+            "очистка старых инлайнов не удалась (не критично): GitHub GET /repos/o/r/pulls/7/comments?per_page=100 → 400: nope"
+        ]
+    );
+}
+
+// --- loadDiff ---
+
+#[test]
+fn client_load_diff_обычный_pr_даёт_sha_и_дифф() {
+    let server = fake_server(|raw| {
+        if raw.to_lowercase().contains("accept: application/vnd.github.v3.diff") {
+            return Some((200, vec![], b"--- a/x\n+++ b/x\n".to_vec()));
+        }
+        Some(json_res(json!({
+            "number": 7,
+            "title": "тест",
+            "html_url": "https://gh/pr/7",
+            "head": {"sha": "deadbeef"},
+            "draft": false,
+        })))
+    });
+    let loaded = client(&server.api).load_diff().unwrap().expect("PR загружен");
+    assert!(!loaded.draft);
+    assert_eq!(loaded.head_sha, "deadbeef");
+    assert_eq!(loaded.diff, "--- a/x\n+++ b/x\n");
+    assert_eq!(loaded.pr.number, 7);
+    assert_eq!(loaded.pr.title, "тест");
+    assert_eq!(loaded.pr.html_url, "https://gh/pr/7");
+    assert_eq!(reqs(&server).len(), 2, "метаданные PR + дифф по accept-заголовку");
+}
+
+#[test]
+fn client_load_diff_черновик_не_запрашивает_дифф() {
+    let server =
+        fake_server(|_| Some(json_res(json!({"number": 7, "draft": true, "head": {"sha": "abc"}}))));
+    let loaded = client(&server.api).load_diff().unwrap().expect("PR загружен");
+    assert!(loaded.draft);
+    assert_eq!(loaded.diff, "", "у черновика дифф не тянем — LLM не зовётся");
+    assert_eq!(reqs(&server).len(), 1);
+}
+
+#[test]
+fn client_gh_с_diff_accept_отдаёт_текст_а_не_json() {
+    let server = fake_server(|_| Some((200, vec![], b"diff --git a b".to_vec())));
+    let opts = GhCallOpts {
+        method: String::new(),
+        body: None,
+        accept: Some("application/vnd.github.v3.diff".to_string()),
+    };
+    let v = client(&server.api).gh("/repos/o/r/pulls/7", &opts).unwrap();
+    assert_eq!(v, json!("diff --git a b"));
+    assert!(request_line(&reqs(&server)[0]).starts_with("GET "), "пустой method — это GET");
+}
+
+#[test]
+fn client_gh_пустое_тело_это_пустой_объект() {
+    let server = fake_server(|_| Some((204, vec![], vec![])));
+    let v = client(&server.api).gh("/x", &GhCallOpts::default()).unwrap();
+    assert_eq!(v, json!({}));
+}
+
+// --- ранние возвраты при несконфигурированном GitHub ---
+
+#[test]
+fn client_без_токена_не_ходит_в_сеть() {
+    let probe = TcpListener::bind("127.0.0.1:0").unwrap();
+    let dead_api = format!("http://{}", probe.local_addr().unwrap());
+    drop(probe); // порт мёртв: реальный запрос был бы ошибкой, а не пустотой
+    let c = RealGithubClient::new(
+        &GithubConfig {
+            api: dead_api,
+            repo: "o/r".to_string(),
+            pr_number: 7,
+            ..GithubConfig::default()
+        },
+        Markers::default(),
+    )
+    .unwrap();
+    assert!(c.load_diff().unwrap().is_none());
+    assert!(c.list_inline_comments().unwrap().is_empty());
+    assert!(c.list_issue_labels().unwrap().is_empty());
+    assert!(c.read_sticky_review().unwrap().is_none());
+    assert!(c.list_pull_comment_reactions(5).unwrap().is_empty());
+    let sticky = c.read_prior_sticky_data().unwrap();
+    assert!(sticky.findings.is_empty() && sticky.runs.is_empty() && sticky.sha.is_empty());
+}
+
+#[test]
+fn client_реакции_читаются_без_номера_pr() {
+    // Проверка реакций в JS — только repo+token: harvest ходит за ними и вне
+    // контекста конкретного PR.
+    let server = fake_server(|_| Some(json_res(json!([{"content": "+1"}]))));
+    let c = RealGithubClient::new(
+        &GithubConfig {
+            api: server.api.clone(),
+            token: "t".to_string(),
+            repo: "o/r".to_string(),
+            pr_number: 0,
+            ..GithubConfig::default()
+        },
+        Markers::default(),
+    )
+    .unwrap();
+    let out = c.list_pull_comment_reactions(77).unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(method_and_path(&reqs(&server)[0]), "GET /repos/o/r/pulls/comments/77/reactions");
+}
+
+#[test]
+fn client_read_sticky_review_отдаёт_последний_свой_комментарий() {
+    let mine = sticky_body(&json!({"findings": [], "runs": [], "sha": "s"}));
+    let server = fake_server(move |_| {
+        Some(json_res(json!([
+            {"id": 1, "body": format!("{MARKER}\nстарый")},
+            {"id": 2, "body": mine},
+            {"id": 3, "body": "чужой"}
+        ])))
+    });
+    let got = client(&server.api).read_sticky_review().unwrap().expect("sticky найден");
+    assert_eq!(got["id"], json!(2), "берём ПОСЛЕДНЕЕ своё вхождение");
+}
+
+#[test]
+fn client_список_меток_идёт_через_пагинацию() {
+    let server = fake_server(|raw| {
+        if request_line(raw).contains("page=2") {
+            return Some(json_res(json!([{"name": "b"}])));
+        }
+        let link = r#"</repos/o/r/issues/7/labels?page=2>; rel="next""#.to_string();
+        Some((
+            200,
+            vec![("Link".to_string(), link)],
+            serde_json::to_vec(&json!([{"name": "a"}])).unwrap(),
+        ))
+    });
+    let labels = client(&server.api).list_issue_labels().unwrap();
+    assert_eq!(labels.len(), 2);
+    assert_eq!(labels[1]["name"], json!("b"));
+}
+
+// --- GraphQL: review-треды ---
+
+/// Ответ GraphQL с одной страницей тредов.
+fn threads_page(nodes: Value, has_next: bool, cursor: &str) -> Value {
+    json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": nodes,
+            "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
+        }}}}
+    })
+}
+
+#[test]
+fn client_треды_курсорная_пагинация_и_фильтр_resolved() {
+    let server = fake_server(|raw| {
+        if raw.contains(r#""after":"CUR1""#) {
+            return Some(json_res(threads_page(
+                json!([{
+                    "id": "T3", "isResolved": false, "path": "b.ts", "line": null,
+                    "comments": {"nodes": [{"body": "вторая страница", "author": null}]},
+                }]),
+                false,
+                "CUR2",
+            )));
+        }
+        Some(json_res(threads_page(
+            json!([
+                {
+                    "id": "T1", "isResolved": false, "path": "a.ts", "line": 12,
+                    "comments": {"nodes": [{"body": "чиню", "author": {"login": "dev"}}]},
+                },
+                {"id": "T2", "isResolved": true, "path": "a.ts", "line": 3, "comments": {"nodes": []}}
+            ]),
+            true,
+            "CUR1",
+        )))
+    });
+    let threads = client(&server.api).list_unresolved_review_threads().unwrap();
+    assert_eq!(threads.len(), 2, "закрытый тред отфильтрован, обе страницы склеены");
+    assert_eq!(threads[0].id, "T1");
+    assert_eq!(threads[0].line, Some(12));
+    assert_eq!(
+        threads[0].comments,
+        vec![ThreadComment { body: "чиню".to_string(), author: Some("dev".to_string()) }]
+    );
+    assert_eq!(threads[1].id, "T3");
+    assert_eq!(threads[1].line, None, "тред на удалённой строке переживается");
+    assert_eq!(threads[1].comments[0].author, None, "автор скрыт — не ошибка");
+
+    let seen = reqs(&server);
+    assert_eq!(seen.len(), 2);
+    assert_eq!(method_and_path(&seen[0]), "POST /graphql");
+    let vars = body_of(&seen[0])["variables"].clone();
+    assert_eq!(vars["owner"], json!("o"));
+    assert_eq!(vars["name"], json!("r"));
+    assert_eq!(vars["pr"], json!(7));
+    assert_eq!(vars["after"], Value::Null, "первая страница идёт без курсора");
+    assert_eq!(body_of(&seen[1])["variables"]["after"], json!("CUR1"));
+}
+
+#[test]
+fn client_треды_превышение_лимита_страниц_это_ошибка() {
+    let server = fake_server(|_| Some(json_res(threads_page(json!([]), true, "CUR"))));
+    let err = client(&server.api).list_unresolved_review_threads().unwrap_err();
+    // Молчаливая обрезка дала бы auto-triage неполную ленту тредов.
+    assert_eq!(err.to_string(), "reviewThreads pagination exceeded 50 pages");
+    assert_eq!(reqs(&server).len(), MAX_THREAD_PAGES);
+}
+
+#[test]
+fn client_треды_ошибки_graphql_склеиваются_в_сообщение() {
+    let server = fake_server(|_| {
+        Some(json_res(json!({"errors": [{"message": "нет прав"}, {"message": "и ещё"}]})))
+    });
+    let err = client(&server.api).list_unresolved_review_threads().unwrap_err();
+    assert_eq!(err.to_string(), "нет прав; и ещё");
+}
+
+#[test]
+fn client_репозиторий_без_слеша_это_ошибка_конфига() {
+    let c = RealGithubClient::new(
+        &GithubConfig { repo: "просто-имя".to_string(), ..GithubConfig::default() },
+        Markers::default(),
+    )
+    .unwrap();
+    let err = c.list_unresolved_review_threads().unwrap_err();
+    assert_eq!(err.to_string(), "github.repo not configured");
+}
+
+#[test]
+fn client_reply_и_resolve_шлют_свои_мутации() {
+    let server = fake_server(|_| Some(json_res(json!({"data": {}}))));
+    let c = client(&server.api);
+    c.reply_review_thread("T1", "готово").unwrap();
+    c.resolve_review_thread("T1").unwrap();
+    let seen = reqs(&server);
+    let reply = body_of(&seen[0]);
+    assert!(reply["query"].as_str().unwrap().contains("addPullRequestReviewThreadReply"));
+    assert_eq!(reply["variables"], json!({"threadId": "T1", "body": "готово"}));
+    let resolve = body_of(&seen[1]);
+    assert!(resolve["query"].as_str().unwrap().contains("resolveReviewThread"));
+    assert_eq!(resolve["variables"], json!({"threadId": "T1"}));
+}
+
+// --- маркеры чужого namespace и конфиг ---
+
+#[test]
+fn client_маркеры_берутся_из_профиля_а_не_из_дефолта() {
+    let markers = Markers::new("orakul-ai-review");
+    let body = format!("{}\n<!-- {}{} -->", markers.review, markers.data_key, json!({"sha": "ns"}));
+    let server = fake_server(move |raw| {
+        if request_line(raw).starts_with("GET ") {
+            return Some(json_res(json!([{"id": 3, "body": body}])));
+        }
+        Some(json_res(json!({"id": 3})))
+    });
+    let c = RealGithubClient::new(
+        &GithubConfig {
+            api: server.api.clone(),
+            token: "t".to_string(),
+            repo: "o/r".to_string(),
+            pr_number: 7,
+            ..GithubConfig::default()
+        },
+        markers,
+    )
+    .unwrap();
+    assert_eq!(c.read_prior_sticky_data().unwrap().sha, "ns");
+    assert_eq!(c.upsert_sticky("новое тело").unwrap(), "updated");
+    // GET (sticky-данные) + GET (upsert) + PATCH: правим найденный чужой namespace.
+    let seen = reqs(&server);
+    assert_eq!(method_and_path(seen.last().unwrap()), "PATCH /repos/o/r/issues/comments/3");
+}
+
+#[test]
+fn config_from_cfg_читает_замороженный_конфиг() {
+    let cfg = json!({
+        "httpRetries": 5,
+        "github": {"api": "https://gh.example/api/v3", "token": "sec", "repo": "o/r", "prNumber": 7},
+        "profile": {"toolName": "orakul-ai-review"},
+    });
+    let got = GithubConfig::from_cfg(&cfg);
+    assert_eq!(got.api, "https://gh.example/api/v3");
+    assert_eq!(got.token, "sec");
+    assert_eq!(got.repo, "o/r");
+    assert_eq!(got.pr_number, 7);
+    assert_eq!(got.tool_name, "orakul-ai-review");
+    assert_eq!(got.http_retries, 5);
+
+    // Урезанный конфиг — дефолты движка, а не паника (JS переживает undefined через ||).
+    let bare = GithubConfig::from_cfg(&json!({}));
+    assert_eq!(bare.api, "https://api.github.com");
+    assert_eq!(bare.tool_name, "ai-review");
+    assert_eq!(bare.http_retries, 3);
+    assert_eq!(bare.pr_number, 0);
+
+    // httpRetries: 0 — валидное «без ретраев», дефолт подставлять нельзя.
+    assert_eq!(GithubConfig::from_cfg(&json!({"httpRetries": 0})).http_retries, 0);
 }
