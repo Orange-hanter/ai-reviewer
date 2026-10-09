@@ -234,7 +234,7 @@ impl Logger {
 
 /// `path.resolve(base, target)` в POSIX-семантике: абсолютный `target` побеждает,
 /// иначе склейка с `base`; `.`/`..` снимаются лексически, без обращения к ФС.
-fn js_resolve(base: &Path, target: &str) -> PathBuf {
+pub fn js_resolve(base: &Path, target: &str) -> PathBuf {
     let source = if target.starts_with('/') {
         target.to_string()
     } else {
