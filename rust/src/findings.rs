@@ -113,31 +113,83 @@ pub fn js_to_number(v: &Value) -> Option<f64> {
 }
 
 /// JS `Number(string)`; None соответствует NaN.
+///
+/// Строго по грамматике StringNumericLiteral (ECMA-262 7.1.4.1.1): знак допустим
+/// только у десятичного литерала и `Infinity`; `0x`/`0o`/`0b` — без знака; ни
+/// `inf`/`nan`/`infinity` в любом регистре, ни `_`, ни двойного знака. Разбор
+/// `str::parse::<f64>` шире JS-грамматики, поэтому вход сначала проверяется.
 pub fn js_string_to_number(s: &str) -> Option<f64> {
     let t = js_trim(s);
     if t.is_empty() {
         return Some(0.0); // Number('') === 0 (пустая строка ловится раньше у normalizeConfidence)
     }
-    if t.eq_ignore_ascii_case("infinity") || t == "+Infinity" {
-        return Some(f64::INFINITY);
+    let b = t.as_bytes();
+    if b.len() > 2 && b[0] == b'0' {
+        let radix = match b[1] {
+            b'x' | b'X' => Some(16),
+            b'o' | b'O' => Some(8),
+            b'b' | b'B' => Some(2),
+            _ => None,
+        };
+        if let Some(radix) = radix {
+            let digits = &t[2..];
+            if !digits.chars().all(|c| c.is_digit(radix)) {
+                return None;
+            }
+            // Без переполнения: u128 покрывает практические значения, дальше —
+            // накопление в f64 (как и V8, теряет младшие биты за 2^53).
+            return Some(match u128::from_str_radix(digits, radix) {
+                Ok(n) => n as f64,
+                Err(_) => digits.chars().fold(0.0, |acc, c| acc * radix as f64 + c.to_digit(radix).unwrap() as f64),
+            });
+        }
     }
-    if t == "-Infinity" {
-        return Some(f64::NEG_INFINITY);
-    }
-    let (sign, rest) = match t.strip_prefix('-') {
-        Some(r) => (-1.0, r),
-        None => (1.0, t.strip_prefix('+').unwrap_or(t)),
+    let (sign, rest) = match b[0] {
+        b'-' => (-1.0, &t[1..]),
+        b'+' => (1.0, &t[1..]),
+        _ => (1.0, t),
     };
-    if let Some(hex) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
-        return i64::from_str_radix(hex, 16).ok().map(|n| sign * n as f64);
+    if rest == "Infinity" {
+        return Some(sign * f64::INFINITY);
     }
-    // ".5"/"+.5"/"-.5" — валидны в JS, но не парсятся Rust напрямую.
-    let normalized = if let Some(dot_rest) = rest.strip_prefix('.') {
-        format!("0.{dot_rest}")
-    } else {
-        rest.to_string()
-    };
+    if !is_js_unsigned_decimal(rest) {
+        return None;
+    }
+    // ".5" Rust парсит не во всех версиях — нормализуем к "0.5".
+    let normalized = if rest.starts_with('.') { format!("0{rest}") } else { rest.to_string() };
     normalized.parse::<f64>().ok().map(|n| sign * n)
+}
+
+/// StrUnsignedDecimalLiteral без `Infinity`: `digits [. digits] [exp]` или
+/// `. digits [exp]`, где exp — `[eE][+-]?digits`.
+fn is_js_unsigned_decimal(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    let digits = |i: &mut usize| {
+        let from = *i;
+        while *i < b.len() && b[*i].is_ascii_digit() {
+            *i += 1;
+        }
+        *i - from
+    };
+    let mut mantissa = digits(&mut i);
+    if i < b.len() && b[i] == b'.' {
+        i += 1;
+        mantissa += digits(&mut i);
+    }
+    if mantissa == 0 {
+        return false;
+    }
+    if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+        i += 1;
+        if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
+            i += 1;
+        }
+        if digits(&mut i) == 0 {
+            return false;
+        }
+    }
+    i == b.len()
 }
 
 /// JS `Number(v) || 0` (NaN → 0; Infinity сохраняется).
@@ -794,6 +846,28 @@ mod tests {
 
     fn finding(v: serde_json::Value) -> Value {
         v
+    }
+
+    /// `Number(string)` по грамматике StringNumericLiteral; эталон — V8.
+    #[test]
+    fn js_string_to_number_matches_v8() {
+        let nan = [
+            "infinity", "INFINITY", "inf", "nan", "NaN", "--5", "+-5", "-+5", "-0x10", "0x", "0x+5", "e5", "1e",
+            ".", "1_000", "0b2", "+0b1",
+        ];
+        for s in nan {
+            assert_eq!(js_string_to_number(s), None, "{s:?}");
+        }
+        let num: [(&str, f64); 16] = [
+            ("0x10", 16.0), ("0b101", 5.0), ("0o17", 15.0), ("0B11", 3.0), ("5.", 5.0), ("+.5", 0.5),
+            ("-.5", -0.5), ("1e3", 1000.0), ("1E+2", 100.0), (" 12 ", 12.0), ("\u{a0} 7 ", 7.0),
+            ("Infinity", f64::INFINITY), ("-Infinity", f64::NEG_INFINITY), ("+Infinity", f64::INFINITY),
+            ("00012", 12.0), ("0x1fffffffffffffffff", 590_295_810_358_705_700_000.0),
+        ];
+        for (s, want) in num {
+            assert_eq!(js_string_to_number(s), Some(want), "{s:?}");
+        }
+        assert!(js_string_to_number("-0").unwrap().is_sign_negative());
     }
 
     #[test]

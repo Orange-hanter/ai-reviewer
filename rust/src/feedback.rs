@@ -1336,6 +1336,33 @@ mod tests {
         );
     }
 
+    /// Граница доверия журнала: Rust не принимает строки, которые JS отвергает, и
+    /// наоборот. Эталон снят с `normalizeFeedbackEntry` (RFC 16 SEC): расхождение
+    /// было в `Number(string)` — `--5`, `-0x5`, `infinity` Rust понимал как числа,
+    /// а `0b101`/`0o17` — нет.
+    #[test]
+    fn normalize_number_coercion_matches_js() {
+        let f = json!({ "file": "a.ts", "line": 3, "title": "t" });
+        let row = |extra: Value| {
+            let mut base = json!({ "pr": 5, "source": "label", "signal": "fp", "finding": f.clone() });
+            for (k, v) in extra.as_object().unwrap() {
+                base[k] = v.clone();
+            }
+            normalize_feedback_entry(&base).map(|v| js_stringify(&v))
+        };
+        let ok = |line: u32, tail: &str| {
+            Some(format!(
+                r#"{{"schemaVersion":1,"ts":"1970-01-01T00:00:00.000Z","repo":"unknown/unknown","pr":5,"source":"label","signal":"fp","finding":{{"file":"a.ts","line":{line},"severity":"minor","title":"t"}}{tail}}}"#
+            ))
+        };
+        assert_eq!(row(json!({ "schemaVersion": "--1" })), None);
+        assert_eq!(row(json!({ "pr": "--5" })), None);
+        assert_eq!(row(json!({ "pr": "-0x5" })), None);
+        assert_eq!(row(json!({ "pr": "0b101" })), ok(3, ""));
+        assert_eq!(row(json!({ "finding": { "file": "a.ts", "line": "infinity", "title": "t" } })), ok(0, ""));
+        assert_eq!(row(json!({ "commentId": "0o17" })), ok(3, r#","commentId":15"#));
+    }
+
     #[test]
     fn migrate_matches_js_and_is_idempotent() {
         let text = "{\"pr\":\"7\",\"source\":\"label\",\"signal\":\"tp\",\"commentId\":\"3\",\"finding\":{\"line\":\"-4\",\"severity\":\"x\",\"title\":\"\",\"model\":\"m\"},\"extra\":1}\n  \n{\"schemaVersion\":2,\"pr\":1}\n[1]\n";
