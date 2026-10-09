@@ -10,6 +10,21 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+## 0.4.0 — карточки символов (RFC 14), ревью-MCP и Cursor Plugin (RFC 08–12), косвенные признаки (RFC 15) — 2026-10-09
+
+**Для потребителя — что меняется при обновлении пина с `v0.3.0`:**
+
+- **Карточки символов включены по умолчанию** (`REVIEW_SYMBOL_CARDS=1`). Нужен граф Graphify
+  (`.graphify/graphify-out/graph.json`, как для blast-radius); без него карточек нет и
+  поведение прежнее. Включённая фича входит в отпечаток конфигурации инкрементального
+  прогона — **первый прогон после обновления полный**. Откат — `REVIEW_SYMBOL_CARDS=0`.
+- **Запасная модель** по умолчанию — `deepseek-v4.1-flash`: прежнюю `deepseek-v4-flash`
+  провайдер снял. Если в вашем workflow явно прописано
+  `OLLAMA_MODELS_FALLBACK: deepseek-v4-flash` (шаблон `examples/ci/pr-review.yml` это
+  делал) — заменить.
+- Формат футера sticky, namespace маркеров, контракты `swarm` / `export` / `structure` —
+  без изменений.
+
 ### Исправлено — запасная модель снята провайдером
 
 `OLLAMA_MODELS_FALLBACK` по умолчанию: `deepseek-v4-flash` → `deepseek-v4.1-flash`. Старую
