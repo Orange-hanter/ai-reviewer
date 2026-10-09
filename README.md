@@ -11,7 +11,7 @@ last_updated: 2026-09-29
 <img src=".github/hero.png" alt="ai-reviewer — code review that has to prove itself: prescan, jury, verifier, merge gate, MCP" width="100%">
 
 [![CI](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml)
-[![version](https://img.shields.io/badge/version-0.3.0-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.4.0-blue)](CHANGELOG.md)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![deps](https://img.shields.io/badge/dependencies-0-success)](package.json)
 [![license](https://img.shields.io/badge/license-UNLICENSED-lightgrey)](#лицензия)
@@ -256,7 +256,7 @@ npx pr-review-structure \
 бы секреты прогона:
 
 ```
-ops/ai-reviewer-ref          # v0.3.0 или commit SHA — пин читается из базовой ветки
+ops/ai-reviewer-ref          # v0.4.0 или commit SHA — пин читается из базовой ветки
 ops/ai-review/profile.json   # профиль проекта
 ```
 
