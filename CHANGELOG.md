@@ -10,6 +10,23 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+**GitLab как второй хостинг кода ([RFC 16](proposals/16-gitlab.md)).**
+
+- Шов `lib/forge.mjs`: пайплайн, auto-triage и feedback работают с клиентом хостинга через
+  один контракт; `deps.forge` (прежний `deps.github` — алиас), `cfg.forge` рядом с `cfg.github`.
+  Выбор — `--forge` / `REVIEW_FORGE`, иначе `GITLAB_CI=true` → GitLab, иначе GitHub.
+- `lib/gitlab.mjs`: MR через REST v4 — дифф (`raw_diffs`, иначе сборка из `/diffs`), sticky
+  заметкой, инлайны draft notes + `bulk_publish` (fallback — discussions), позиция с
+  `old_path`/`old_line` из того же диффа, auto-triage на discussions, 👍/👎 через award emoji.
+- На GitLab экспорт пишет `gl-code-quality-report.json` (виджет Code Quality в MR).
+- Шаблоны `examples/ci/gitlab/` (ревью и feedback) с контрактными тестами; раздел GitLab в
+  `docs/integration.md` и `docs/configuration.md`.
+- Разбор футера sticky вынесен в `lib/sticky.mjs` (был продублирован в `lib/github.mjs`).
+
+**Для потребителя на GitHub:** поведение не меняется; формат футера, namespace маркеров,
+контракты `swarm` / `export` / `structure` — прежние. `repositoryUri` SARIF по умолчанию
+учитывает `GITHUB_SERVER_URL` (GitHub Enterprise).
+
 ## 0.4.0 — карточки символов (RFC 14), ревью-MCP и Cursor Plugin (RFC 08–12), косвенные признаки (RFC 15) — 2026-10-09
 
 **Для потребителя — что меняется при обновлении пина с `v0.3.0`:**

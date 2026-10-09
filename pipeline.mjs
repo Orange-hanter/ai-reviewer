@@ -398,7 +398,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         log(`дифф из файла ${diffFile} (${diff.length} байт)${headSha ? ` · head ${headSha.slice(0, 7)}` : ''}`);
       } else {
         const loaded = await github.loadDiff();
-        if (!loaded) die('не удалось загрузить дифф PR (нет REPO/PR/token или сбой GitHub API)');
+        if (!loaded) die('не удалось загрузить дифф PR (нет REPO/PR/token или сбой API хостинга)');
         if (loaded.draft) die('PR — черновик, пропускаем');
         pr = loaded.pr;
         headSha = loaded.headSha;

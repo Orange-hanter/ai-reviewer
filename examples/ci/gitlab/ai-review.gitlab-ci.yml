@@ -1,0 +1,98 @@
+# ШАБЛОН для проекта-потребителя на GitLab (RFC 16). Подключите в .gitlab-ci.yml проекта:
+#
+#   include:
+#     - local: ops/ci/ai-review.gitlab-ci.yml
+#
+# Авто код-ревью MR: Ollama Cloud (MoA specialists → aggregator → verifier). Ревью постится
+# заметками в MR, но БЛОКИРУЕТ merge через exit 1 на консенсус-блокерах critical/major:
+# job упадёт, а с «Pipelines must succeed» (Settings → Merge requests) MR не смёржится.
+# Инфра-сбои по умолчанию не блокируют, полный LLM-аутедж блокирует (REVIEW_LLM_REQUIRED=1).
+#
+# Переменные CI/CD (Settings → CI/CD → Variables, masked; в этот файл НЕ вписывать):
+#   AI_REVIEW_GITLAB_TOKEN — project access token, роль Developer, scope `api`. CI_JOB_TOKEN
+#                            не подходит: писать заметки и резолвить треды он не может.
+#   OLLAMA_API_KEY         — ключ LLM-провайдера.
+#
+# МОДЕЛЬ ДОВЕРИЯ (RFC 16, Р4). На GitHub пин движка и workflow берутся из base-ветки, и код
+# PR не исполняется с секретами. На GitLab этот файл исполняется из ветки MR: автор MR из
+# того же проекта может поменять job и прочитать секреты. Держать инвариант:
+#   1. внешний путь CI-конфига (Settings → CI/CD → General pipelines → CI/CD configuration
+#      file: `.gitlab-ci.yml@group/ci-config`) — тогда ветка MR конфиг не меняет;
+#   2. НЕ включать «Run pipelines in the parent project for merge requests from forks»:
+#      MR из форков секретов не получают по умолчанию.
+# Без п. 1 секреты доступны каждому, кто может открыть MR из ветки проекта (Developer+).
+# Пин движка ниже всё равно читается из target-ветки — это защищает от подмены движка
+# коммитом в MR, но не от правки самого job.
+
+ai-review:
+  stage: test
+  image: node:24-bookworm
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  # Новый push в MR отменяет прошлый прогон (Settings → CI/CD → Auto-cancel redundant pipelines).
+  interruptible: true
+  # Вердикт гейта — exit code; allow_failure: true превратил бы блок в предупреждение.
+  allow_failure: false
+  timeout: 25m
+  variables:
+    GIT_DEPTH: "0"
+    REVIEW_FORGE: gitlab
+    REVIEW_MODE: moa
+    MOA_REFERENCE_MODELS: kimi-k2.7-code,glm-5.3,glm-5.3-flash
+    MOA_SPECIALIST_MODELS: security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3
+    MOA_AGGREGATOR: minimax-m3
+    MOA_REFERENCE_TEMPERATURE: "0.3"
+    MOA_AGGREGATOR_TEMPERATURE: "0.4"
+    OLLAMA_MODELS_FALLBACK: deepseek-v4.1-flash
+    REVIEW_AUTO_TRIAGE: "1"
+    REVIEW_INLINE_ON: critical,major
+    REVIEW_BLOCK_ON: critical,major
+    REVIEW_BLOCK_SINGLE: critical
+    REVIEW_CONSENSUS: "1"
+    REVIEW_CONFIDENCE_MIN: "0.8"
+    REVIEW_VERIFIER: "1"
+    REVIEW_VERIFIER_MODEL: deepseek-v4-pro
+    REVIEW_VERIFIER_STRICT: "1"
+    REVIEW_ROUTER: "1"
+    REVIEW_PRESCAN: "1"
+    REVIEW_PRESCAN_ASTGREP: "1"
+    REVIEW_OBSERVABILITY: "1"
+    REVIEW_EXPORT: "1"
+    # Каталоги зафиксированы здесь, а не профилем: на них ссылается artifacts ниже.
+    REVIEW_OBSERVABILITY_DIR: .ai-review/observability
+    REVIEW_EXPORT_DIR: .ai-review/export
+    REVIEW_APP_DIR: app
+    REVIEW_PROFILE: ops/ai-review/profile.json
+    REVIEW_TIME_BUDGET_MIN: "20"
+  script:
+    - |
+      set -euo pipefail
+      # Пин движка — из target-ветки MR, не из ветки MR: правка ops/ai-reviewer-ref в MR
+      # поменяет движок только после мержа (и это видно в диффе).
+      TARGET="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-main}"
+      [[ "$TARGET" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid target branch"; exit 1; }
+      git fetch --quiet origin "$TARGET"
+      REF="$(git show "FETCH_HEAD:ops/ai-reviewer-ref" 2>/dev/null | tr -d '[:space:]' || true)"
+      if [ -z "$REF" ]; then
+        echo "→ пин ops/ai-reviewer-ref отсутствует в $TARGET (bootstrap-MR) — ревью пропускаем"
+        exit 0
+      fi
+      [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
+      echo "→ движок ai-reviewer@$REF"
+      git clone --quiet https://github.com/Orange-hanter/ai-reviewer.git .ai-reviewer-engine
+      git -C .ai-reviewer-engine checkout --quiet "$REF"
+      # --ignore-scripts: postinstall зависимостей из кода MR не исполняем. eslint/ast-grep
+      # prescan — чистый JS, lifecycle-скрипты ему не нужны.
+      if [ -f app/package-lock.json ]; then
+        (cd app && npm ci --ignore-scripts --fund=false --audit=false) || echo "npm ci упал — prescan без eslint"
+      fi
+      node .ai-reviewer-engine/bin/pr-review.mjs
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - .ai-review/observability/
+      - .ai-review/export/
+    reports:
+      # Находки ревью в виджете MR (SARIF GitLab не рендерит).
+      codequality: .ai-review/export/gl-code-quality-report.json

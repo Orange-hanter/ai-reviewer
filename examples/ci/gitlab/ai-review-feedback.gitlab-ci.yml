@@ -1,0 +1,80 @@
+# ШАБЛОН (RFC 16): сбор 👍/👎 и лейбла ai-review-fp с недавних MR → JSONL в репозитории →
+# MR с данными. Аналог examples/ci/pr-review-feedback.yml для GitLab.
+#
+# Запуск — pipeline schedule (CI/CD → Schedules) на target-ветке с переменной
+# AI_REVIEW_JOB=feedback. Точечный harvest одного MR — ручной pipeline с
+# CI_MERGE_REQUEST_IID=<iid> в переменных.
+#
+# Переменные CI/CD (masked): AI_REVIEW_GITLAB_TOKEN — project access token, роль Developer,
+# scopes `api` + `write_repository` (push ветки с данными и создание MR).
+#
+# Доверенность авторов: на GitLab бот — владелец токена (`project_<id>_bot_<hash>`), и при
+# дефолтном REVIEW_FEEDBACK_TRUSTED_AUTHORS движок подставляет его логин сам. Если ревью
+# постит другой токен, задайте его логин явно.
+
+ai-review-feedback:
+  stage: test
+  image: node:24-bookworm
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $AI_REVIEW_JOB == "feedback"
+    - if: $CI_PIPELINE_SOURCE == "web" && $AI_REVIEW_JOB == "feedback"
+  # Два прогона одновременно запушили бы одну ветку данных.
+  resource_group: ai-review-feedback
+  timeout: 15m
+  variables:
+    GIT_DEPTH: "0"
+    REVIEW_FORGE: gitlab
+    REVIEW_FEEDBACK_LABEL: ai-review-fp
+    REVIEW_FEEDBACK_WRITE: "1"
+    REVIEW_PROFILE: ops/ai-review/profile.json
+    REVIEW_FEEDBACK_LOG: ops/ai-review/feedback/fp-feedback.jsonl
+    REVIEW_FEEDBACK_CANDIDATES: "0"
+    REVIEW_FEEDBACK_MD_APPEND: "0"
+    REVIEW_FEEDBACK_SINCE_DAYS: "14"
+    REVIEW_FEEDBACK_PR_LIMIT: "30"
+  script:
+    - |
+      set -euo pipefail
+      # Schedule исполняется на защищённой ветке — пин читается из неё же.
+      REF="$(tr -d '[:space:]' < ops/ai-reviewer-ref)"
+      [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
+      git clone --quiet https://github.com/Orange-hanter/ai-reviewer.git .ai-reviewer-engine
+      git -C .ai-reviewer-engine checkout --quiet "$REF"
+
+      LOG="$REVIEW_FEEDBACK_LOG"
+      node .ai-reviewer-engine/feedback/migrate-feedback.mjs --file "$CI_PROJECT_DIR/$LOG" --write
+      node .ai-reviewer-engine/bin/pr-review-feedback-batch.mjs
+
+      if git diff --quiet -- "$LOG"; then
+        echo "Новых записей нет"
+        exit 0
+      fi
+      BRANCH="bot/ai-review-feedback"
+      git config user.name "ai-review-bot"
+      git config user.email "ai-review-bot@${CI_SERVER_HOST}"
+      git checkout -B "$BRANCH"
+      git add "$LOG"
+      git commit -m "chore(pr-review): persist harvested feedback"
+      # Git по HTTP принимает access token как пароль Basic-авторизации (PRIVATE-TOKEN —
+      # только для API). Токен в заголовке, а не в URL remote: URL печатается в ошибках git.
+      AUTH="$(printf 'oauth2:%s' "$AI_REVIEW_GITLAB_TOKEN" | base64 -w0)"
+      git -c "http.extraHeader=Authorization: Basic ${AUTH}" \
+        push -f "${CI_SERVER_URL}/${CI_PROJECT_PATH}.git" "HEAD:refs/heads/$BRANCH"
+      BRANCH="$BRANCH" node --input-type=module -e '
+        const api = process.env.CI_API_V4_URL, project = process.env.CI_PROJECT_ID;
+        const res = await fetch(`${api}/projects/${project}/merge_requests`, {
+          method: "POST",
+          headers: { "PRIVATE-TOKEN": process.env.AI_REVIEW_GITLAB_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_branch: process.env.BRANCH,
+            target_branch: process.env.CI_COMMIT_REF_NAME,
+            title: "chore(pr-review): persist harvested feedback",
+            remove_source_branch: true,
+          }),
+          signal: AbortSignal.timeout(20_000),
+        });
+        // 409 — MR из этой ветки уже открыт: force-push выше уже обновил его данные.
+        if (res.status === 409) { console.log("MR с данными уже открыт — обновлён push"); process.exit(0); }
+        if (!res.ok) throw new Error(`create MR → ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        console.log(`MR: ${(await res.json()).web_url}`);
+      '

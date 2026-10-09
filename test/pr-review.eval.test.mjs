@@ -1750,3 +1750,39 @@ test('loadReviewConfig: REVIEW_FEEDBACK off', () => {
   assert.equal(cfg.feedback.label, 'ai-review-fp');
   assert.match(cfg.feedback.logFile, /fp-feedback\.jsonl$/);
 });
+
+// RFC 16: шаблоны GitLab CI. Гейт держится на exit code job'а — allow_failure и пин движка
+// из target-ветки проверяются так же строго, как в шаблонах GitHub Actions.
+test('gitlab ci: ревью — MR pipeline, гейт не ослаблен, пин из target-ветки, секретов в файле нет', async () => {
+  const { CODEQUALITY_FILE } = await import('../lib/codequality.mjs');
+  const yml = await readFile(resolve(REPO_ROOT, 'examples/ci/gitlab/ai-review.gitlab-ci.yml'), 'utf8');
+  assert.equal(workflowScalar(yml, 'ai-review.allow_failure'), 'false', 'allow_failure: true превращает блок в предупреждение');
+  assert.equal(workflowScalar(yml, 'ai-review.interruptible'), 'true');
+  assert.equal(workflowScalar(yml, 'ai-review.variables.REVIEW_FORGE'), 'gitlab');
+  assert.match(yml, /- if: \$CI_PIPELINE_SOURCE == "merge_request_event"/);
+  // Пин читается из target-ветки, а не из чекаута MR.
+  assert.match(yml, /git fetch --quiet origin "\$TARGET"/);
+  assert.match(yml, /git show "FETCH_HEAD:ops\/ai-reviewer-ref"/);
+  assert.doesNotMatch(yml, /cat ops\/ai-reviewer-ref|< ops\/ai-reviewer-ref/, 'пин из рабочей копии MR подменяется коммитом в MR');
+  assert.match(yml, /npm ci --ignore-scripts/);
+  // Секреты — только переменными CI/CD (masked), не литералами в шаблоне.
+  for (const secret of ['AI_REVIEW_GITLAB_TOKEN', 'OLLAMA_API_KEY']) {
+    assert.ok(!yml.split('\n').some((l) => new RegExp(`^\\s+${secret}:`).test(l)), `${secret} не задаётся в variables шаблона`);
+  }
+  // Отчёт Code Quality лежит там, куда его пишет writeReviewExports.
+  const exportDir = workflowScalar(yml, 'ai-review.variables.REVIEW_EXPORT_DIR');
+  assert.equal(workflowScalar(yml, 'ai-review.artifacts.reports.codequality'), `${exportDir}/${CODEQUALITY_FILE}`);
+  assert.equal(workflowScalar(yml, 'ai-review.artifacts.when'), 'always');
+});
+
+test('gitlab ci: feedback — только schedule/web с явным AI_REVIEW_JOB, сериализован, токен не в URL', async () => {
+  const yml = await readFile(resolve(REPO_ROOT, 'examples/ci/gitlab/ai-review-feedback.gitlab-ci.yml'), 'utf8');
+  const rules = yml.split('\n').filter((l) => /^\s+- if:/.test(l));
+  assert.equal(rules.length, 2);
+  assert.ok(rules.every((l) => l.includes('$AI_REVIEW_JOB == "feedback"')), 'без метки job запускался бы в каждом pipeline');
+  assert.ok(rules.every((l) => !l.includes('merge_request_event')), 'harvest пишет в репозиторий — не из MR pipeline');
+  assert.equal(workflowScalar(yml, 'ai-review-feedback.resource_group'), 'ai-review-feedback');
+  assert.equal(workflowScalar(yml, 'ai-review-feedback.variables.REVIEW_FORGE'), 'gitlab');
+  assert.doesNotMatch(yml, /https:\/\/[^\s"]*\$\{?AI_REVIEW_GITLAB_TOKEN/, 'токен в URL remote печатается в ошибках git');
+  assert.match(yml, /pr-review-feedback-batch\.mjs/);
+});

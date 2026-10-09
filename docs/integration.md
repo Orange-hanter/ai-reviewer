@@ -3,7 +3,7 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
+last_updated: 2026-10-09
 ---
 
 # Интеграция в репозиторий-потребитель
@@ -11,7 +11,8 @@ last_updated: 2026-09-29
 Движок живёт в отдельном репозитории и **никогда не берётся из кода PR**: CI выкачивает его
 по пину — так вредоносный PR не сможет выполнить свой код с секретами прогона.
 
-Готовые шаблоны workflow — в [`examples/ci/`](../examples/ci/).
+Готовые шаблоны workflow — в [`examples/ci/`](../examples/ci/) (GitHub Actions) и
+[`examples/ci/gitlab/`](../examples/ci/gitlab/) (GitLab CI, § 9 — там модель доверия иная).
 
 ## 1. Пин версии
 
@@ -128,3 +129,41 @@ OLLAMA_API_KEY=… REVIEW_PROFILE=ops/ai-review/profile.json \
    (пин читается из базовой ветки) → merge.
 3. Первый прогон после bump сравнить с предыдущим: Δ-блок в sticky показывает, что изменилось
    в наборе находок на том же коде.
+
+## 9. GitLab (RFC 16)
+
+Шаблоны — [`examples/ci/gitlab/`](../examples/ci/gitlab/):
+
+| Шаблон | Что делает |
+|--------|------------|
+| [`ai-review.gitlab-ci.yml`](../examples/ci/gitlab/ai-review.gitlab-ci.yml) | Ревью MR (гейт) в merge request pipeline; отчёт Code Quality в виджет MR |
+| [`ai-review-feedback.gitlab-ci.yml`](../examples/ci/gitlab/ai-review-feedback.gitlab-ci.yml) | По расписанию: сбор 👍/👎 и метки → MR с журналом |
+
+Шаблонов promote и metrics для GitLab пока нет: `feedback/promote-candidate.mjs` и
+`pr-review-metrics` читают GitHub API.
+
+Подключение:
+
+1. Пин и профиль — как в § 1–2.
+2. Access token проекта (Settings → Access tokens): роль Developer, scope `api` (для
+   feedback-шаблона ещё `write_repository`). Положить в CI/CD-переменную
+   `AI_REVIEW_GITLAB_TOKEN` (masked), рядом — `OLLAMA_API_KEY`.
+3. `include:` шаблона в `.gitlab-ci.yml`, в Settings → Merge requests включить
+   **Pipelines must succeed** — иначе exit 1 гейта не блокирует merge.
+4. Auto-cancel redundant pipelines (Settings → CI/CD) — job помечен `interruptible`.
+
+**Модель доверия отличается от GitHub.** Там workflow и пин берутся из базовой ветки, и код
+PR не исполняется с секретами. На GitLab `.gitlab-ci.yml` исполняется из ветки MR, и автор
+MR из ветки того же проекта может поменять job и прочитать секреты; пин из target-ветки
+защищает только от подмены движка. Чтобы держать инвариант, задайте внешний путь CI-конфига
+(Settings → CI/CD → General pipelines → CI/CD configuration file:
+`.gitlab-ci.yml@group/ci-config`) и не включайте pipelines в родительском проекте для MR из
+форков (по умолчанию выключено — секретов форки не получают).
+
+Локальный прогон по живому MR без постинга:
+
+```bash
+REVIEW_FORGE=gitlab GITLAB_API_URL=https://gitlab.example/api/v4 \
+  AI_REVIEW_GITLAB_TOKEN=… OLLAMA_API_KEY=… \
+  node .ai-reviewer-engine/bin/pr-review.mjs --dry-run --repo group/project --pr 42
+```

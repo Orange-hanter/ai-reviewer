@@ -3,7 +3,7 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
+last_updated: 2026-10-09
 ---
 
 # Конфигурация
@@ -19,7 +19,7 @@ default-off — `1`/`true`/`yes`/`on` как вкл. Пустое/незадан
 ## CLI
 
 ```bash
-pr-review [--dry-run] [--diff path/to.patch] [--head-sha SHA] [--pr N] [--repo owner/repo]
+pr-review [--dry-run] [--diff path/to.patch] [--head-sha SHA] [--pr N] [--repo owner/repo] [--forge github|gitlab]
 pr-review-eval [--fixtures dir] [--json]
 pr-review-gold [--case id] [--jsonl out.jsonl]  # shadow-прогон с LLM на gold-диффах
 pr-review-benchmark [results.jsonl] | --findings f.json --meta meta.json | --gold-dir dir
@@ -37,10 +37,11 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 
 | Флаг | Назначение |
 |------|------------|
-| `--dry-run` | Не постить в GitHub; summary в stdout |
+| `--dry-run` | Не постить в хостинг (GitHub/GitLab); summary в stdout |
 | `--diff` | Offline-режим: unified diff из файла (без PR API) |
 | `--head-sha` | Пин коммита для file-diff (MCP и dry-run). Без флага при `--diff` `headSha` в артефакте пустой |
-| `--pr` / `--repo` | Явный PR (иначе `PR_NUMBER`, `GITHUB_REPOSITORY`) |
+| `--pr` / `--repo` | Явный PR/MR (иначе `PR_NUMBER`, `GITHUB_REPOSITORY`; на GitLab — `CI_MERGE_REQUEST_IID`, `CI_PROJECT_ID`) |
+| `--forge` | Хостинг кода: `github` \| `gitlab` (иначе `REVIEW_FORGE`, затем автоопределение) |
 | `gold --jsonl` | Записи прогона (`id`, `findings`, `wouldBlock`, `wallMs`…) в JSONL — вход для `pr-review-benchmark` |
 | `benchmark` | Оценка gold-результатов без LLM: JSON-массив/JSONL прогонов, пара `--findings` + `--meta` или `--gold-dir` (meta-only) |
 | `gold-harvest --emit` | Писать кандидатов в `<dir>/<id>/meta.json`; существующую мету не перезаписывает — разметка, поправленная руками, сохраняется |
@@ -57,6 +58,16 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_PROFILE` | автопоиск `.ai-reviewer.json`, затем `ai-reviewer.config.json` в корне | Путь к [профилю проекта](profiles.md) |
 
+## Хостинг кода (RFC 16)
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_FORGE` | `gitlab` при `GITLAB_CI=true`, иначе `github` | Куда постить ревью и откуда брать дифф. `--forge` перебивает |
+
+Хостинг попадает в конфиг полем `forge` (`kind`, `api`, `token`, `repo`, `prNumber`,
+`webUrl`); `cfg.github` остаётся алиасом для читателей до RFC 16. `webUrl` — `repositoryUri`
+SARIF, если профиль его не задал.
+
 ## GitHub
 
 | Переменная | Default | Описание |
@@ -66,6 +77,37 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `PR_NUMBER` | — | Номер PR |
 | `GITHUB_API_URL` | `https://api.github.com` | Enterprise API |
 | `GH_TOKEN` | — | Только gold-загрузчик ([`lib/gold-fetch.mjs`](../lib/gold-fetch.mjs)): после `GITHUB_TOKEN`, перед `gh auth token`; без токена — анонимно |
+| `GITHUB_SERVER_URL` | `https://github.com` | Основа `webUrl` (GitHub Enterprise) |
+
+## GitLab
+
+Клиент — [`lib/gitlab.mjs`](../lib/gitlab.mjs), только JS (без Rust-бинаря). Переменные
+`CI_*` GitLab выставляет сам в merge request pipeline.
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `AI_REVIEW_GITLAB_TOKEN` | — | Project/group access token, роль Developer, scope `api`. `CI_JOB_TOKEN` не подходит: заметки в MR он не пишет |
+| `GITLAB_TOKEN` | — | Запасное имя токена, если `AI_REVIEW_GITLAB_TOKEN` пуст |
+| `GITLAB_API_URL` | `CI_API_V4_URL`, иначе `https://gitlab.com/api/v4` | API v4 (self-managed) |
+| `CI_PROJECT_ID` | — | Проект; запасной вариант — `CI_PROJECT_PATH` (`group/sub/project`) |
+| `CI_MERGE_REQUEST_IID` | — | Номер MR |
+| `CI_PROJECT_URL` | собирается из API и `CI_PROJECT_PATH` | `webUrl` проекта |
+
+Что куда пишется:
+
+| Сущность | GitHub | GitLab |
+|----------|--------|--------|
+| Дифф | `pulls/:n` (media type diff) | `merge_requests/:iid/raw_diffs`; нет эндпоинта → сборка из `/diffs` |
+| Sticky | issue comment | заметка MR владельца токена (без позиции) |
+| Инлайны | один review | draft notes + `bulk_publish`; нет draft notes → discussions по одному |
+| Позиция инлайна | `line` + `side: RIGHT` | три SHA из `diff_refs`, `old_path`/`new_path`, `new_line` (+ `old_line` для контекстной строки) — из того же диффа |
+| Auto-triage | GraphQL review threads | REST discussions (`resolved=true`) |
+| 👍/👎 | reactions | award emoji `thumbsup`/`thumbsdown` |
+| Отчёт для UI | SARIF | `gl-code-quality-report.json` в каталоге экспорта (Code Quality) |
+
+Позиции, которые GitLab отклонил (строка вне диффа, 400), не публикуются — число пишется в
+лог. Чистка старых инлайнов и поиск sticky трогают только заметки владельца токена: маркер
+может поставить и человек.
 
 ## Ollama / LLM
 
@@ -349,6 +391,10 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 существующего или другой `markerNamespace` (см. [profiles.md](profiles.md)).
 
 ## Feedback (обучение на 👍/👎)
+
+На GitLab при дефолтном `REVIEW_FEEDBACK_TRUSTED_AUTHORS` доверенным считается владелец
+токена (`GET /user`): у автора заметки GitLab нет признака бота, а дефолт
+`github-actions[bot]` там не встречается. Явно заданный список не подменяется.
 
 | Переменная | Default | Описание |
 |------------|---------|----------|

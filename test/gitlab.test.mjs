@@ -12,6 +12,11 @@ import { createForgeClient, forgeOf } from '../lib/forge.mjs';
 import { resolveForge } from '../lib/config.mjs';
 import { resolveTrustedAuthors, DEFAULT_TRUSTED_AUTHORS } from '../lib/feedback.mjs';
 import { parseDiff, collectAddedPaths } from '../lib/diff.mjs';
+import { buildCodeQuality, CODEQUALITY_FILE } from '../lib/codequality.mjs';
+import { writeReviewExports } from '../lib/export.mjs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const API = 'https://gitlab.test/api/v4';
 const MR = '/projects/g%2Fp/merge_requests/7';
@@ -38,6 +43,7 @@ function res(body, { status = 200, link = '', headers = {} } = {}) {
  * маршрут — 404, как у настоящего API на отсутствующий эндпоинт.
  */
 function fakeGitlab(routes) {
+  routes = { 'GET /user': () => res({ username: 'project_1_bot_x' }), ...routes };
   const calls = [];
   const fetchMock = mock.fn(async (url, opts = {}) => {
     const u = new URL(String(url));
@@ -150,6 +156,8 @@ test('gitlab: sticky — читается из обычных заметок, Di
   const sticky = `${MARKERS.review}\nok\n<!-- ${MARKERS.dataKey}${JSON.stringify(data)} -->`;
   const notes = [
     note(1, sticky),
+    // Последняя по времени, но чужая: подменить футер (перенос находок) она не должна.
+    note(9, `${MARKERS.review}\n<!-- ${MARKERS.dataKey}{"sha":"forged"} -->`, { author: { username: 'dev' } }),
     note(2, `${MARKERS.review} системная`, { system: true }),
     diffNote(3, `${MARKERS.review} в строке`),
   ];
@@ -221,6 +229,8 @@ test('gitlab: post-then-delete — удаляются только инлайн�
     { id: 'old', notes: [diffNote(1, `${MARKERS.inline}\nстарый`)] },
     { id: 'replied', notes: [diffNote(2, `${MARKERS.inline}\nс ответом`), note(3, 'не согласен')] },
     { id: 'human', notes: [diffNote(4, 'человек')] },
+    // Маркер поставил человек: токен с ролью Maintainer мог бы удалить заметку — не должен.
+    { id: 'forged', notes: [diffNote(5, `${MARKERS.inline}\nподделка`, { author: { username: 'dev' } })] },
   ];
   const deleted = [];
   const { client } = fakeGitlab({
@@ -309,6 +319,24 @@ test('gitlab: пагинация по Link и ретрай 5xx; токен в PR
   assert.equal(calls[0].headers['PRIVATE-TOKEN'], 't');
 });
 
+test('gitlab: ссылка пагинации на чужой origin не запрашивается (токен не уходит)', async () => {
+  const { client, calls } = fakeGitlab({
+    [`GET ${MR}/notes`]: () => res([note(1, 'a')], { link: '<https://evil.test/api/v4/x?page=2>; rel="next"' }),
+  });
+  await client.readStickyReview();
+  assert.ok(calls.every((c) => !String(c.path).startsWith('/x')));
+  assert.equal(calls.filter((c) => c.path === `${MR}/notes`).length, 1);
+});
+
+test('gitlab: владелец токена не определён → инлайны не чистятся', async () => {
+  const { client, calls } = fakeGitlab({
+    'GET /user': () => res({ message: '401' }, { status: 401 }),
+    [`GET ${MR}/discussions`]: () => res([{ id: 'old', notes: [diffNote(1, `${MARKERS.inline}\nстарый`)] }]),
+  });
+  assert.equal(await client.deleteStaleInline(), 0);
+  assert.ok(!calls.some((c) => c.method === 'DELETE'));
+});
+
 test('forge: resolveForge — GITLAB_CI, явный REVIEW_FORGE, GitHub по умолчанию', () => {
   const gl = resolveForge({
     GITLAB_CI: 'true', CI_API_V4_URL: 'https://gl.example/api/v4/', CI_PROJECT_ID: '42',
@@ -339,4 +367,37 @@ test('feedback: resolveTrustedAuthors — дефолт заменяется вл
   assert.deepEqual(await resolveTrustedAuthors('me,you', client), ['me', 'you']);
   assert.deepEqual(await resolveTrustedAuthors(DEFAULT_TRUSTED_AUTHORS, {}), [DEFAULT_TRUSTED_AUTHORS]);
   assert.deepEqual(await resolveTrustedAuthors(DEFAULT_TRUSTED_AUTHORS, { selfLogin: async () => { throw new Error('401'); } }), [DEFAULT_TRUSTED_AUTHORS]);
+});
+
+test('codequality: формат отчёта GitLab, отпечаток не зависит от строки', () => {
+  const report = buildCodeQuality({
+    findings: [
+      { file: 'a.js', line: 3, severity: 'critical', title: 'утечка' },
+      { file: 'a.js', line: 0, severity: 'nit', title: 'стиль' },
+      { file: '', line: 1, severity: 'major', title: 'без файла' },
+    ],
+  }, { checkPrefix: 'p' });
+  assert.equal(report.length, 2);
+  assert.deepEqual(report[0].location, { path: 'a.js', lines: { begin: 3 } });
+  assert.equal(report[0].severity, 'critical');
+  assert.equal(report[0].check_name, 'p/critical');
+  assert.equal(report[1].severity, 'info');
+  assert.equal(report[1].location.lines.begin, 1);
+  const moved = buildCodeQuality({ findings: [{ file: 'a.js', line: 30, severity: 'critical', title: 'утечка' }] });
+  assert.equal(moved[0].fingerprint, report[0].fingerprint);
+});
+
+test('codequality: writeReviewExports пишет отчёт только на GitLab', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cq-'));
+  try {
+    const payload = { findings: [{ file: 'a.js', line: 1, severity: 'major', title: 't' }], blockers: [] };
+    const exp = { enabled: true, dir, json: false, sarif: false };
+    const gl = await writeReviewExports({ ...CFG, export: exp }, payload);
+    assert.deepEqual(gl.written, [join(dir, CODEQUALITY_FILE)]);
+    assert.equal(JSON.parse(await readFile(join(dir, CODEQUALITY_FILE), 'utf8')).length, 1);
+    const gh = await writeReviewExports({ github: { repo: 'o/r' }, export: { ...exp, dir: join(dir, 'gh') } }, payload);
+    assert.deepEqual(gh.written, []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

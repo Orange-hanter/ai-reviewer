@@ -55,7 +55,8 @@ router (skip / light / full) → `parseDiff` + чанки → контекст (
 через Graphify) → prescan (eslint + ast-grep, детерминированно, до LLM) → engine (MoA:
 specialist-advisors → жюри-агрегатор с refutation) → verifier Pass B (отдельная модель) →
 FP-фильтр, кластеризация, гейт (`resolveBlockers`) → actionability (inline или свод) →
-sticky + inline + Δ-блок в GitHub, JSON/SARIF-артефакт, JSONL observability.
+sticky + inline + Δ-блок в GitHub или GitLab (шов `lib/forge.mjs`, RFC 16), JSON/SARIF-артефакт,
+JSONL observability.
 
 **Цена прогона — предмет проектирования, а не следствие** ([RFC 04](proposals/04-token-economy.md)).
 Три места, где состав вызовов решается, а не задан: контекст **добавленного** файла не
@@ -73,7 +74,9 @@ sticky + inline + Δ-блок в GitHub, JSON/SARIF-артефакт, JSONL obse
 блокер до minor только потому, что жюри в этом прогоне по нему не высказывалось. Порядок этих
 трёх шагов — не деталь реализации, а то, чем гейт держится при экономии.
 
-**DI вместо моков.** `deps` принимает `github`, `engine`, `prescan`, `graphify`, `die`.
+**DI вместо моков.** `deps` принимает `forge` (прежнее имя `github` — алиас), `engine`, `prescan`,
+`graphify`, `die`. Клиент хостинга приводит ответы к GitHub-форме из контракта в
+`lib/forge.mjs` — пайплайн не знает, где работает.
 Тесты (`test/pr-review.pipeline.test.mjs`) и gold-раннер подменяют их и гоняют весь `run()`
 без сети. Новый внешний эффект заводи через `deps`, а не прямым import внутри стадии.
 
