@@ -474,6 +474,7 @@ fn client(api: &str) -> RealGithubClient {
             pr_number: 7,
             tool_name: "ai-reviewer-test".to_string(),
             http_retries: 2,
+            ..GithubConfig::default()
         },
         Markers::default(),
     )
@@ -519,7 +520,7 @@ fn client_sticky_data_берёт_последний_футер_игнориру�
     });
     let quoted = format!("<!-- {DATA_KEY}{} -->", json!({"findings": []}));
     let body = format!("{MARKER}\nПример: {quoted}\n\n<!-- {DATA_KEY}{real} -->");
-    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "body": body}]))));
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "user": bot(), "body": body}]))));
     let data = client(&server.api).read_prior_sticky_data().unwrap();
     assert_eq!(data.sha, "abc");
     assert_eq!(data.findings.len(), 1, "цитата маркера в теле не перебивает настоящий футер");
@@ -533,7 +534,7 @@ fn client_sticky_data_обрезанный_футер_чинится_ремон�
     let body = format!(
         "{MARKER}\n<!-- {DATA_KEY}{{\"findings\":[{{\"file\":\"b.ts\",\"line\":2,\"title\":\"t\"}}],\"runs\":[],\"sha\":\"dead"
     );
-    let server = fake_server(move |_| Some(json_res(json!([{"id": 9, "body": body}]))));
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 9, "user": bot(), "body": body}]))));
     let data = client(&server.api).read_prior_sticky_data().unwrap();
     assert_eq!(data.findings[0]["file"], json!("b.ts"));
     assert_eq!(data.sha, "dead");
@@ -543,7 +544,7 @@ fn client_sticky_data_обрезанный_футер_чинится_ремон�
 fn client_sticky_data_мусор_в_футере_это_пустая_форма() {
     // Единственный catch JS-версии: битый футер = «прошлого прогона не было».
     let body = format!("{MARKER}\n<!-- {DATA_KEY} не json -->");
-    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "body": body}]))));
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "user": bot(), "body": body}]))));
     let data = client(&server.api).read_prior_sticky_data().unwrap();
     assert!(data.findings.is_empty());
     assert_eq!(data.sha, "");
@@ -559,7 +560,7 @@ fn client_sticky_data_фильтрует_форму_элементов_и_реж
         "sha": 42,
     });
     let body = sticky_body(&data);
-    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "body": body}]))));
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "user": bot(), "body": body}]))));
     let got = client(&server.api).read_prior_sticky_data().unwrap();
     assert_eq!(got.findings.len(), 1, "без строкового file элемент не находка");
     assert_eq!(got.runs.len(), 5, "slice(-5): последние пять прогонов");
@@ -571,7 +572,7 @@ fn client_sticky_data_фильтрует_форму_элементов_и_реж
 fn client_read_prior_findings_это_находки_футера() {
     let data = json!({"findings": [{"file": "a.ts"}], "runs": [], "sha": "x"});
     let body = sticky_body(&data);
-    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "body": body}]))));
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 1, "user": bot(), "body": body}]))));
     let findings = client(&server.api).read_prior_findings().unwrap();
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0]["file"], json!("a.ts"));
@@ -601,7 +602,7 @@ fn client_upsert_sticky_есть_маркер_это_updated_патчем() {
     let existing = sticky_body(&json!({"findings": [], "runs": [], "sha": "old"}));
     let server = fake_server(move |raw| {
         if request_line(raw).starts_with("GET ") {
-            return Some(json_res(json!([{"id": 42, "body": existing}])));
+            return Some(json_res(json!([{"id": 42, "user": bot(), "body": existing}])));
         }
         Some(json_res(json!({"id": 42})))
     });
@@ -620,7 +621,7 @@ fn client_upsert_sticky_чужой_комментарий_не_перезапи�
     // маркера сделала бы чужой комментарий нашим sticky.
     let server = fake_server(|raw| {
         if request_line(raw).starts_with("GET ") {
-            return Some(json_res(json!([{"id": 5, "body": format!("цитирую {MARKER} вот так")}])));
+            return Some(json_res(json!([{"id": 5, "user": bot(), "body": format!("цитирую {MARKER} вот так")}])));
         }
         Some(json_res(json!({"id": 6})))
     });
@@ -634,14 +635,14 @@ fn client_список_комментариев_ходит_по_link_next() {
         let line = request_line(raw);
         if line.starts_with("GET ") {
             if line.contains("page=2") {
-                return Some(json_res(json!([{"id": 2, "body": "x"}])));
+                return Some(json_res(json!([{"id": 2, "user": bot(), "body": "x"}])));
             }
             let link =
                 r#"</repos/o/r/issues/7/comments?page=2&per_page=100>; rel="next""#.to_string();
             return Some((
                 200,
                 vec![("Link".to_string(), link)],
-                serde_json::to_vec(&json!([{"id": 1, "body": "x"}])).unwrap(),
+                serde_json::to_vec(&json!([{"id": 1, "user": bot(), "body": "x"}])).unwrap(),
             ));
         }
         Some(json_res(json!({"id": 1})))
@@ -740,11 +741,11 @@ fn client_delete_stale_inline_фильтры_и_лог() {
     let server = fake_server(|raw| {
         if request_line(raw).starts_with("GET ") {
             return Some(json_res(json!([
-                {"id": 10, "body": format!("{INLINE_MARKER}\nold"), "pull_request_review_id": 1},
-                {"id": 11, "body": format!("{INLINE_MARKER}\nfresh"), "pull_request_review_id": 99},
-                {"id": 12, "body": format!("{INLINE_MARKER}\nroot"), "pull_request_review_id": 1},
-                {"id": 13, "body": "reply", "in_reply_to_id": 12, "pull_request_review_id": 2},
-                {"id": 14, "body": "чужой комментарий"}
+                {"id": 10, "user": bot(), "body": format!("{INLINE_MARKER}\nold"), "pull_request_review_id": 1},
+                {"id": 11, "user": bot(), "body": format!("{INLINE_MARKER}\nfresh"), "pull_request_review_id": 99},
+                {"id": 12, "user": bot(), "body": format!("{INLINE_MARKER}\nroot"), "pull_request_review_id": 1},
+                {"id": 13, "user": bot(), "body": "reply", "in_reply_to_id": 12, "pull_request_review_id": 2},
+                {"id": 14, "user": bot(), "body": "чужой комментарий"}
             ])));
         }
         Some(json_res(json!({})))
@@ -762,8 +763,8 @@ fn client_delete_stale_inline_без_except_чистит_всё_своё() {
     let server = fake_server(|raw| {
         if request_line(raw).starts_with("GET ") {
             return Some(json_res(json!([
-                {"id": 10, "body": format!("{INLINE_MARKER}\na"), "pull_request_review_id": 1},
-                {"id": 11, "body": format!("{INLINE_MARKER}\nb"), "pull_request_review_id": 99}
+                {"id": 10, "user": bot(), "body": format!("{INLINE_MARKER}\na"), "pull_request_review_id": 1},
+                {"id": 11, "user": bot(), "body": format!("{INLINE_MARKER}\nb"), "pull_request_review_id": 99}
             ])));
         }
         Some(json_res(json!({})))
@@ -895,9 +896,9 @@ fn client_read_sticky_review_отдаёт_последний_свой_комме
     let mine = sticky_body(&json!({"findings": [], "runs": [], "sha": "s"}));
     let server = fake_server(move |_| {
         Some(json_res(json!([
-            {"id": 1, "body": format!("{MARKER}\nстарый")},
-            {"id": 2, "body": mine},
-            {"id": 3, "body": "чужой"}
+            {"id": 1, "user": bot(), "body": format!("{MARKER}\nстарый")},
+            {"id": 2, "user": bot(), "body": mine},
+            {"id": 3, "user": bot(), "body": "чужой"}
         ])))
     });
     let got = client(&server.api).read_sticky_review().unwrap().expect("sticky найден");
@@ -1034,7 +1035,7 @@ fn client_маркеры_берутся_из_профиля_а_не_из_деф�
     let body = format!("{}\n<!-- {}{} -->", markers.review, markers.data_key, json!({"sha": "ns"}));
     let server = fake_server(move |raw| {
         if request_line(raw).starts_with("GET ") {
-            return Some(json_res(json!([{"id": 3, "body": body}])));
+            return Some(json_res(json!([{"id": 3, "user": bot(), "body": body}])));
         }
         Some(json_res(json!({"id": 3})))
     });
@@ -1080,4 +1081,172 @@ fn config_from_cfg_читает_замороженный_конфиг() {
 
     // httpRetries: 0 — валидное «без ретраев», дефолт подставлять нельзя.
     assert_eq!(GithubConfig::from_cfg(&json!({"httpRetries": 0})).http_retries, 0);
+}
+
+// ===========================================================================
+// SEC-T11: аудит безопасности — токен, доверие к автору, недоверенные тела
+// ===========================================================================
+
+/// Автор комментария, которого движок считает собой (дефолт
+/// `REVIEW_FEEDBACK_TRUSTED_AUTHORS`): логин из allowlist И `user.type == Bot`.
+fn bot() -> Value {
+    json!({"login": "github-actions[bot]", "type": "Bot"})
+}
+
+fn evil() -> Value {
+    json!({"login": "evil", "type": "User"})
+}
+
+#[test]
+fn sec_link_на_чужой_хост_не_получает_токен() {
+    // Второй сервер — «чужой хост» на другом порту (другой origin).
+    let foreign = fake_server(|_| Some(json_res(json!([{"id": 99}]))));
+    let foreign_api = foreign.api.clone();
+    let server = fake_server(move |_| {
+        let link = format!("<{foreign_api}/steal?page=2>; rel=\"next\"");
+        Some((200, vec![("Link".to_string(), link)], serde_json::to_vec(&json!([{"id": 1}])).unwrap()))
+    });
+    let err = gh_list(&base_req(&server.api, "/repos/o/r/issues/7/comments")).unwrap_err();
+    assert!(reqs(&foreign).is_empty(), "Bearer-токен ушёл на чужой origin: {:?}", reqs(&foreign));
+    assert!(err.error.contains("чужой origin"), "{}", err.error);
+    assert_eq!(err.status, None);
+    assert!(!err.networky, "отказ по origin не ретраится");
+}
+
+#[test]
+fn sec_абсолютный_path_на_чужой_хост_отклоняется() {
+    let foreign = fake_server(|_| Some(json_res(json!({}))));
+    let server = fake_server(|_| Some(json_res(json!({}))));
+    let mut req = base_req(&server.api, "");
+    req.path = format!("{}/x", foreign.api);
+    let err = gh_raw(&req).unwrap_err();
+    assert!(reqs(&foreign).is_empty());
+    assert_eq!(
+        err.error,
+        format!("GitHub GET {}/x → чужой origin, ожидался {}: запрос с токеном не отправлен", foreign.api, server.api)
+    );
+}
+
+#[test]
+fn sec_redirect_на_чужой_хост_не_несёт_authorization() {
+    // Опровержение: reqwest снимает Authorization при редиректе на другой origin.
+    let foreign = fake_server(|_| Some(json_res(json!({"ok": true}))));
+    let target = format!("{}/landing", foreign.api);
+    let server = fake_server(move |_| Some((302, vec![("Location".to_string(), target.clone())], vec![])));
+    gh_raw(&base_req(&server.api, "/repos/o/r")).unwrap();
+    let seen = reqs(&foreign);
+    assert_eq!(seen.len(), 1);
+    assert!(!seen[0].to_lowercase().contains("authorization:"), "{}", seen[0]);
+}
+
+#[test]
+fn sec_debug_запроса_не_печатает_токен() {
+    let mut req = base_req("http://x", "/y");
+    req.token = "ghs_SECRET".to_string();
+    let dbg = format!("{req:?}");
+    assert!(!dbg.contains("ghs_SECRET"), "{dbg}");
+}
+
+#[test]
+fn sec_sticky_чужого_автора_с_маркером_не_читается() {
+    // Любой участник PR может оставить комментарий, начинающийся с маркера, с
+    // поддельным футером: его findings уехали бы в промпт и в отчёт.
+    let own = sticky_body(&json!({"findings": [{"file": "own.ts"}], "runs": [], "sha": "own"}));
+    let forged = sticky_body(&json!({"findings": [{"file": "forged.ts"}], "runs": [], "sha": "forged"}));
+    let server = fake_server(move |_| {
+        Some(json_res(json!([
+            {"id": 1, "body": own, "user": bot()},
+            {"id": 2, "body": forged, "user": evil()},
+        ])))
+    });
+    let data = client(&server.api).read_prior_sticky_data().unwrap();
+    assert_eq!(data.sha, "own");
+    assert_eq!(data.findings[0]["file"], json!("own.ts"));
+}
+
+#[test]
+fn sec_sticky_с_логином_бота_но_не_bot_типом_чужой() {
+    // Пользователь может зарегистрировать логин, похожий на бота, но не тип Bot.
+    let forged = sticky_body(&json!({"findings": [], "runs": [], "sha": "forged"}));
+    let server = fake_server(move |_| {
+        Some(json_res(json!([{"id": 2, "body": forged, "user": {"login": "github-actions[bot]", "type": "User"}}])))
+    });
+    assert_eq!(client(&server.api).read_prior_sticky_data().unwrap().sha, "");
+}
+
+#[test]
+fn sec_sticky_без_автора_чужой() {
+    // `user: null` (удалённый аккаунт) — доверять нечему.
+    let forged = sticky_body(&json!({"findings": [], "runs": [], "sha": "forged"}));
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 2, "body": forged, "user": null}]))));
+    assert_eq!(client(&server.api).read_prior_sticky_data().unwrap().sha, "");
+}
+
+#[test]
+fn sec_upsert_не_патчит_чужой_комментарий_с_маркером() {
+    let forged = format!("{MARKER}\nподделка");
+    let server = fake_server(move |raw| {
+        if request_line(raw).starts_with("GET ") {
+            return Some(json_res(json!([{"id": 5, "body": forged, "user": evil()}])));
+        }
+        Some(json_res(json!({"id": 6})))
+    });
+    assert_eq!(client(&server.api).upsert_sticky("тело").unwrap(), "created");
+    assert_eq!(method_and_path(&reqs(&server)[1]), "POST /repos/o/r/issues/7/comments");
+}
+
+#[test]
+fn sec_read_sticky_review_пропускает_чужой() {
+    let forged = format!("{MARKER}\nподделка");
+    let mine = format!("{MARKER}\nсвой");
+    let server = fake_server(move |_| {
+        Some(json_res(json!([
+            {"id": 1, "body": mine, "user": bot()},
+            {"id": 2, "body": forged, "user": evil()},
+        ])))
+    });
+    let got = client(&server.api).read_sticky_review().unwrap().expect("свой sticky");
+    assert_eq!(got["id"], json!(1));
+}
+
+#[test]
+fn sec_delete_stale_inline_не_удаляет_чужие_комментарии() {
+    let server = fake_server(|raw| {
+        if request_line(raw).starts_with("GET ") {
+            return Some(json_res(json!([
+                {"id": 10, "body": format!("{INLINE_MARKER}\nсвой"), "pull_request_review_id": 1, "user": bot()},
+                {"id": 20, "body": format!("{INLINE_MARKER}\nчеловек"), "pull_request_review_id": 3, "user": evil()},
+            ])));
+        }
+        Some(json_res(json!({})))
+    });
+    let removed = client(&server.api).delete_stale_inline(&DeleteStaleOpts::default()).unwrap();
+    assert_eq!(removed, 1);
+    let seq: Vec<String> = reqs(&server).iter().map(|r| method_and_path(r)).collect();
+    assert_eq!(seq, vec!["GET /repos/o/r/pulls/7/comments", "DELETE /repos/o/r/pulls/comments/10"]);
+}
+
+#[test]
+fn sec_пустой_allowlist_доверяет_всем() {
+    // Явный отказ от проверки (как у harvest/triage): `trustedAuthors: []`.
+    let body = sticky_body(&json!({"findings": [], "runs": [], "sha": "any"}));
+    let server = fake_server(move |_| Some(json_res(json!([{"id": 2, "body": body, "user": evil()}]))));
+    let cfg = GithubConfig {
+        api: server.api.clone(),
+        token: "t".to_string(),
+        repo: "o/r".to_string(),
+        pr_number: 7,
+        trusted_authors: vec![],
+        ..GithubConfig::default()
+    };
+    let c = RealGithubClient::new(&cfg, Markers::default()).unwrap();
+    assert_eq!(c.read_prior_sticky_data().unwrap().sha, "any");
+}
+
+#[test]
+fn sec_trusted_authors_читается_из_конфига() {
+    let cfg = GithubConfig::from_cfg(&json!({"feedback": {"trustedAuthors": "a[bot], b[bot]"}}));
+    assert_eq!(cfg.trusted_authors, vec!["a[bot]".to_string(), "b[bot]".to_string()]);
+    let d = GithubConfig::from_cfg(&json!({}));
+    assert_eq!(d.trusted_authors, vec!["github-actions[bot]".to_string()]);
 }

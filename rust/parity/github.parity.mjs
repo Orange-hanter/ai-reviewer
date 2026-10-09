@@ -51,6 +51,10 @@ const API = '/api/v3'; // path-префикс api — сверяем path без
 const REPO_SLUG = 'o/r';
 const PR = 7;
 
+// Автор, которого движок считает собой (дефолт REVIEW_FEEDBACK_TRUSTED_AUTHORS, SEC-T11).
+const BOT = { login: 'github-actions[bot]', type: 'Bot' };
+const EVIL = { login: 'evil', type: 'User' };
+
 const stickyBody = (data) =>
   `${MARKERS.review}\n## Вердикт\nok\n<!-- ${MARKERS.dataKey}${JSON.stringify(data)} -->`;
 
@@ -136,7 +140,7 @@ await scenario('upsert: нет маркера → create',
 
 await scenario('upsert: маркер на первой странице → edit',
   (e) => {
-    if (e.method === 'GET') return [200, {}, [{ id: 42, body: stickyBody({ findings: [], runs: [], sha: 'old' }) }]];
+    if (e.method === 'GET') return [200, {}, [{ id: 42, user: BOT, body: stickyBody({ findings: [], runs: [], sha: 'old' }) }]];
     assert.equal(e.method, 'PATCH');
     assert.equal(e.path, P('/issues/comments/42'));
     return [200, {}, { id: 42 }];
@@ -151,7 +155,7 @@ await scenario('upsert: маркер на второй странице (отн�
         link: `<${issueComments}?page=2&per_page=100>; rel="next"`,
       }, [{ id: 1, body: 'чужой' }]];
     }
-    if (e.method === 'GET') return [200, {}, [{ id: 2, body: stickyBody({ findings: [], runs: [], sha: 'old' }) }]];
+    if (e.method === 'GET') return [200, {}, [{ id: 2, user: BOT, body: stickyBody({ findings: [], runs: [], sha: 'old' }) }]];
     assert.equal(e.method, 'PATCH');
     assert.equal(e.path, P('/issues/comments/2'));
     return [200, {}, { id: 2 }];
@@ -167,11 +171,12 @@ const inlineScript = (e) => {
   }
   if (e.method === 'GET' && e.path === pullComments) {
     return [200, {}, [
-      { id: 10, body: `${MARKERS.inline}\nold`, pull_request_review_id: 1 },
-      { id: 11, body: `${MARKERS.inline}\nfresh`, pull_request_review_id: 555 },
-      { id: 12, body: `${MARKERS.inline}\nroot`, pull_request_review_id: 1 },
+      { id: 10, user: BOT, body: `${MARKERS.inline}\nold`, pull_request_review_id: 1 },
+      { id: 11, user: BOT, body: `${MARKERS.inline}\nfresh`, pull_request_review_id: 555 },
+      { id: 12, user: BOT, body: `${MARKERS.inline}\nroot`, pull_request_review_id: 1 },
       { id: 13, body: 'reply', in_reply_to_id: 12, pull_request_review_id: 2 },
       { id: 14, body: 'чужой' },
+      { id: 15, user: EVIL, body: `${MARKERS.inline}\nчеловек`, pull_request_review_id: 3 },
     ]];
   }
   assert.equal(e.method, 'DELETE');
@@ -197,6 +202,7 @@ await scenario('readPriorStickyData: пустая лента → пустая ф
 await scenario('readPriorStickyData: цитата маркера в теле → последнее вхождение',
   () => [200, {}, [{
     id: 1,
+    user: BOT,
     body: `${MARKERS.review}\nПример: <!-- ${MARKERS.dataKey}{"findings":[]} -->\n\n<!-- ${MARKERS.dataKey}{"findings":[{"file":"a.ts","line":1,"title":"x"}],"runs":[{"sha":"abc"}],"sha":"abc"} -->`,
   }]],
   (c) => c.readPriorStickyData(),
@@ -205,6 +211,7 @@ await scenario('readPriorStickyData: цитата маркера в теле →
 await scenario('readPriorStickyData: обрезанный футер чинится json_repair',
   () => [200, {}, [{
     id: 9,
+    user: BOT,
     body: `${MARKERS.review}\n<!-- ${MARKERS.dataKey}{"findings":[{"file":"b.ts","line":2,"title":"t"}],"runs":[],"sha":"dead`,
   }]],
   (c) => c.readPriorStickyData(),
@@ -305,6 +312,35 @@ await scenario('loadDiff: draft → {draft:true} без запроса diff',
   async (c) => {
     const r = await c.loadDiff();
     return { draft: r.draft ?? null, headSha: r.headSha ?? null };
+  },
+);
+
+// --- 7. SEC-T11 ---
+
+await scenario('SEC-T11: sticky чужого автора с маркером не читается и не патчится',
+  (e) => {
+    if (e.method === 'GET') {
+      return [200, {}, [
+        { id: 1, user: BOT, body: stickyBody({ findings: [{ file: 'own.ts' }], runs: [], sha: 'own' }) },
+        { id: 2, user: EVIL, body: stickyBody({ findings: [{ file: 'forged.ts' }], runs: [], sha: 'forged' }) },
+      ]];
+    }
+    assert.equal(e.method, 'PATCH');
+    assert.equal(e.path, P('/issues/comments/1'));
+    return [200, {}, { id: 1 }];
+  },
+  async (c) => ({ data: await c.readPriorStickyData(), op: await c.upsertSticky('тело') }),
+);
+
+await scenario('SEC-T11: Link на чужой origin — ошибка до запроса, токен не уходит',
+  (e) => [200, { link: '<http://127.0.0.2:9/steal?page=2>; rel="next"' }, [{ id: 1 }]],
+  async (c) => {
+    try {
+      await c.listIssueLabels();
+      return { threw: false };
+    } catch (e) {
+      return { threw: true, message: e.message.replace(/127\.0\.0\.1:\d+/g, 'API') };
+    }
   },
 );
 
