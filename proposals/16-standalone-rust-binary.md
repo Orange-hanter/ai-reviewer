@@ -445,7 +445,7 @@ T08 замораживает сигнатуры трейтов до того, к
 | ✅ T14 | `astgrep.rs` + `prescan.rs`, embedded ruleset → `temp_dir()`, fail-open | `cargo test astgrep:: prescan::`; фикстуры `prescan-astgrep-xff`, `prescan-eslint-layer-block`; интеграционный тест с реальным `ast-grep` |
 | ✅ T15 | `blast_findings.rs`, `cost.rs`, `swarm.rs` — чистые порты | `cargo test blast_findings:: cost:: swarm::` |
 | ✅ T16 | `observability.rs` ← `lib/observability.mjs` | `cargo test observability::` |
-| T17 | `feedback.rs` ← `feedback-schema` + `feedback` (harvest через `GithubApi`) | `cargo test feedback::` |
+| ✅ T17 | `feedback.rs` ← `feedback-schema` + `feedback` (harvest через `GithubApi`) | `cargo test feedback::` |
 | T34 | `absent_path.rs` ← `lib/absent-path.mjs` (`buildRepoPathIndex`, `findAbsentButExistingPath`, `listRepoFiles` спавном `git ls-files`, fail-open) + FP-семейство 7 в `findings::filter_false_positive_findings` (`repoIndex`, только LLM-находки). Зависит от T07 | `cargo test absent_path:: findings::`; кейсы `test/absent-path.test.mjs`; фикстура `fp-absent-path-outside-diff` |
 | T35 | `context_window.rs` ← `lib/context-window.mjs` (окна ±`contextMargin` RFC 07: `windowChunkFileContents`, `buildVerifierFileContents`) + `read_changed_files` с маркером добавленного файла (`collect_added_paths` уже в `diff.rs`). Зависит от T04 | `cargo test context_window:: diff::`; `REVIEW_CONTEXT_MARGIN=0` — откат на целые файлы |
 | T36 | `chunk_routing.rs`, `specialist_merge.rs`, `prompt_layout.rs` и `build_merged_specialist_system` в `prompt.rs` — чистые порты RFC 04 (решения 2, 4, 5). Зависит от T12 | `cargo test chunk_routing:: specialist_merge:: prompt_layout::`; сорванный формат секций не раздаёт один текст трём ролям |
