@@ -17,6 +17,8 @@ pub mod fixtures;
 pub mod findings;
 pub mod github;
 pub mod json_repair;
+// RFC 16 T23: общий stdio-транспорт MCP (транспортная часть T40).
+pub mod mcp_stdio;
 pub mod llm;
 pub mod metrics;
 pub mod prompt;
