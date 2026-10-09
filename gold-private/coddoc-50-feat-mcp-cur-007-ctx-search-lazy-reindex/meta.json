@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-50-feat-mcp-cur-007-ctx-search-lazy-reindex",
+  "type": "tp",
+  "tags": [],
+  "description": "#50 «feat(mcp): CUR-007 — ctx_search с lazy reindex пустого FTS-индекса (#50)» — дефект, который потом исправил #71",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "f29bf5aa6e06ff7baae7e7197423de66b220092e",
+    "base": "4f2d4d078218527aa828c7f34860b20f1394ae42",
+    "ref": "#50",
+    "fixes": [
+      {
+        "sha": "ecb79828d449008415e19ea25e9e4114f0837404",
+        "ref": "#71",
+        "title": "fix(search): CUR-010 — понятная ошибка вместо трейса при отсутствии FTS-таблицы (#71)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 178 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/search_service.py",
+        "lines": [
+          229,
+          231
+        ]
+      }
+    ]
+  }
+}

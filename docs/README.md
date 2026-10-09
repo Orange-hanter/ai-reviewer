@@ -37,5 +37,6 @@ last_updated: 2026-09-29
 | [../fixtures/README.md](../fixtures/README.md) | Golden fixtures для eval без LLM |
 | [../gold/README.md](../gold/README.md) | Размеченные диффы для shadow-прогона с LLM |
 | [../gold-public/README.md](../gold-public/README.md) | Публичный набор: как отобраны кейсы, отбракованные кандидаты |
+| [../gold-private/README.md](../gold-private/README.md) | Набор из истории своих проектов: SZZ по локальному git, тег `contract`, запуск по клонам |
 | [../examples/ci/](../examples/ci/) | Шаблоны workflow для потребителя |
 | [../profiles/orakul.json](../profiles/orakul.json) | Reference-профиль (он же — база регрессионных тестов) |

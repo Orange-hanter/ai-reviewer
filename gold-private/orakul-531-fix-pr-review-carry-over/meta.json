@@ -1,0 +1,70 @@
+{
+  "id": "orakul-531-fix-pr-review-carry-over",
+  "type": "tp",
+  "tags": [],
+  "description": "#531 «fix(pr-review): carry-over решается по коду, а не по номеру строки» — дефект, который потом исправил #532",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "0406e749fe8c8f58dabf95372b60d83972e029b7",
+    "base": "9e6ea9b5bf25fda97df4e2d3ca2c0b5e3e2c22a1",
+    "ref": "#531",
+    "fixes": [
+      {
+        "sha": "1ab5ad0ff89572b7e1556c5a7881338c8f830c41",
+        "ref": "#532",
+        "title": "fix(ai-review): футер sticky читается по последнему маркеру, а не по первому"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 291 строк в 11 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "ops/ai-review-status/lib/markers.mjs",
+        "lines": [
+          7,
+          10
+        ]
+      },
+      {
+        "file": "ops/ai-review-status/lib/parse.mjs",
+        "lines": [
+          24,
+          26
+        ]
+      },
+      {
+        "file": "ops/ai-review-status/lib/parse.mjs",
+        "lines": [
+          29,
+          33
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/constants.mjs",
+        "lines": [
+          41,
+          45
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/github.mjs",
+        "lines": [
+          85,
+          88
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/github.mjs",
+        "lines": [
+          94,
+          98
+        ]
+      }
+    ]
+  }
+}

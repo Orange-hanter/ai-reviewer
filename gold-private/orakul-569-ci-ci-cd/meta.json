@@ -1,0 +1,35 @@
+{
+  "id": "orakul-569-ci-ci-cd",
+  "type": "tp",
+  "tags": [],
+  "description": "#569 «ci: один прогон на коммит вместо двух + карта CI/CD» — дефект, который потом исправил #573",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "d046b2fda2563e1cf1e64ebebc9a873d1ef190c8",
+    "base": "8b8e703db94dea80d7decaf5a127c6ec988ba33a",
+    "ref": "#569",
+    "fixes": [
+      {
+        "sha": "6ab93132ba666ec47f54bfea2b284e27de2cfc05",
+        "ref": "#573",
+        "title": "ci: e2e — отдельный workflow, чтобы не блокировать деплой"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 249 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          306,
+          307
+        ]
+      }
+    ]
+  }
+}

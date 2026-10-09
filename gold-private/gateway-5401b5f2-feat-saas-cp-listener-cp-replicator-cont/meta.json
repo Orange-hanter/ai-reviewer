@@ -1,0 +1,61 @@
+{
+  "id": "gateway-5401b5f2-feat-saas-cp-listener-cp-replicator-cont",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(saas): cp-listener + cp-replicator controlplane tooling» — дефект, который потом исправил b12cbf91, e7406439",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "5401b5f29310d754118c95ccc722d57a3c782ec7",
+    "base": "a36f7ecbb728966528a4b6b7adc3612f98290dfa",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "b12cbf919802ed76ec4aa00a823481c4e76c5671",
+        "ref": null,
+        "title": "fix(lint): nolint gosec G304 in cp-replicator + cp-listener"
+      },
+      {
+        "sha": "e74064393ae74fd815a0a74038fb1ebedf73236d",
+        "ref": null,
+        "title": "fix(lint): errcheck — wrap defer raw.Close() in cp-replicator + cp-listener"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 583 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cmd/cp-listener/main.go",
+        "lines": [
+          71,
+          71
+        ]
+      },
+      {
+        "file": "cmd/cp-listener/main.go",
+        "lines": [
+          165,
+          165
+        ]
+      },
+      {
+        "file": "cmd/cp-replicator/main.go",
+        "lines": [
+          103,
+          103
+        ]
+      },
+      {
+        "file": "cmd/cp-replicator/main.go",
+        "lines": [
+          322,
+          322
+        ]
+      }
+    ]
+  }
+}

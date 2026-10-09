@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-3d96ac27-fix-ci-promote-mypy-strict-check-to-bloc",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(ci): promote mypy strict check to blocking» — дефект, который потом исправил 47ce9f2b",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "3d96ac27bbc6366dd7739e1130aa3260d374317a",
+    "base": "ff7f92ccf53b1c36e092e9df78fae66afc5e24f8",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "47ce9f2bfcce1d0bc9a5257df56add8a135b9246",
+        "ref": null,
+        "title": "fix: COD-079 — render markdown tables, auto-sync section links, link backfill CLI"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 4 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          65,
+          65
+        ]
+      }
+    ]
+  }
+}

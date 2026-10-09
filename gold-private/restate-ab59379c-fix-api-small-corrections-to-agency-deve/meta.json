@@ -1,0 +1,71 @@
+{
+  "id": "restate-ab59379c-fix-api-small-corrections-to-agency-deve",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(api): small corrections to agency & developer controllers and application bootstrap» — дефект, который потом исправил 9d563acb, !16, b3350b83, dcfb5e70",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "ab59379c8b2248ed573bf501ba542058056e00ae",
+    "base": "b18bad1a4e7e298c71c75d882954deda4c585ab9",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "9d563acb4d19d7f1920844360ff4c70326bc12fe",
+        "ref": null,
+        "title": "fix(cors): allow remote admin origin allowlist"
+      },
+      {
+        "sha": "80a8954a605a9353a71dc823cc489e717eca3887",
+        "ref": "!16",
+        "title": "fix(cors): harden CORS config, refresh cookie path, env guards"
+      },
+      {
+        "sha": "b3350b838db4332f36a8264a6d92c390ea95b294",
+        "ref": null,
+        "title": "fix(openapi): centralize shared description"
+      },
+      {
+        "sha": "dcfb5e70cb606fc0a42f8904480394743589a25d",
+        "ref": null,
+        "title": "fix: add roster filtering by membership status (AGN-036)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 75 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/main.ts",
+        "lines": [
+          48,
+          90
+        ]
+      },
+      {
+        "file": "restate-api/src/main.ts",
+        "lines": [
+          95,
+          95
+        ]
+      },
+      {
+        "file": "restate-api/src/main.ts",
+        "lines": [
+          107,
+          107
+        ]
+      },
+      {
+        "file": "restate-api/src/agency/agency.controller.ts",
+        "lines": [
+          90,
+          90
+        ]
+      }
+    ]
+  }
+}

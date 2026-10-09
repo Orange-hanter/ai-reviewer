@@ -368,7 +368,9 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_FP_PROMOTE_MIN` | `2` | Сколько одинаковых FP → новый паттерн |
 | `REVIEW_FIXTURES_DIR` | fixtures пакета | Куда промоутить fixtures |
 | `REVIEW_GOLD_DIR` | gold пакета | Набор для shadow-прогона с LLM (`gold-public` — публичный набор) |
-| `REVIEW_GOLD_CACHE` | `.ai-review/gold-public` | Кэш диффов публичных кейсов, скачанных по пину `source.sha` |
+| `REVIEW_GOLD_CACHE` | `.ai-review/gold-public` | Кэш диффов публичных кейсов, скачанных по пину `source.sha`; для кейсов `source.local` — ещё и деревья проекта (`trees/`) |
+| `REVIEW_GOLD_REPOS` | — | Локальные клоны для кейсов `gold-private/`: `orakul=/path/Orakul,restate=/path/Restate`; имя — `source.local` кейса |
+| `REVIEW_GOLD_CHECKOUT` | `1` | `0` — кейс `source.local` гоняется без дерева проекта на `source.sha` (без окон контекста и карточек) |
 
 ## Auto-triage
 

@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-7fc5c3a2-fix-tui-bug-fixes-and-structured-debug-l",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix: TUI bug fixes and structured debug-log infrastructure» — дефект, который потом исправил 919ef856",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "7fc5c3a2dacfb01a9a0970b8ef946b6c0f75f2bf",
+    "base": "211b58da32693680c99ef6b695adf8dea9155f75",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "919ef856a3fd83ff87854c06c326adfd67b68cdb",
+        "ref": null,
+        "title": "fix: select dashboard projects on click and focus"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 140 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/tui/screens/dashboard.py",
+        "lines": [
+          231,
+          233
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "id": "orakul-349-fix-ci-restore-feedback-promotion-workfl",
+  "type": "tp",
+  "tags": [],
+  "description": "#349 «fix(ci): restore feedback promotion workflow (#349)» — дефект, который потом исправил #482",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "d1155aedcffc5049d60e9340ade6ca2dd8340ab6",
+    "base": "41b697dc9ca7b7cfeac22f30aa954556a0dd5b34",
+    "ref": "#349",
+    "fixes": [
+      {
+        "sha": "01a6ef8d9930128ce270f7a42c3f50fbd22c1ef1",
+        "ref": "#482",
+        "title": "fix(ci): мелкие инфра-фиксы — GRAPH path, promote REST, SARIF-шаг"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 57 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/pr-review-feedback-promote.yml",
+        "lines": [
+          52,
+          54
+        ]
+      },
+      {
+        "file": ".github/workflows/pr-review-feedback-promote.yml",
+        "lines": [
+          60,
+          64
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,186 @@
+{
+  "id": "gateway-8b991c52-feat-wizard-guided-uses-four-human-steps",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": " «feat(wizard): guided uses four human steps, not the inspector» — дефект, который потом исправил bdefc287, bce40b5f, 4ab62e31, 80d58aad",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "8b991c52ce9bccfb93607d31d75075676d373dc8",
+    "base": "313af271b87609c6373a2aede93a01eeaf3a97f0",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "bdefc28788d60424e42f10a1b33c0aca0d7cfb33",
+        "ref": null,
+        "title": "fix(wizard): guided device list is a page, not a collapsible expert drawer"
+      },
+      {
+        "sha": "bce40b5fb1bf2c785ebce60c72445ca0ea45d47e",
+        "ref": null,
+        "title": "fix(wizard): drop duplicate find-device and expert actions"
+      },
+      {
+        "sha": "4ab62e31ca854d18afb78526495b263184f7ed13",
+        "ref": null,
+        "title": "fix(wizard): connection step edits device name and endpoint"
+      },
+      {
+        "sha": "80d58aadc8f31ee545e4115bef365a1f125deb77",
+        "ref": null,
+        "title": "fix(wizard): start another device from the first screen"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 744 строк в 11 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: furthestGuidedStep"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "wizard/src/components/ConnectionSummary.tsx",
+        "lines": [
+          7,
+          7
+        ]
+      },
+      {
+        "file": "wizard/src/components/ConnectionSummary.tsx",
+        "lines": [
+          13,
+          13
+        ]
+      },
+      {
+        "file": "wizard/src/components/ConnectionSummary.tsx",
+        "lines": [
+          22,
+          23
+        ]
+      },
+      {
+        "file": "wizard/src/components/ConnectionSummary.tsx",
+        "lines": [
+          29,
+          32
+        ]
+      },
+      {
+        "file": "wizard/src/components/ConnectionSummary.tsx",
+        "lines": [
+          38,
+          41
+        ]
+      },
+      {
+        "file": "wizard/src/components/ConnectionSummary.tsx",
+        "lines": [
+          96,
+          102
+        ]
+      },
+      {
+        "file": "wizard/src/components/ConnectionSummary.tsx",
+        "lines": [
+          105,
+          111
+        ]
+      },
+      {
+        "file": "wizard/src/components/ConnectionSummary.tsx",
+        "lines": [
+          117,
+          118
+        ]
+      },
+      {
+        "file": "wizard/src/App.tsx",
+        "lines": [
+          483,
+          489
+        ]
+      },
+      {
+        "file": "wizard/src/App.tsx",
+        "lines": [
+          527,
+          527
+        ]
+      },
+      {
+        "file": "wizard/src/App.tsx",
+        "lines": [
+          1281,
+          1281
+        ]
+      },
+      {
+        "file": "wizard/src/components/GuidedWorkspace.tsx",
+        "lines": [
+          17,
+          18
+        ]
+      },
+      {
+        "file": "wizard/src/components/GuidedWorkspace.tsx",
+        "lines": [
+          52,
+          52
+        ]
+      },
+      {
+        "file": "wizard/src/components/GuidedWorkspace.tsx",
+        "lines": [
+          80,
+          80
+        ]
+      },
+      {
+        "file": "wizard/src/components/GuidedWorkspace.tsx",
+        "lines": [
+          97,
+          102
+        ]
+      },
+      {
+        "file": "wizard/src/components/GuidedWorkspace.tsx",
+        "lines": [
+          145,
+          145
+        ]
+      },
+      {
+        "file": "wizard/src/components/StepActionBar.tsx",
+        "lines": [
+          25,
+          25
+        ]
+      },
+      {
+        "file": "wizard/src/components/StepActionBar.tsx",
+        "lines": [
+          56,
+          56
+        ]
+      },
+      {
+        "file": "wizard/src/components/StepActionBar.tsx",
+        "lines": [
+          83,
+          85
+        ]
+      },
+      {
+        "file": "wizard/src/components/StepActionBar.tsx",
+        "lines": [
+          88,
+          91
+        ]
+      }
+    ]
+  }
+}

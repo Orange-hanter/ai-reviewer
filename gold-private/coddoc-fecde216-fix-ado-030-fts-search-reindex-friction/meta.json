@@ -1,0 +1,42 @@
+{
+  "id": "coddoc-fecde216-fix-ado-030-fts-search-reindex-friction",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(ADO-030): инкрементальный FTS при импорте — search без --reindex (friction #5)» — дефект, который потом исправил #100",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "fecde216bc2b297f632c513e78c5c52dbeffaeb8",
+    "base": "17b7137b3e0e97cb4f40317961066d3622796aa2",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "b71b84fd7904f9bacba96861683b63222bee53ea",
+        "ref": "#100",
+        "title": "fix(search): ADO-211 — документ находится поиском сразу после записи (#100)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 118 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/import_service.py",
+        "lines": [
+          442,
+          444
+        ]
+      },
+      {
+        "file": "cod_doc/services/import_service.py",
+        "lines": [
+          494,
+          494
+        ]
+      }
+    ]
+  }
+}

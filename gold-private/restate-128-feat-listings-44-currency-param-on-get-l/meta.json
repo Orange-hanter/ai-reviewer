@@ -1,0 +1,77 @@
+{
+  "id": "restate-128-feat-listings-44-currency-param-on-get-l",
+  "type": "tp",
+  "tags": [],
+  "description": "!128 «feat(listings): #44 — currency param on GET /listings/filter-options» — дефект, который потом исправил !174",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "6a19249eb68c32f0b6b37f988664e1fd54d29810",
+    "base": "ded6efb88d9f0eaa969748d93e7653b6bd3ce327",
+    "ref": "!128",
+    "fixes": [
+      {
+        "sha": "f6c5e4f874aa4788aafcdf743e5b2e5f8f89a89d",
+        "ref": "!174",
+        "title": "fix(listings): scope catalog facets by market type, count projects not units (#79)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 55 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/listings/ports/listings.repository.port.ts",
+        "lines": [
+          412,
+          412
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/public-listings.controller.ts",
+        "lines": [
+          172,
+          173
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/public-listings.controller.ts",
+        "lines": [
+          176,
+          179
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/public-listings.controller.ts",
+        "lines": [
+          183,
+          183
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/public-listings.controller.ts",
+        "lines": [
+          187,
+          188
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listings.repository.ts",
+        "lines": [
+          802,
+          802
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/repositories/listings.repository.ts",
+        "lines": [
+          816,
+          817
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "restate-42bebfe7-fix-db-update-sql-queries-in-adminreposi",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(db): update SQL queries in AdminRepository to use table aliases for clarity» — дефект, который потом исправил 6a823979",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "42bebfe73e392a811c871bb61675fd38d1af58dd",
+    "base": "43041a1a871bbb55be5e6fb27eb37b39a61e3ea6",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "6a823979d832affa6d08201893c99651f851cc85",
+        "ref": null,
+        "title": "fix(admin): load agency owner email with current role name"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 74 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/admin/repositories/admin.repository.ts",
+        "lines": [
+          114,
+          114
+        ]
+      }
+    ]
+  }
+}

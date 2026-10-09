@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-40-fix-infra-ado-182",
+  "type": "tp",
+  "tags": [],
+  "description": "#40 «fix(infra): ADO-182 — фильтр по статусу резал класс эквивалентности» — дефект, который потом исправил #119",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "2df7abe8c4f9657c6e2a11328fe6d9db226d1617",
+    "base": "db5881a75fb5e3a3180a5b0fec5604d5d6d9a667",
+    "ref": "#40",
+    "fixes": [
+      {
+        "sha": "2e2b8cc5613fede2c4a5a3fdacd25ee2c103b570",
+        "ref": "#119",
+        "title": "fix(infra): task_repo._filtered не зависит от параметра типа Select (#119)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 236 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/infra/repositories/task_repo.py",
+        "lines": [
+          98,
+          98
+        ]
+      }
+    ]
+  }
+}

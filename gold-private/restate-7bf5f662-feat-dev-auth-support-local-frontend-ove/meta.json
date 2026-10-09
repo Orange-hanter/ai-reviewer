@@ -1,0 +1,75 @@
+{
+  "id": "restate-7bf5f662-feat-dev-auth-support-local-frontend-ove",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(dev-auth): support local frontend over IP» — дефект, который потом исправил befc544f, !16",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "7bf5f662a46ff006c1e031fc384dd867a27ff2bd",
+    "base": "a2877e1b97bf4f0f90f7c844ac785b1e56f596a5",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "befc544f4b4d1fc3b09b13bd8ea183752dfbbcec",
+        "ref": null,
+        "title": "fix(token): improve type safety for authorization header parsing"
+      },
+      {
+        "sha": "80a8954a605a9353a71dc823cc489e717eca3887",
+        "ref": "!16",
+        "title": "fix(cors): harden CORS config, refresh cookie path, env guards"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 226 строк в 10 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/auth/services/token.service.ts",
+        "lines": [
+          203,
+          204
+        ]
+      },
+      {
+        "file": "restate-api/src/auth/services/token.service.ts",
+        "lines": [
+          209,
+          209
+        ]
+      },
+      {
+        "file": "docker-compose.yml",
+        "lines": [
+          118,
+          119
+        ]
+      },
+      {
+        "file": "restate-api/src/main.ts",
+        "lines": [
+          22,
+          24
+        ]
+      },
+      {
+        "file": "restate-api/src/main.ts",
+        "lines": [
+          27,
+          32
+        ]
+      },
+      {
+        "file": "restate-api/src/main.ts",
+        "lines": [
+          83,
+          83
+        ]
+      }
+    ]
+  }
+}

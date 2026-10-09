@@ -1,0 +1,49 @@
+{
+  "id": "coddoc-36-fix-domain-ado-181-documentstatus-author",
+  "type": "tp",
+  "tags": [],
+  "description": "#36 «fix(domain): ADO-181 — DocumentStatus учит authoritative (#36)» — дефект, который потом исправил #113",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "bd7b45e336a73ea5dc614d47d19165513e59b01e",
+    "base": "db73f7487fb2393ecf9a23c14a94ae05b99755be",
+    "ref": "#36",
+    "fixes": [
+      {
+        "sha": "2766e4def0d67505e2df43f7764aede89240bc88",
+        "ref": "#113",
+        "title": "fix(domain): ADO-218 — DocumentStatus учит resolved и done (#113)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 351 строк в 10 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/web/pages/docs.py",
+        "lines": [
+          200,
+          200
+        ]
+      },
+      {
+        "file": "cod_doc/cli/doc/cmd_create.py",
+        "lines": [
+          38,
+          38
+        ]
+      },
+      {
+        "file": "cod_doc/mcp/tools/doc_tools.py",
+        "lines": [
+          82,
+          82
+        ]
+      }
+    ]
+  }
+}

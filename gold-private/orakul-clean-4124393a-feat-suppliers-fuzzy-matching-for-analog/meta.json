@@ -1,0 +1,15 @@
+{
+  "id": "orakul-clean-4124393a-feat-suppliers-fuzzy-matching-for-analog",
+  "type": "clean",
+  "description": " «feat(suppliers): fuzzy matching for analog search» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "4124393a243d2ce8d54f27ffe4ce6bc8857a7769",
+    "base": "4685d25457ce5cb5f9f3ad2bd95ff3ab502b5ba8",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

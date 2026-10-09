@@ -1,0 +1,42 @@
+{
+  "id": "orakul-493-fix-pre-commit-regen-for-api-endpoints-i",
+  "type": "tp",
+  "tags": [],
+  "description": "#493 «fix: pre-commit regen for API endpoints index» — дефект, который потом исправил #543",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "afcc0d0db0d9f3b644e6f9f1aa0c145fcbb71ce2",
+    "base": "f54105c1a63eef3d8578c4fae07aa76a9eef4d50",
+    "ref": "#493",
+    "fixes": [
+      {
+        "sha": "66c80c36742d3755f5f25e8151495db6a83635cb",
+        "ref": "#543",
+        "title": "fix(ops): генератор api-endpoints-index сам ведёт `Версия:` — минор +1 только при изменении тела"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 85 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "ops/gen-api-routes-doc.mjs",
+        "lines": [
+          107,
+          107
+        ]
+      },
+      {
+        "file": "ops/gen-api-routes-doc.mjs",
+        "lines": [
+          127,
+          129
+        ]
+      }
+    ]
+  }
+}

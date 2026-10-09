@@ -1,0 +1,35 @@
+{
+  "id": "orakul-337-fix-ci-valid-sarif-guid-upload-sarif-v4",
+  "type": "tp",
+  "tags": [],
+  "description": "#337 «fix(ci): valid SARIF guid + upload-sarif v4» — дефект, который потом исправил #482",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "b0d62a15528ef296fe4932d65842dfebddcfebd8",
+    "base": "8c487b4efdd9c587d9867465df8c6bc811894b4f",
+    "ref": "#337",
+    "fixes": [
+      {
+        "sha": "01a6ef8d9930128ce270f7a42c3f50fbd22c1ef1",
+        "ref": "#482",
+        "title": "fix(ci): мелкие инфра-фиксы — GRAPH path, promote REST, SARIF-шаг"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 22 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/pr-review.yml",
+        "lines": [
+          157,
+          157
+        ]
+      }
+    ]
+  }
+}

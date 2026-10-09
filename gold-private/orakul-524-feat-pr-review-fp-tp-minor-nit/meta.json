@@ -1,0 +1,35 @@
+{
+  "id": "orakul-524-feat-pr-review-fp-tp-minor-nit",
+  "type": "tp",
+  "tags": [],
+  "description": "#524 «feat(pr-review): точечная отметка FP/TP — петля обучения получила вход для minor/nit» — дефект, который потом исправил #521",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "b146544a50e9bd82c82a2d754bc1e85a06727a9a",
+    "base": "cc97c92e2b2d3202d13f23f3ee513f7b067023b9",
+    "ref": "#524",
+    "fixes": [
+      {
+        "sha": "b57acc17284cdeb8b0261dfdece11d1938062efe",
+        "ref": "#521",
+        "title": "fix(ai-review-status): влитый PR больше не выдаётся за красный merge-гейт"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 359 строк в 10 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          133,
+          133
+        ]
+      }
+    ]
+  }
+}

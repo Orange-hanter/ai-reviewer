@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-f340fc3c-fix-ado-037-legacy-api-projects-name-tas",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(ADO-037): legacy /api/projects/{name}/tasks переведены на task_service — Revision + статус-машина, 409 без state.db» — дефект, который потом исправил #23",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "f340fc3cfc154357f288487bb9706fbb55c83c27",
+    "base": "17cd6e0f8aa25c5db8f6c2431f17d3285743b398",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "956e93dce9bf2f2ffd6b21ddf7c33111486199bd",
+        "ref": "#23",
+        "title": "fix(storage): STO-009 + STO-026 — миграции по db_url, кэш движков, 503 на рассинхрон схемы"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 421 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/routes.py",
+        "lines": [
+          148,
+          148
+        ]
+      }
+    ]
+  }
+}

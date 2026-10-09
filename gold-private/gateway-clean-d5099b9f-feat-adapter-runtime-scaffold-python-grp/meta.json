@@ -1,0 +1,15 @@
+{
+  "id": "gateway-clean-d5099b9f-feat-adapter-runtime-scaffold-python-grp",
+  "type": "clean",
+  "description": " «feat(adapter-runtime): scaffold Python gRPC adapter service» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "d5099b9f062c30248c7aff656489a7825b131557",
+    "base": "b06b6d674aed130c23d913b523b3e2d43fa7c1d3",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

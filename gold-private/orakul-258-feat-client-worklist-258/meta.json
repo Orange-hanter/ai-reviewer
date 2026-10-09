@@ -1,0 +1,35 @@
+{
+  "id": "orakul-258-feat-client-worklist-258",
+  "type": "tp",
+  "tags": [],
+  "description": "#258 «feat(client): проработка вкладки «Техкарты» — заготовки, себестоимость по роли, worklist (#258)» — дефект, который потом исправил #494",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "5ecd256037a8289c03e69659a5e896e6c6ed861a",
+    "base": "c7bdd494515bd731a2497598b957543885e6ac35",
+    "ref": "#258",
+    "fixes": [
+      {
+        "sha": "5f77821887d477b6afb4693320cef7b11f9ce7d8",
+        "ref": "#494",
+        "title": "fix(stock): clarify product cards and category hierarchy (#17)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 714 строк в 14 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/tabs/TechCardsTab/index.tsx",
+        "lines": [
+          409,
+          411
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "orakul-157-fix-ocr-iphone-heic-157",
+  "type": "tp",
+  "tags": [],
+  "description": "#157 «fix(ocr): накладная с iPhone не распознавалась (HEIC) + видимость причины (#157)» — дефект, который потом исправил #341",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "8e20f824936406a8e8c0fafd8febfb5264efce38",
+    "base": "688dd8122a0a18b26e690d3b67d8da937b041908",
+    "ref": "#157",
+    "fixes": [
+      {
+        "sha": "db80f37f2e7408dfedaa9a1078439d0671b4ab46",
+        "ref": "#341",
+        "title": "fix(invoice): улучшить качество фото накладных (#341)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 68 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/PhotoCaptureGrid.tsx",
+        "lines": [
+          25,
+          25
+        ]
+      }
+    ]
+  }
+}

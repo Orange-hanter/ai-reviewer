@@ -1,0 +1,75 @@
+{
+  "id": "restate-b6c313ae-fix-auth-update-dtos-and-adjust-auth-ser",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(auth): update DTOs and adjust auth service tests» — дефект, который потом исправил 50c083a8, !67",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "b6c313ae7cf3db9a51f28885bfba533961c240d3",
+    "base": "2f266557f76b2d18db23eb9a2ac9ad6e942b9e24",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "50c083a869e0cf603e072ba139c4a34e62e9edbd",
+        "ref": null,
+        "title": "fix(dto): replace unsafe any with typed casts in Transform decorators"
+      },
+      {
+        "sha": "37ba36f115b448469a09de38695f7bf9d7e8600e",
+        "ref": "!67",
+        "title": "fix(auth): align developer registration with agency — phone required (SPR-002)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 350 строк в 10 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/auth/dto/register-agency.dto.ts",
+        "lines": [
+          49,
+          49
+        ]
+      },
+      {
+        "file": "restate-api/src/auth/dto/register-agency.dto.ts",
+        "lines": [
+          56,
+          56
+        ]
+      },
+      {
+        "file": "restate-api/src/auth/dto/register-developer.dto.ts",
+        "lines": [
+          26,
+          26
+        ]
+      },
+      {
+        "file": "restate-api/src/auth/dto/register-developer.dto.ts",
+        "lines": [
+          30,
+          30
+        ]
+      },
+      {
+        "file": "restate-api/src/auth/dto/register-developer.dto.ts",
+        "lines": [
+          49,
+          49
+        ]
+      },
+      {
+        "file": "restate-api/src/auth/dto/register-developer.dto.ts",
+        "lines": [
+          56,
+          56
+        ]
+      }
+    ]
+  }
+}

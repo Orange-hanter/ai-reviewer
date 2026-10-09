@@ -1,0 +1,80 @@
+{
+  "id": "restate-e52cfe3f-feat-admin-render-verification-document",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(admin): render verification document preview cards» — дефект, который потом исправил 3f2168b1, eea22102, ea256048",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "e52cfe3f009d59955339c96a7189fee58eff31b9",
+    "base": "71c35e2881e3495e3ecd4224c8d3d902874e6ad7",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "3f2168b1e5af471e5966f96a409e8f87dfc71742",
+        "ref": null,
+        "title": "fix: improve URL extraction logic in extractObjectKey function"
+      },
+      {
+        "sha": "eea22102b4418925da122c296eb8a2384bee3c33",
+        "ref": null,
+        "title": "fix: refactor extractObjectKey function to simplify known root handling"
+      },
+      {
+        "sha": "ea256048667ca1df3c0302d9379d31aa8fac3635",
+        "ref": null,
+        "title": "fix(storage): split admin vs ownership presign-download flows (AGN-065)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 312 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "admin-panel/src/views/agencies/AgencyDetailView.vue",
+        "lines": [
+          363,
+          364
+        ]
+      },
+      {
+        "file": "admin-panel/src/views/agencies/AgencyDetailView.vue",
+        "lines": [
+          367,
+          368
+        ]
+      },
+      {
+        "file": "admin-panel/src/views/agencies/AgencyDetailView.vue",
+        "lines": [
+          381,
+          381
+        ]
+      },
+      {
+        "file": "admin-panel/src/views/agencies/AgencyDetailView.vue",
+        "lines": [
+          402,
+          402
+        ]
+      },
+      {
+        "file": "admin-panel/src/views/agencies/AgencyDetailView.vue",
+        "lines": [
+          406,
+          406
+        ]
+      },
+      {
+        "file": "admin-panel/src/api/admin.ts",
+        "lines": [
+          46,
+          48
+        ]
+      }
+    ]
+  }
+}

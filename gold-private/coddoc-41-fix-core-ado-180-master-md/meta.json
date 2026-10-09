@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-41-fix-core-ado-180-master-md",
+  "type": "tp",
+  "tags": [],
+  "description": "#41 «fix(core): ADO-180 — таблица реестра в MASTER.md разъезжалась с блоками» — дефект, который потом исправил #81",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "1e37a79e6fcec69aa3cec70d0c18f33fddf59dcb",
+    "base": "2df7abe8c4f9657c6e2a11328fe6d9db226d1617",
+    "ref": "#41",
+    "fixes": [
+      {
+        "sha": "acb2a77794c8c12b6c4db2a3b8c905eafcf1dc8f",
+        "ref": "#81",
+        "title": "fix(core): «файла нет» и «файл под .gitignore» — разные диагнозы (#81)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 173 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/core/hash_calc.py",
+        "lines": [
+          81,
+          82
+        ]
+      }
+    ]
+  }
+}

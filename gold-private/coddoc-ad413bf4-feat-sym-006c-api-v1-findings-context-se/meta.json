@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-ad413bf4-feat-sym-006c-api-v1-findings-context-se",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(SYM-006C): API v1 — findings/context/search + Bearer-gate контракт» — дефект, который потом исправил #71",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "ad413bf4b3d34671ce94f0f8229b97aa36571e5a",
+    "base": "33544c9beafca657e3a27ddd0bc07e4993af9eb2",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "ecb79828d449008415e19ea25e9e4114f0837404",
+        "ref": "#71",
+        "title": "fix(search): CUR-010 — понятная ошибка вместо трейса при отсутствии FTS-таблицы (#71)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 553 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/v1/routes.py",
+        "lines": [
+          161,
+          161
+        ]
+      }
+    ]
+  }
+}

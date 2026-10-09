@@ -1,0 +1,38 @@
+{
+  "id": "gateway-80d58aad-fix-wizard-start-another-device-from-the",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": " «fix(wizard): start another device from the first screen» — дефект, который потом исправил #71",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "80d58aadc8f31ee545e4115bef365a1f125deb77",
+    "base": "559251aa53d15adba010bc62b2c29bdf31ef72fd",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "9c8796ff04271c6f6759382e24151578a46ab327",
+        "ref": "#71",
+        "title": "fix(wizard): make the error panel's Retry retry what actually failed (#71)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 79 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: classifyError, classifyFlowErrors"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "wizard/src/App.tsx",
+        "lines": [
+          550,
+          550
+        ]
+      }
+    ]
+  }
+}

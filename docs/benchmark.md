@@ -104,3 +104,21 @@ OLLAMA_API_KEY=… npm run benchmark:public
 что дефект был, но не что он единственный. Выборка смещена в сторону дефектов, которые
 проект заметил и описал ссылкой на виновника. Сравнения с конкурентами здесь нет — для него
 нужен их прогон на том же наборе.
+
+## Набор своих проектов (`gold-private/`)
+
+Тот же SZZ, но по локальной истории проектов, где работает ревью (Orakul, Restate, Iot_Gateway,
+cod-doc), без ссылки «introduced in #N»: виновника находит `git blame` строк, удалённых
+фиксом (`fix…` в заголовке или ветка `fix/…`), на родителе фикса. Кейс несёт `source.local`
+(имя клона) и `source.base..source.sha`; дифф строится из клона по `REVIEW_GOLD_REPOS`, код в
+репозиторий ai-reviewer не попадает. Раннер разворачивает дерево проекта на `source.sha` и
+ревьюит из него — окна контекста и карточки символов настоящие, а не из каталога ai-reviewer.
+
+Тег `contract` — фикс поменял вызов функции, объявленной в одном другом файле проекта:
+подмножество для замера карточек символов (RFC 14). Сборщик и ограничения разметки —
+[gold-private/README.md](../gold-private/README.md).
+
+```bash
+node bin/pr-review-gold-harvest-local.mjs --repo /path/Orakul --name orakul --branch origin/main --since 2026-01-01 --emit gold-private
+REVIEW_GOLD_DIR=gold-private REVIEW_GOLD_REPOS="orakul=/path/Orakul,…" OLLAMA_API_KEY=… node bin/pr-review-gold.mjs
+```

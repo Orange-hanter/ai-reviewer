@@ -1,0 +1,73 @@
+{
+  "id": "orakul-519-ci-fail-fast-ai-review",
+  "type": "tp",
+  "tags": [],
+  "description": "#519 «ci(fail-fast): красный гейт качества гасит AI review этого коммита» — дефект, который потом исправил #527, #529, #573",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "f5973121a9bd4cf31a77d6adea7d3245db5d5134",
+    "base": "2d8e01fd10ab21686f8973715f1905ae55c594d3",
+    "ref": "#519",
+    "fixes": [
+      {
+        "sha": "5a0e4392a4f92a3e8a23e4c503a4f20c54006157",
+        "ref": "#527",
+        "title": "fix(ci): fail-fast не срабатывал — выключатель ломался о приведение типов"
+      },
+      {
+        "sha": "366384caa3c50d1efde79b57607291d20720da54",
+        "ref": "#529",
+        "title": "fix(ci): job fail-fast ломал общий workspace self-hosted раннера"
+      },
+      {
+        "sha": "6ab93132ba666ec47f54bfea2b284e27de2cfc05",
+        "ref": "#573",
+        "title": "ci: e2e — отдельный workflow, чтобы не блокировать деплой"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 568 строк в 8 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          161,
+          161
+        ]
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          174,
+          184
+        ]
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          193,
+          193
+        ]
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          200,
+          202
+        ]
+      },
+      {
+        "file": ".github/workflows/ci.yml",
+        "lines": [
+          205,
+          205
+        ]
+      }
+    ]
+  }
+}

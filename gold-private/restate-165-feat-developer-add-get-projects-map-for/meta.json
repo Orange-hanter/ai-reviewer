@@ -1,0 +1,63 @@
+{
+  "id": "restate-165-feat-developer-add-get-projects-map-for",
+  "type": "tp",
+  "tags": [],
+  "description": "!165 «feat(developer): add GET /projects/map for the public project catalog» — дефект, который потом исправил !176",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "3b7b7d4c86cdeaaa26db3e700551bd2de0bd817e",
+    "base": "04659e6a4831839cfcacb7f710a762abe8a81a38",
+    "ref": "!165",
+    "fixes": [
+      {
+        "sha": "7a0a28b2665a1c7226bedd05336fb80013c0f964",
+        "ref": "!176",
+        "title": "fix(projects): compute unit counters from listings, mig 112 (#75)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 503 строк в 14 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/developer/dto/list-public-projects-query.dto.ts",
+        "lines": [
+          190,
+          190
+        ]
+      },
+      {
+        "file": "restate-api/src/developer/repositories/developer-projects.repository.ts",
+        "lines": [
+          90,
+          91
+        ]
+      },
+      {
+        "file": "restate-api/src/developer/repositories/developer-projects.repository.ts",
+        "lines": [
+          504,
+          504
+        ]
+      },
+      {
+        "file": "restate-api/src/developer/repositories/developers.repository.types.ts",
+        "lines": [
+          241,
+          241
+        ]
+      },
+      {
+        "file": "restate-api/src/developer/services/developer-projects.service.ts",
+        "lines": [
+          134,
+          134
+        ]
+      }
+    ]
+  }
+}

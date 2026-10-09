@@ -1,0 +1,47 @@
+{
+  "id": "restate-632459e0-feat-deploy-enhance-deployment-process-w",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(deploy): enhance deployment process with failure handling and notifications» — дефект, который потом исправил 284d918a, 2329c8d9",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "632459e0d1d03146e8a89dc5939aff280811959a",
+    "base": "58d871ee55f07a0a8742071b67ae49d0b620fb71",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "284d918a2f5a5c27e50fb9f3a40d8621c6e3f5a0",
+        "ref": null,
+        "title": "fix(deploy): improve health check command for container readiness"
+      },
+      {
+        "sha": "2329c8d946598325c3c9954f01f71cf987100a73",
+        "ref": null,
+        "title": "fix(deploy): enhance smoke login checks and error handling in deployment script"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 154 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".gitlab-ci.yml",
+        "lines": [
+          431,
+          431
+        ]
+      },
+      {
+        "file": ".gitlab-ci.yml",
+        "lines": [
+          486,
+          500
+        ]
+      }
+    ]
+  }
+}

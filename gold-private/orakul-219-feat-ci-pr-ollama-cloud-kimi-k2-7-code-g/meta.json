@@ -1,0 +1,35 @@
+{
+  "id": "orakul-219-feat-ci-pr-ollama-cloud-kimi-k2-7-code-g",
+  "type": "tp",
+  "tags": [],
+  "description": "#219 «feat(ci): авто код-ревью PR — Ollama Cloud (kimi-k2.7-code) + Graphify blast-radius (#219)» — дефект, который потом исправил #482",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "1ff60dd5d92e9bb62ce871286ea307fc718d0440",
+    "base": "8639570c0c3381eb2bb1c382c7e8e2cc6f7b052b",
+    "ref": "#219",
+    "fixes": [
+      {
+        "sha": "01a6ef8d9930128ce270f7a42c3f50fbd22c1ef1",
+        "ref": "#482",
+        "title": "fix(ci): мелкие инфра-фиксы — GRAPH path, promote REST, SARIF-шаг"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 625 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/pr-review.yml",
+        "lines": [
+          91,
+          91
+        ]
+      }
+    ]
+  }
+}

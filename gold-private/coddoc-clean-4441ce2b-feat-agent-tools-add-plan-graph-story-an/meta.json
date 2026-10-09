@@ -1,0 +1,15 @@
+{
+  "id": "coddoc-clean-4441ce2b-feat-agent-tools-add-plan-graph-story-an",
+  "type": "clean",
+  "description": " «feat: agent tools — add plan graph, story, and doc reading tools (B1-B2)» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "4441ce2b7deecaac6c65642be96a8bb1b2ee47a3",
+    "base": "7e72b30075dc0be4506e31a71c3d4c2a6c8a6ba9",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

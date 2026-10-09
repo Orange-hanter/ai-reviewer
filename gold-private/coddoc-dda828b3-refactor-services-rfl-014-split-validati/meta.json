@@ -1,0 +1,56 @@
+{
+  "id": "coddoc-dda828b3-refactor-services-rfl-014-split-validati",
+  "type": "tp",
+  "tags": [],
+  "description": " «refactor(services): RFL-014 — split validation.py into validation/ package» — дефект, который потом исправил c43c422c",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "dda828b3d13d09c2265e3685f8f885eda586ad3e",
+    "base": "33b785cb92f000faad0b465bc9c141a61309dfa3",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "c43c422c218c1d29084f27647160b2541a055793",
+        "ref": null,
+        "title": "fix(validation): ADO-021 — fullmatch вместо match в 4 ID-валидаторах"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 424 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/validation/structural.py",
+        "lines": [
+          27,
+          27
+        ]
+      },
+      {
+        "file": "cod_doc/services/validation/structural.py",
+        "lines": [
+          39,
+          39
+        ]
+      },
+      {
+        "file": "cod_doc/services/validation/structural.py",
+        "lines": [
+          49,
+          49
+        ]
+      },
+      {
+        "file": "cod_doc/services/validation/structural.py",
+        "lines": [
+          60,
+          60
+        ]
+      }
+    ]
+  }
+}

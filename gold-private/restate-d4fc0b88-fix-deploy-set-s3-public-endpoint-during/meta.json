@@ -1,0 +1,35 @@
+{
+  "id": "restate-d4fc0b88-fix-deploy-set-s3-public-endpoint-during",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(deploy): set S3 public endpoint during full stack rebuild» — дефект, который потом исправил 84bacbb0",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "d4fc0b883f43f900611bd9c3db2f4f93b89ac914",
+    "base": "ec5fd123c8713542cca67745f99c617ec4ac95c9",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "84bacbb0389801671b45494117cb96489c41ef82",
+        "ref": null,
+        "title": "fix(ci): recover from postgres PG16→PG17 data mismatch on develop deploy"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 2 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          51,
+          51
+        ]
+      }
+    ]
+  }
+}

@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:90c83166ed8c`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:151943acafa9`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:92a147d57c54`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:9d5f3653a373`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -147,7 +147,7 @@ graph TD
 
 ### Индекс документации
 - **Описание:** все документы `docs/` и соседние README; сюда — всё, чего нет в этом реестре.
-- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:bdf7704c58f7`
+- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:cbf05b5c312c`
 - **Статус:** `🟢 VERIFIED`
 
 ### Бэклог

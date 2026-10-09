@@ -1,0 +1,42 @@
+{
+  "id": "coddoc-ae5911e6-feat-security-sym-003-loopback-bind-loop",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(security): SYM-003 — loopback bind по умолчанию + loopback-гейт POST /settings» — дефект, который потом исправил 147a1c59",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "ae5911e6712efb94580de7685b337f292a2ce7e4",
+    "base": "f43f0963236d93f8ec0261c8c700a588f8387e35",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "147a1c59df6a6bac3ffc41ded62bdf1d75f8f953",
+        "ref": null,
+        "title": "fix(ADO-035): loopback-гварда на PATCH /api/config — guard в api/deps.py, симметрия с POST /settings"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 138 строк в 8 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/web/pages/_helpers.py",
+        "lines": [
+          7,
+          14
+        ]
+      },
+      {
+        "file": "cod_doc/api/web/pages/_helpers.py",
+        "lines": [
+          17,
+          22
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "id": "orakul-11147caa-feat-m4-5-2-17-hometab-tsx",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": " «feat(m4): Волна 5.2 ч.17 — HomeTab → .tsx» — дефект, который потом исправил #74",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "11147caa1f9a7095ee304a0d56d8123c45750535",
+    "base": "a1daca75c5a35f0c4163c7eb629b65c392ade6ea",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "8766b7779b947a64d59ba9ab61ccf58167011597",
+        "ref": "#74",
+        "title": "feat(pilot): #42 клик по аномалии, #22 статус интеграций, #7 разбор аномалий"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 427 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: nplural"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/tabs/HomeTab.tsx",
+        "lines": [
+          252,
+          252
+        ]
+      }
+    ]
+  }
+}

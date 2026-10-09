@@ -1,0 +1,42 @@
+{
+  "id": "coddoc-106-feat-curator-aft-002-curator-next-8-advi",
+  "type": "tp",
+  "tags": [],
+  "description": "#106 «feat(curator): AFT-002 — curator_next ≤ 8 КБ: advisory отдельно, скиллы по имени (#106)» — дефект, который потом исправил #108",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "051a86b6f360d1e8f9daae03b0a003f526161557",
+    "base": "f02e9ad2198acd468c19214ec7ce8a06f4c4681c",
+    "ref": "#106",
+    "fixes": [
+      {
+        "sha": "427a1bbb9f4af005f6bcbcd4c50dedeb17237140",
+        "ref": "#108",
+        "title": "fix(curator): AFT-002 — дожим карточки куратора до 8 КБ на живом корпусе (#108)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 415 строк в 11 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/curator_service.py",
+        "lines": [
+          86,
+          87
+        ]
+      },
+      {
+        "file": "cod_doc/services/curator_service.py",
+        "lines": [
+          125,
+          125
+        ]
+      }
+    ]
+  }
+}

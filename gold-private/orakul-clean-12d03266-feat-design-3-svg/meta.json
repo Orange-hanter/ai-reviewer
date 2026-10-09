@@ -1,0 +1,15 @@
+{
+  "id": "orakul-clean-12d03266-feat-design-3-svg",
+  "type": "clean",
+  "description": " «feat(design): этап 3 — SVG-иконки в заголовках секций вместо эмодзи» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "12d032662920dcc11ccbfd671a886693a51bef2e",
+    "base": "0294c37b0b1020f650c16e902b85d8e39197148e",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

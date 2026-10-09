@@ -1,0 +1,56 @@
+{
+  "id": "orakul-534-feat-pr-review-sticky",
+  "type": "tp",
+  "tags": [],
+  "description": "#534 «feat(pr-review): Δ-блок и история прогонов в sticky» — дефект, который потом исправил #540",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "7939b0472eb8ab1405702c21349517edb9afa787",
+    "base": "984d3a0912bca80e7a10b90e5826319c2dbcc1fe",
+    "ref": "#534",
+    "fixes": [
+      {
+        "sha": "953ac222eb01c2b5f7555aeb74190f91ddcc63d1",
+        "ref": "#540",
+        "title": "fix(ai-review): идентичность находки против идентичности точки кода"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 259 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          147,
+          149
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          154,
+          154
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          159,
+          162
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          171,
+          172
+        ]
+      }
+    ]
+  }
+}

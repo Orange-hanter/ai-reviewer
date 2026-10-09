@@ -1,0 +1,70 @@
+{
+  "id": "orakul-350-feat-pr-review-persist-scheduled-feedbac",
+  "type": "tp",
+  "tags": [],
+  "description": "#350 «feat(pr-review): persist scheduled feedback via bot PR (#350)» — дефект, который потом исправил #520",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "c6233152741d1bdd05a6d476f07e78a9892c0b59",
+    "base": "d1155aedcffc5049d60e9340ade6ca2dd8340ab6",
+    "ref": "#350",
+    "fixes": [
+      {
+        "sha": "dd1acebc7ef449fa1fc4921a7f553593ed776b74",
+        "ref": "#520",
+        "title": "fix(pr-review): harvest перестал слать пустые PR — петля feedback замкнута"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 641 строк в 11 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/pr-review-feedback.yml",
+        "lines": [
+          20,
+          20
+        ]
+      },
+      {
+        "file": ".github/workflows/pr-review-feedback.yml",
+        "lines": [
+          91,
+          91
+        ]
+      },
+      {
+        "file": ".github/workflows/pr-review-feedback.yml",
+        "lines": [
+          97,
+          98
+        ]
+      },
+      {
+        "file": ".github/workflows/pr-review-feedback.yml",
+        "lines": [
+          101,
+          101
+        ]
+      },
+      {
+        "file": ".github/workflows/pr-review-feedback.yml",
+        "lines": [
+          104,
+          104
+        ]
+      },
+      {
+        "file": ".github/workflows/pr-review-feedback.yml",
+        "lines": [
+          107,
+          107
+        ]
+      }
+    ]
+  }
+}
