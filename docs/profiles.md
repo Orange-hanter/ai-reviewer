@@ -1,3 +1,11 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-29
+---
+
 # Профиль проекта
 
 Движок один, репозитории разные. Всё, что зависит от конкретного репозитория — имена маркеров
@@ -30,6 +38,7 @@ TS/JS в корне репозитория, блок правил проекта
   "sarifRulePrefix": "acme",               // ruleId в SARIF: acme/critical…
   "repositoryUri": "https://github.com/acme/widgets",
   "repoRulesFile": "acme-repo-rules.md",   // или "repoRules": "…текст…"; иначе AGENTS.md
+  "strict": false,                         // строгий гейт, как REVIEW_STRICT=1
 
   "prompts": {                             // опционально: вставки в системные промпты
     "aggregatorExtra": "Prefer findings about money rounding.",
@@ -41,7 +50,7 @@ TS/JS в корне репозитория, блок правил проекта
     "layerDirs": ["server", "shared", "client"],
     "lintable": "^app/(?:shared|server|client)/.+\\.(?:ts|tsx)$",
     "e2eSpec": "^app/e2e/.*\\.spec\\.ts$",
-    "logic": "^(?:app/)?(?:server|shared|client)/.+\\.(?:ts|tsx)$",
+    "logic": "^(?:app/)?(?:server|shared|client)/.+\\.(?:ts|tsx)$",  // сейчас не читается, см. ниже
     "sensitive": "(?:^|/)ops/(?:pr-merge|deploy)"
   },
 
@@ -57,6 +66,9 @@ TS/JS в корне репозитория, блок правил проекта
     "fpMarkdown": "docs/ai-review-false-positives.md",
     "observabilityDir": ".ai-review/observability",
     "exportDir": ".ai-review/export",
+    "incrementalState": ".ai-review/incremental/state.json",
+    "structureExportDir": ".ai-review/structure",
+    "coverageLcov": "coverage/lcov.info",
     "astgrepConfig": "ops/ai-review/ast-grep/sgconfig.yml"
   }
 }
@@ -74,16 +86,26 @@ TS/JS в корне репозитория, блок правил проекта
 | `sarifRulePrefix` | `ruleId` в SARIF — по нему Code Scanning группирует алерты | = `toolName` |
 | `repositoryUri` | `tool.driver.informationUri` в SARIF | из `GITHUB_REPOSITORY` |
 | `repoRules` / `repoRulesFile` | Блок «правила проекта» в системном промпте: слои, канонические примитивы, чем проверяется поведение. Самое сильное средство против FP-лекций «у вас неправильная архитектура» | пусто; иначе **`AGENTS.md`** в корне (или рядом с профилем), если файл есть |
+| `strict` | Строгий гейт (`true`): блок и inline блокер-severity — только при prescan или `verifierStatus: verified`, advisory в строку не поднимаются; по умолчанию включает и `REVIEW_REQUIRE_QUOTE`. Складывается с `REVIEW_STRICT` через «или»: env `0` профильный `true` не выключает | `false` |
 | `prompts.advisorExtra` / `specialistExtra` / `aggregatorExtra` / `verifierExtra` | Свободный текст, дописывается в соответствующий системный промпт (кастомизация без форка движка) | пусто |
 | `layout.appDir` | Каталог, из которого запускается eslint/ast-grep (там `node_modules`) | корень |
 | `layout.layerDirs` | Каталоги, которым можно вернуть префикс `appDir`, если путь из diff пришёл без него | — |
 | `layout.lintable` | Какие файлы вообще отдаются в prescan | любой TS/JS |
-| `layout.e2eSpec` | Что считать e2e-спекой: список таких файлов уходит в промпт, чтобы модель не писала «тестов нет» о PR со спекой в диффе | `e2e//tests/*.spec|test.*` |
-| `layout.logic` | Классификация файла как «логика» для роутера | любой код |
+| `layout.e2eSpec` | Что считать e2e-спекой: список таких файлов уходит в промпт, чтобы модель не писала «тестов нет» о PR со спекой в диффе | `*.spec.*` / `*.test.*` (`js`/`ts`, варианты `x`/`c`/`m`) под каталогом `e2e/`, `test/` или `tests/` на любой глубине: `(?:^\|/)(?:e2e\|tests?)/.+\.(?:spec\|test)\.[cm]?[jt]sx?$` |
+| `layout.logic` | **Сейчас не читается**: поле валидируется и хранится, но роутер классифицирует файлы по своим зашитым `LOGIC`/`CODE` ([`lib/router.mjs`](../lib/router.mjs), `rust/src/router.rs`) — задавать его бессмысленно | `\.(?:ts\|tsx\|js\|jsx\|mjs\|cjs\|vue\|svelte)$` — только JS/TS/Vue/Svelte |
 | `layout.sensitive` | Зоны, где цена пропущенного дефекта выше средней (плюс к встроенным auth/billing/migrations/workflows) — влияет на маршрут находки | пусто |
 | `astgrep.scopes` | `ruleId → regex пути`: где правило вообще применимо (globs в `sgconfig.yml` не знают слоёв проекта) | правило действует везде |
 | `astgrep.allow` | `ruleId → список путей-исключений` (например, единственный модуль, которому сырой `X-Forwarded-For` положен по роли) | пусто |
-| `paths.*` | Куда писать feedback/observability/export и откуда читать FP-паттерны и ast-grep конфиг | `.ai-review/*` |
+| `paths.feedbackLog` | JSONL-журнал feedback | `.ai-review/feedback/fp-feedback.jsonl` |
+| `paths.feedbackCandidatesDir` | Кандидаты в fixtures | `.ai-review/feedback/candidates` |
+| `paths.fpPatterns` | Паттерны известных FP | пусто → стартовый набор пакета (`feedback/fp-patterns.jsonl`) |
+| `paths.fpMarkdown` | Журнал FP в markdown | `docs/ai-review-false-positives.md` |
+| `paths.observabilityDir` | JSONL-лог прогонов | `.ai-review/observability` |
+| `paths.exportDir` | JSON/SARIF артефакт | `.ai-review/export` |
+| `paths.incrementalState` | Состояние инкрементального прогона | `.ai-review/incremental/state.json` |
+| `paths.structureExportDir` | Выходы `pr-review-structure` | `.ai-review/structure` |
+| `paths.coverageLcov` | LCOV для structure-контура | `coverage/lcov.info` |
+| `paths.astgrepConfig` | `sgconfig.yml` для prescan | пусто → ruleset пакета (`ast-grep/sgconfig.yml`) |
 
 Любой путь из `paths` перебивается соответствующей env-переменной (см. [configuration.md](configuration.md)) —
 профиль задаёт умолчание репозитория, env — решение конкретного прогона.
@@ -93,6 +115,17 @@ TS/JS в корне репозитория, блок правил проекта
 [`profiles/orakul.json`](../profiles/orakul.json) — профиль первого потребителя движка. Он же
 используется регрессионным набором тестов: движок под ним обязан вести себя ровно так, как
 вёл себя in-repo версией до выноса в отдельный пакет.
+
+## Пример: профиль самого движка
+
+[`.ai-reviewer.json`](../.ai-reviewer.json) в корне — профиль, под которым ревьюится сам
+`ai-reviewer`; автопоиск подхватывает его без `REVIEW_PROFILE`. Показателен двумя вещами:
+`layout.sensitive` покрывает `lib/`, `bin/`, `rust/src/` и `pipeline.mjs` (гейт и его
+доказательства), а `repoRules` — это ~16 строк про осознанные решения (реэкспорт канонических
+примитивов, fail-open, объявленные усечения, паритетные копии JS↔Rust, ноль зависимостей).
+Ровно этот блок закрывает семейство FP «претензия к сознательному решению» из
+[review-quality.md](review-quality.md) §2.5. Локальная подготовка окружения под такой
+прогон — [model-tuning.md](model-tuning.md), «Локальный прогон с полными сигналами».
 
 ## Как завести свой
 

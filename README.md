@@ -1,9 +1,17 @@
+---
+type: vision
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-29
+---
+
 <div align="center">
 
 <img src=".github/hero.png" alt="ai-reviewer — code review that has to prove itself: prescan, jury, verifier, merge gate, MCP" width="100%">
 
 [![CI](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml)
-[![version](https://img.shields.io/badge/version-0.2.4-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.4.0-blue)](CHANGELOG.md)
 [![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![deps](https://img.shields.io/badge/dependencies-0-success)](package.json)
 [![license](https://img.shields.io/badge/license-UNLICENSED-lightgrey)](#лицензия)
@@ -100,7 +108,7 @@ flowchart LR
   DIFF[PR diff] --> ROUTE{router}
   ROUTE -->|lockfile, generated, rename| SKIP[без LLM]
   ROUTE -->|docs-only| LIGHT[без LLM]
-  ROUTE -->|код| CHUNK[чанки + файлы целиком]
+  ROUTE -->|код| CHUNK[чанки + окна контекста вокруг изменений]
   GRAPH[граф кода] --> CHUNK
   PRE[eslint + ast-grep] --> CHUNK
   CHUNK --> SPEC[security · correctness · architecture]
@@ -148,9 +156,30 @@ MCP-сервер `pr-review-structure-mcp` и его метод `structure_conte
 { "mcpServers": { "ai-reviewer-structure": { "command": "npx", "args": ["pr-review-structure-mcp"] } } }
 ```
 
+Полный прогон из чата — отдельный сервер `pr-review-mcp` ([RFC 08](proposals/08-review-mcp.md), [RFC 09](proposals/09-cursor-plugin-mcp.md), [RFC 10](proposals/10-mcp-cold-start.md)): сначала дешёвые стадии (`review_route` / `review_prescan` / `fp_check`), полный MoA — `review_run` как pinned dry-run, без постинга в GitHub. Это превью (`previewWouldBlock`), не merge-гейт. MoA идёт дольше клиентского timeout MCP, поэтому `review_run` зовут с `wait: false`: ответ сразу несёт `jobId`, а `review_findings` по `jobId` поллят, пока `status: running` ([RFC 12](proposals/12-mcp-long-run.md)). Cursor Plugin: `cursor-plugin/bin/install-local.sh` (копия в `~/.cursor/plugins/local`, не symlink; для старта и дешёвых тулзов Configure и Authenticate не нужны, `review_run` требует `OLLAMA_API_KEY` из Plugins → Configure или окружения) — [`cursor-plugin/README.md`](cursor-plugin/README.md).
+
+```json
+{
+  "mcpServers": {
+    "ai-reviewer": {
+      "command": "npx",
+      "args": ["pr-review-mcp"],
+      "env": {
+        "REVIEW_MCP_ROOT": "/abs/path/to/repo",
+        "OLLAMA_API_KEY": "...",
+        "REVIEW_PROFILE": "/abs/path/to/profile.json"
+      }
+    }
+  }
+}
+```
+
 Статусы, приоритеты evidence, cod-doc-интеграция — [docs/structure.md](docs/structure.md).
 
 ## Быстрый старт
+
+Пакет `private` и в npm не опубликован: `npx pr-review*` в примерах ниже работает внутри клона
+или checkout'а, где пакет установлен; иначе — `node <клон>/bin/pr-review*.mjs`.
 
 ```bash
 git clone git@github.com:Orange-hanter/ai-reviewer.git
@@ -191,9 +220,13 @@ npx pr-review-structure \
 | `pr-review-gold` | Shadow-прогон с LLM на размеченных TP/FP диффах |
 | `pr-review-metrics` | Сводка по логам прогонов |
 | `pr-review-probe-models` | Доступность, latency и JSON-mode моделей |
+| `pr-review-probe-cache` | Даёт ли endpoint скидку за общий префикс (стоит ли `REVIEW_PROMPT_LAYOUT=shared-prefix`) |
+| `pr-review-benchmark` | Precision/recall по результатам gold-прогонов без LLM |
+| `pr-review-gold-harvest` | Кандидаты публичного gold-набора из пар «виновник → фикс» |
 | `pr-review-feedback` · `-batch` | Сбор <img src=".github/icons/fp-up.svg" alt="👍" height="15">/<img src=".github/icons/fp-down.svg" alt="👎" height="15"> с PR |
 | `pr-review-structure` | Structure facts/assessment, drift, property drafts и Markdown |
 | `pr-review-structure-mcp` | Pinned-SHA `structure_context` MCP для агентов |
+| `pr-review-mcp` | Dry-run ревью из чата (`review_run` и дешёвые стадии); не гейт |
 
 ## Профиль проекта
 
@@ -223,7 +256,7 @@ npx pr-review-structure \
 бы секреты прогона:
 
 ```
-ops/ai-reviewer-ref          # v0.2.0 или commit SHA — пин читается из базовой ветки
+ops/ai-reviewer-ref          # v0.4.0 или commit SHA — пин читается из базовой ветки
 ops/ai-review/profile.json   # профиль проекта
 ```
 
@@ -241,13 +274,19 @@ ops/ai-review/profile.json   # профиль проекта
 | [structure.md](docs/structure.md) | Вне-PR анализ кодовой базы, MCP-контекст для агентов |
 | [false-positives.md](docs/false-positives.md) | Семейства FP, встроенные защиты, петля обучения |
 | [model-tuning.md](docs/model-tuning.md) | Роли моделей, температуры, чанки, reasoning effort |
+| [review-quality.md](docs/review-quality.md) | Почему находки не доезжают до строки: замер и причины |
+| [swarm.md](docs/swarm.md) | Внешний verdict + blast scope для PR-swarm |
+| [benchmark.md](docs/benchmark.md) | Precision/recall gold-бенчмарк |
+| [docs/dev/](docs/dev/README.md) · [MASTER.md](MASTER.md) | Журнал разработки, RFC; L0-навигатор для агента |
+
+Полный индекс — [docs/README.md](docs/README.md).
 
 ## Разработка
 
 ```bash
 npm test        # юнит + контракты (в т.ч. шаблоны workflow)
 npm run eval    # golden fixtures без LLM
-npm run check   # то и другое
+npm run check   # то и другое + check:rust (cargo build, cargo test, паритет JS ↔ Rust); ровно это гоняет CI
 ```
 
 Регрессионный набор гоняется под reference-профилем [`profiles/orakul.json`](profiles/orakul.json) —

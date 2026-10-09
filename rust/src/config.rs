@@ -16,14 +16,18 @@
 use serde_json::{json, Map, Value};
 
 // Дефолты движка (lib/constants.mjs + lib/config.mjs).
-pub const DEFAULT_MOA_REFERENCES: &str = "kimi-k2.7-code,glm-5.2,deepseek-v4-flash";
+pub const DEFAULT_MOA_REFERENCES: &str = "kimi-k2.7-code,glm-5.3,glm-5.3-flash";
 pub const DEFAULT_MOA_SPECIALIST_MODELS: &str =
-    "security:deepseek-v4-flash,correctness:kimi-k2.7-code,architecture:glm-5.2";
+    "security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3";
 pub const DEFAULT_MOA_AGGREGATOR: &str = "minimax-m3";
 pub const DEFAULT_REVIEW_VERIFIER_MODEL: &str = "deepseek-v4-pro";
-pub const DEFAULT_OLLAMA_MODELS_FALLBACK: &str = "deepseek-v4-flash";
+pub const DEFAULT_OLLAMA_MODELS_FALLBACK: &str = "deepseek-v4.1-flash";
 pub const DEFAULT_STRUCTURE_TRUST_TIER: &str = "trusted_local";
 pub const SPECIALIST_ROLES: [&str; 3] = ["security", "correctness", "architecture"];
+/// Вес сигнала `verified` из ACTIONABILITY_SIGNALS (lib/actionability.mjs): на него
+/// опускается порог допуска к verifier'у. Дублируется числом с JS-стороной
+/// (VERIFIED_SIGNAL_WEIGHT в lib/config.mjs) — паритет держит config.parity.mjs.
+pub const VERIFIED_SIGNAL_WEIGHT: f64 = 3.0;
 
 // Дефолты профиля (lib/profile.mjs DEFAULT_PROFILE).
 pub const DEFAULT_MARKER_NAMESPACE: &str = "ai-review";
@@ -71,6 +75,21 @@ fn js_number_env(env: &Map<String, Value>, key: &str) -> Option<f64> {
 fn num_env(env: &Map<String, Value>, key: &str, def: f64) -> f64 {
     match js_number_env(env, key) {
         Some(n) if n.is_finite() && n > 0.0 => n,
+        _ => def,
+    }
+}
+
+/// nonNegEnv из lib/util.mjs: конечное и >= 0, где НОЛЬ — значащее значение
+/// («выключено»), а не повод взять дефолт. Отсутствие переменной и пустая строка —
+/// «не задано» → def (в отличие от js_number_env, где пустая строка это 0).
+fn non_neg_env(env: &Map<String, Value>, key: &str, def: f64) -> f64 {
+    match env.get(key) {
+        None | Some(Value::Null) => return def,
+        Some(Value::String(s)) if s.trim().is_empty() => return def,
+        _ => {}
+    }
+    match js_number_env(env, key) {
+        Some(n) if n.is_finite() && n >= 0.0 => n,
         _ => def,
     }
 }
@@ -219,9 +238,9 @@ fn num_json(n: f64) -> Value {
 /// fallback на moaReferences (как в JS) недостижим, но цепочка сохранена.
 fn role_default_model(role: &str) -> &'static str {
     match role {
-        "security" => "deepseek-v4-flash",
+        "security" => "glm-5.3-flash",
         "correctness" => "kimi-k2.7-code",
-        "architecture" => "glm-5.2",
+        "architecture" => "glm-5.3",
         _ => "",
     }
 }
@@ -374,6 +393,11 @@ fn default_paths() -> Map<String, Value> {
     m.insert("fpMarkdown".into(), json!("docs/ai-review-false-positives.md"));
     m.insert("observabilityDir".into(), json!(".ai-review/observability"));
     m.insert("exportDir".into(), json!(".ai-review/export"));
+    // Состояние инкрементального прогона (lib/incremental.mjs).
+    m.insert(
+        "incrementalState".into(),
+        json!(".ai-review/incremental/state.json"),
+    );
     m.insert("structureExportDir".into(), json!(".ai-review/structure"));
     m.insert("coverageLcov".into(), json!("coverage/lcov.info"));
     m.insert("astgrepConfig".into(), json!(""));
@@ -613,6 +637,20 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
 
     let mut out = Map::new();
     out.insert("reviewMode".into(), json!(review_mode));
+    // Раскладка сообщений под префиксный кэш (RFC 16, решение 5; lib/prompt-layout.mjs).
+    out.insert(
+        "promptLayout".into(),
+        json!(
+            match or_env(env, "REVIEW_PROMPT_LAYOUT", "legacy")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "shared-prefix" => "shared-prefix",
+                _ => "legacy",
+            }
+        ),
+    );
     out.insert("httpRetries".into(), num_json(http_retries));
     out.insert(
         "github".into(),
@@ -635,8 +673,14 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "jsonMode": env_flag(env, "REVIEW_JSON_MODE", true),
             "seed": seed,
             "httpRetries": num_json(http_retries),
-            "requestTimeoutMs": num_json(num_env(env, "REVIEW_LLM_TIMEOUT_MS", 240_000.0)),
+            // 240 с обрывали половину prose-вызовов (медиана kimi на замере — 331 с):
+            // вход оплачен, ответа нет. 420 с покрывают p90 замера.
+            "requestTimeoutMs": num_json(num_env(env, "REVIEW_LLM_TIMEOUT_MS", 420_000.0)),
             "effort": or_env(env, "REVIEW_REASONING_EFFORT", "low").trim(),
+            // Reasoning effort первой попытки JSON-вызовов (агрегатор, verifier): рассуждение
+            // считается completion-токенами (замер: 1903 на находку у minimax-m3 против 474
+            // у sonnet), эксперименту нужен переключатель, а не правка кода.
+            "aggregatorEffort": or_env(env, "REVIEW_AGGREGATOR_REASONING_EFFORT", "low").trim(),
             "providerConcurrency": num_json(num_env(env, "REVIEW_PROVIDER_CONCURRENCY", 12.0)),
             "providerPerModel": num_json(num_env(env, "REVIEW_PROVIDER_PER_MODEL", 6.0)),
         }),
@@ -647,7 +691,8 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "references": moa_references,
             "aggregator": moa_aggregator,
             "label": moa_label,
-            "refMaxTokens": num_json(num_env(env, "MOA_REFERENCE_MAX_TOKENS", 12_000.0)),
+            // Страховка под лимит «не более 8 пунктов» из промпта (RFC 16, решение 3).
+            "refMaxTokens": num_json(num_env(env, "MOA_REFERENCE_MAX_TOKENS", 6_000.0)),
             "refTemp": num_json(moa_ref_temp),
             "aggTemp": num_json(moa_agg_temp),
         }),
@@ -676,12 +721,21 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
     );
     out.insert("cost".into(), json!({ "priceMap": price_map }));
     out.insert("inlineOn".into(), json!(inline_on));
+    let actionability_min = num_env(env, "REVIEW_ACTIONABILITY_MIN", 4.0);
     out.insert(
         "actionability".into(),
         json!({
-            "threshold": num_json(num_env(env, "REVIEW_ACTIONABILITY_MIN", 4.0)),
+            "threshold": num_json(actionability_min),
             "maxAdvisoryInline": num_json(num_env(env, "REVIEW_MAX_ADVISORY_INLINE", 5.0)),
             "verifyAdvisory": num_json(num_env(env, "REVIEW_VERIFY_ADVISORY", 5.0)),
+            // Порог ДОПУСКА к verifier'у, отдельный от порога маршрута: «порог минус вес
+            // сигнала verified» — кандидатом становится всё, что СТАНЕТ доказуемым после
+            // подтверждения (docs/review-quality.md §2.2, P1).
+            "verifyMin": num_json(num_env(
+                env,
+                "REVIEW_VERIFY_ADVISORY_MIN",
+                actionability_min - VERIFIED_SIGNAL_WEIGHT,
+            )),
         }),
     );
     out.insert(
@@ -691,7 +745,12 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "model": verifier_model,
             "maxCandidates": num_json(num_env(env, "REVIEW_VERIFIER_MAX", 12.0)),
             "temperature": num_json(verifier_temp),
+            // ±строк вокруг строки-кандидата в контексте verifier'а (lib/context-window.mjs):
+            // второй проход смотрит 1–2 строки на файл, целый файл он не окупает.
+            "contextMargin": num_json(num_env(env, "REVIEW_VERIFIER_CONTEXT_MARGIN", 80.0)),
             "strictBlocks": env_flag(env, "REVIEW_VERIFIER_STRICT", true),
+            // Карточки символов verifier'у (RFC 14, решение 4): выключено до gold ×3.
+            "symbolCards": env_flag(env, "REVIEW_VERIFIER_SYMBOL_CARDS", false),
         }),
     );
     out.insert("router".into(), json!({ "enabled": router_enabled }));
@@ -700,6 +759,17 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
         json!({
             "enabled": specialists_enabled,
             "assignments": specialist_assignments,
+            // auto — слить роли в один вызов, когда модель у всех одна (RFC 16, решение 4);
+            // always — сливать и при разных моделях; never — опрашивать по отдельности.
+            "merge": match or_env(env, "REVIEW_SPECIALISTS_MERGE", "auto")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "always" => "always",
+                "never" => "never",
+                _ => "auto",
+            },
         }),
     );
     out.insert(
@@ -725,6 +795,16 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "enabled": observability_enabled,
             "dir": or_env(env, "REVIEW_OBSERVABILITY_DIR", &ppath(paths, "observabilityDir")),
             "file": or_env(env, "REVIEW_OBSERVABILITY_FILE", "pr-review-runs.jsonl"),
+        }),
+    );
+    // Инкрементальный прогон (RFC 05, lib/incremental.mjs): не ревьюить заново файлы,
+    // чей вход для модели не изменился.
+    out.insert(
+        "incremental".into(),
+        json!({
+            "enabled": env_flag(env, "REVIEW_INCREMENTAL", false),
+            "stateFile": or_env(env, "REVIEW_INCREMENTAL_STATE", &ppath(paths, "incrementalState")),
+            "fullEvery": num_json(num_env(env, "REVIEW_INCREMENTAL_FULL_EVERY", 10.0)),
         }),
     );
     out.insert(
@@ -765,6 +845,21 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "maxDepsPerSymbol": num_json(num_env(env, "REVIEW_MAX_DEPS_PER_SYMBOL", 20.0)),
             "godNodeThreshold": num_json(num_env(env, "REVIEW_GOD_NODE_THRESHOLD", 20.0)),
             "maxFileLines": num_json(num_env(env, "REVIEW_MAX_FILE_LINES", 1500.0)),
+            // Добавленный файл целиком лежит в диффе — второй экземпляр в контексте
+            // оплачивается каждой ролью на каждом чанке (см. lib/diff.mjs addedFileMarker).
+            "skipAddedFileContext": env_flag(env, "REVIEW_SKIP_ADDED_FILE_CONTEXT", true),
+            // Чанк без исполняемого кода обслуживает один агрегатор вместо жюри
+            // (RFC 16, lib/chunk-routing.mjs).
+            "chunkRouting": env_flag(env, "REVIEW_CHUNK_ROUTING", true),
+            // Окна контекста для advisors и жюри (RFC 07, lib/context-window.mjs):
+            // НОЛЬ — «окна выключены» (откат), поэтому non_neg_env, а не num_env.
+            "contextMargin": num_json(non_neg_env(env, "REVIEW_CONTEXT_MARGIN", 40.0)),
+            "contextWindowMinChars": num_json(non_neg_env(env, "REVIEW_CONTEXT_WINDOW_MIN_CHARS", 8000.0)),
+            // Карточки символов (RFC 14, lib/symbol-cards.mjs): включено по gold A/B.
+            "symbolCards": env_flag(env, "REVIEW_SYMBOL_CARDS", true),
+            "symbolCardsMax": num_json(num_env(env, "REVIEW_SYMBOL_CARDS_MAX", 20.0)),
+            "symbolCardsMaxChars": num_json(num_env(env, "REVIEW_SYMBOL_CARDS_MAX_CHARS", 3000.0)),
+            "symbolCardsBodyMaxLines": num_json(non_neg_env(env, "REVIEW_SYMBOL_CARDS_BODY_MAX_LINES", 0.0)),
             "maxContextBytes": num_json(num_env(env, "REVIEW_MAX_CONTEXT_BYTES", 180_000.0)),
             "chunkBytes": num_json(num_env(env, "REVIEW_CHUNK_BYTES", 56_000.0)),
             "maxChunks": num_json(num_env(env, "REVIEW_MAX_CHUNKS", 40.0)),
@@ -880,6 +975,17 @@ mod tests {
     }
 
     #[test]
+    fn non_neg_env_zero_is_meaningful() {
+        let e = env(&[("A", "0"), ("B", ""), ("C", "abc"), ("D", "-3"), ("E", "40")]);
+        assert_eq!(non_neg_env(&e, "A", 40.0), 0.0, "0 — значащее значение (выключено)");
+        assert_eq!(non_neg_env(&e, "B", 40.0), 40.0, "пустая строка — «не задано»");
+        assert_eq!(non_neg_env(&e, "C", 40.0), 40.0);
+        assert_eq!(non_neg_env(&e, "D", 40.0), 40.0);
+        assert_eq!(non_neg_env(&e, "E", 40.0), 40.0);
+        assert_eq!(non_neg_env(&e, "MISSING", 40.0), 40.0);
+    }
+
+    #[test]
     fn ratio_env_range() {
         let e = env(&[("A", "0"), ("B", "1"), ("C", "0.5"), ("D", "1.5"), ("E", "-0.1")]);
         assert_eq!(ratio_env(&e, "A", 0.1), 0.0);
@@ -983,9 +1089,9 @@ mod tests {
         assert_eq!(parts["github"]["api"], "https://api.github.com");
         assert_eq!(parts["llm"]["base"], "https://ollama.com/v1");
         assert_eq!(parts["ollama"]["model"], "kimi-k2.7-code");
-        assert_eq!(parts["ollama"]["requestTimeoutMs"], 240000);
+        assert_eq!(parts["ollama"]["requestTimeoutMs"], 420000);
         assert_eq!(parts["moa"]["label"], "moa-specialist(minimax-m3←security+correctness+architecture)");
-        assert_eq!(parts["models"]["fallback"], json!(["deepseek-v4-flash"]));
+        assert_eq!(parts["models"]["fallback"], json!(["deepseek-v4.1-flash"]));
         assert_eq!(parts["gate"]["blockOn"], json!(["critical", "major"]));
         assert_eq!(parts["gate"]["consensusMin"], 1);
         assert_eq!(parts["gate"]["confidenceMin"], 0.8);
@@ -1036,6 +1142,38 @@ mod tests {
         let e2 = env(&[("REVIEW_BLOCK_ON", "")]);
         let p2 = load_review_config_parts(&e2, &profile_bits(&default_profile()));
         assert_eq!(p2["gate"]["blockOn"], json!([]));
+    }
+
+    #[test]
+    fn load_verify_min_derives_from_actionability_min() {
+        // Дефолт — «порог маршрута минус вес сигнала verified» (3), а не константа.
+        let parts = load_review_config_parts(&env(&[]), &profile_bits(&default_profile()));
+        assert_eq!(parts["actionability"]["threshold"], 4);
+        assert_eq!(parts["actionability"]["verifyMin"], 1);
+
+        let e = env(&[("REVIEW_ACTIONABILITY_MIN", "6")]);
+        let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(parts["actionability"]["verifyMin"], 3, "порог поехал — допуск едет за ним");
+
+        // Явное значение перебивает вывод; порог маршрута при этом не меняется.
+        let e = env(&[("REVIEW_VERIFY_ADVISORY_MIN", "99")]);
+        let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(parts["actionability"]["verifyMin"], 99);
+        assert_eq!(parts["actionability"]["threshold"], 4);
+    }
+
+    #[test]
+    fn load_new_token_knobs_defaults() {
+        let parts = load_review_config_parts(&env(&[]), &profile_bits(&default_profile()));
+        assert_eq!(parts["ollama"]["aggregatorEffort"], "low");
+        assert_eq!(parts["verifier"]["contextMargin"], 80);
+        let e = env(&[
+            ("REVIEW_AGGREGATOR_REASONING_EFFORT", " none "),
+            ("REVIEW_VERIFIER_CONTEXT_MARGIN", "20"),
+        ]);
+        let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(parts["ollama"]["aggregatorEffort"], "none", "trim как у REVIEW_REASONING_EFFORT");
+        assert_eq!(parts["verifier"]["contextMargin"], 20);
     }
 
     #[test]
@@ -1161,9 +1299,9 @@ mod tests {
         let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
         assert_eq!(parts["reviewMode"], "consensus", "trim + lowercase");
         assert_eq!(parts["models"]["list"], json!(["m1", "m2"]));
-        assert_eq!(parts["models"]["fallback"], json!(["deepseek-v4-flash"]));
+        assert_eq!(parts["models"]["fallback"], json!(["deepseek-v4.1-flash"]));
         // fallback исключает модели списка.
-        let e = env(&[("REVIEW_MODE", "consensus"), ("OLLAMA_MODELS", "deepseek-v4-flash,m9")]);
+        let e = env(&[("REVIEW_MODE", "consensus"), ("OLLAMA_MODELS", "deepseek-v4.1-flash,m9")]);
         let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
         assert_eq!(parts["models"]["fallback"], json!([]));
     }

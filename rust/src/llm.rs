@@ -2,7 +2,7 @@
 //! `/chat/completions` — HTTP, ручной SSE-стриминг, ретраи с backoff,
 //! бюджет таймаута, fail-open по `stream_options/include_usage` на 400.
 //!
-//! Второй слой (задача T10 RFC 04) — [`RealLlmClient`], порт `createLlmClient`
+//! Второй слой (задача T10 RFC 16) — [`RealLlmClient`], порт `createLlmClient`
 //! (`lib/llm.mjs:107-241`): два уровня адаптивных семафоров, AIMD-троттлинг обоих
 //! на 429, каскад ретраев `chatJson`, `chatText` с повтором на `effort=none`
 //! и учёт usage через колбэк `on_usage` (в JS — `costTracker.record`).

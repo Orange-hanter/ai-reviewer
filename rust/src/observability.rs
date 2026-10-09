@@ -1,4 +1,4 @@
-//! Порт `lib/observability.mjs` (RFC 04, задача T16): JSONL-лог прогона.
+//! Порт `lib/observability.mjs` (RFC 16, задача T16): JSONL-лог прогона.
 //!
 //! Чистые функции `countBySeverity`/`slimFindings` уже портированы в
 //! [`crate::metrics`] (там же живёт агрегация по этим же записям) — здесь они

@@ -1,5 +1,5 @@
 //! Подкоманда `pr-review review` — порт bin/pr-review.mjs и runReview из pipeline.mjs.
-//! Заполняется в задаче T27 (RFC 04).
+//! Заполняется в задаче T27 (RFC 16).
 
 use std::path::PathBuf;
 
@@ -19,5 +19,5 @@ pub struct Args {
 }
 
 pub fn run(_args: Args) -> anyhow::Result<i32> {
-    anyhow::bail!("подкоманда ещё не реализована (см. RFC 04)")
+    anyhow::bail!("подкоманда ещё не реализована (см. RFC 16)")
 }

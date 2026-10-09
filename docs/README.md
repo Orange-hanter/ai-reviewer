@@ -1,8 +1,19 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-29
+---
+
 # Документация ai-reviewer
 
 | Раздел | О чём |
 |--------|-------|
 | [architecture.md](architecture.md) | Как устроен прогон: поток данных, модули, ключевые решения |
+| [../MASTER.md](../MASTER.md) | L0-навигатор для агента (реестр канона + хэши) |
+| [dev/README.md](dev/README.md) | Куда писать журнал, execution-log, RFC; sync в cod-doc |
+| [dev/journal.md](dev/journal.md) | Журнал разработки (решения и прогоны; релизы — CHANGELOG) |
 | [profiles.md](profiles.md) | Профиль проекта — чем движок адаптируется к репозиторию |
 | [configuration.md](configuration.md) | CLI и все env-переменные с дефолтами |
 | [integration.md](integration.md) | Подключение к репозиторию-потребителю (пин + workflow) |
@@ -11,6 +22,12 @@
 | [false-positives.md](false-positives.md) | Семейства ложных срабатываний, защиты, петля обучения |
 | [model-tuning.md](model-tuning.md) | Роли моделей, температуры, размер чанка, reasoning effort |
 | [review-quality.md](review-quality.md) | Разбор низкого сигнала ревью: замер, причины по коду, план |
+| [scent-measurement.md](scent-measurement.md) | Замер слоя косвенных признаков без LLM: несут ли поверхностные признаки адрес дефекта ([RFC 15](../proposals/15-cue-driven-briefs.md)) |
+| [structure.md](structure.md) | Structure-контур: facts/assessment/obligations, провайдеры, MCP; вне гейта |
+| [benchmark-public.md](benchmark-public.md) | Замер на публичных диффах (`gold-public/`): precision/recall и разбор промахов |
+| [backlog.md](backlog.md) | Открытые направления и долг слияний вне планов cod-doc |
+| [../proposals/README.md](../proposals/README.md) | Реестр RFC: решения, дорогие для отката, до кода |
+| [../cursor-plugin/README.md](../cursor-plugin/README.md) | Cursor Plugin: установка, два MCP, skill и команды |
 
 Рядом с кодом:
 
@@ -19,5 +36,6 @@
 | [../feedback/README.md](../feedback/README.md) | Формат журнала 👍/👎, promote паттернов |
 | [../fixtures/README.md](../fixtures/README.md) | Golden fixtures для eval без LLM |
 | [../gold/README.md](../gold/README.md) | Размеченные диффы для shadow-прогона с LLM |
+| [../gold-public/README.md](../gold-public/README.md) | Публичный набор: как отобраны кейсы, отбракованные кандидаты |
 | [../examples/ci/](../examples/ci/) | Шаблоны workflow для потребителя |
 | [../profiles/orakul.json](../profiles/orakul.json) | Reference-профиль (он же — база регрессионных тестов) |

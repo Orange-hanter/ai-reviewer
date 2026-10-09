@@ -1,7 +1,8 @@
 // Канонический публичный API движка (import 'ai-reviewer' / 'ai-reviewer/lib/*').
 
-export { parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, parseDiffNewPath, parseDiffGitPath, unescapeGitPath } from './lib/diff.mjs';
+export { parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, collectAddedPaths, parseDiffNewPath, parseDiffGitPath, unescapeGitPath } from './lib/diff.mjs';
 export { extractJsonObject } from './lib/json.mjs';
+export { windowFileEntry, buildVerifierFileContents, windowChunkFileContents } from './lib/context-window.mjs';
 export { filterFalsePositiveFindings, matchesKnownFalsePositive, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers, applyPrescanBlockPolicy, filterStalePriorFindings, filterFindingsFixedInDiff, dedupeSameModelFindings, findingFingerprint, attachFingerprints } from './lib/findings.mjs';
 export { selectVerifierCandidates, applyVerifierVerdicts, createVerifierRunner } from './lib/verifier.mjs';
 export {
@@ -89,6 +90,12 @@ export { buildStructureContext } from './lib/structure-context.mjs';
 export {
   STRUCTURE_CONTEXT_TOOL, callStructureContext, handleStructureMcpRequest,
 } from './lib/structure-mcp.mjs';
+export {
+  REVIEW_RUN_TOOL, REVIEW_FINDINGS_TOOL, REVIEW_ROUTE_TOOL, REVIEW_PRESCAN_TOOL,
+  FP_CHECK_TOOL, FINGERPRINT_CHECK_TOOL, REVIEW_ARTIFACT_TOOL,
+  BLAST_SCOPE_TOOL, ACTIONABILITY_EXPLAIN_TOOL, REVIEW_METRICS_TOOL,
+  handleReviewMcpRequest, resetReviewMcpStore,
+} from './lib/review-mcp.mjs';
 export { buildStructureMarkdown, writeStructureExports } from './lib/structure-export.mjs';
 export {
   suggestObligationLinks, computeStructureDrift, reconcileStructureFindings,
@@ -96,4 +103,4 @@ export {
 } from './lib/structure-drift.mjs';
 export { decideAutoTriage, buildTriageContext, runAutoTriage, findingLocationKey as triageLocationKey } from './lib/triage.mjs';
 export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog } from './lib/router.mjs';
-export { createReviewPipeline, runGateResolution, runReview } from './pipeline.mjs';
+export { createReviewPipeline, runGateResolution, runReview, PipelineSoftFail } from './pipeline.mjs';

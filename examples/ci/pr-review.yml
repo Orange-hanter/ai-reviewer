@@ -141,12 +141,12 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           REVIEW_MODE: moa
-          MOA_REFERENCE_MODELS: kimi-k2.7-code,glm-5.2,deepseek-v4-flash
-          MOA_SPECIALIST_MODELS: security:deepseek-v4-flash,correctness:kimi-k2.7-code,architecture:glm-5.2
+          MOA_REFERENCE_MODELS: kimi-k2.7-code,glm-5.3,glm-5.3-flash
+          MOA_SPECIALIST_MODELS: security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3
           MOA_AGGREGATOR: minimax-m3
           MOA_REFERENCE_TEMPERATURE: '0.3'   # меньше находок, плотнее по существу (см. docs/model-tuning.md движка)
           MOA_AGGREGATOR_TEMPERATURE: '0.4'
-          OLLAMA_MODELS_FALLBACK: deepseek-v4-flash
+          OLLAMA_MODELS_FALLBACK: deepseek-v4.1-flash
           REVIEW_AUTO_TRIAGE: '1'
           REVIEW_INLINE_ON: critical,major
           REVIEW_BLOCK_ON: critical,major

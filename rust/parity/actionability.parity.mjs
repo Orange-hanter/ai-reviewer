@@ -20,7 +20,7 @@
  *   4. createFindingsFormatter.classify/findingBlock (обёртка lib/findings.mjs →
  *      бинарь actionability): группировка, marker профиля, SEV-эмодзи, suggestion;
  *   5. профиль с layout.sensitive (profiles/orakul.json) — обе ветки под ним,
- *      в т.ч. регекс с lookahead (в Rust его берёт fancy-regex, RFC 04).
+ *      в т.ч. регекс с lookahead (в Rust его берёт fancy-regex, RFC 16).
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -180,6 +180,12 @@ const edgeFindings = [
   { file: 'server/auth.ts', line: 10, severity: 'minor', advisorClaims: [] },
   { file: 'server/auth.ts', line: 10, severity: 'minor', advisorClaims: 'not-array' },
   { file: 'server/auth.ts', line: 10, severity: 'minor', verifierStatus: 'rejected', advisorClaims: [{ status: 'verified' }] },
+  // RFC 06: refutationStatus гасит jury-штраф только при точном 'downgraded'
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: 'downgraded', advisorClaims: [{ status: 'downgraded' }, { status: 'verified' }] },
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: 'kept', advisorClaims: [{ status: 'downgraded' }, { status: 'verified' }] },
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: 'downgraded_no_claims', advisorClaims: [{ status: 'rejected' }, { status: 'verified' }] },
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: 'downgraded', verifierStatus: 'downgraded', advisorClaims: [{ status: 'downgraded' }] },
+  { file: 'server/auth.ts', line: 10, severity: 'minor', refutationStatus: null, advisorClaims: [{ status: 'rejected' }, { status: 'verified' }] },
   { file: 'server/auth.ts', line: 10, severity: 'minor', consensus: true },
   { file: 'server/auth.ts', line: 10, severity: 'minor', consensus: false },
   { file: 'server/auth.ts', line: 10, severity: 'minor', confidence: 0.8 },
@@ -316,7 +322,7 @@ try {
     { file: 'ops/pr-review/gate.sh', line: 1, severity: 'minor', title: 'gate', body: 'b', model: 'm', confidence: 0.9, consensus: true },
   ], null, {});
 
-  // Регекс с lookahead: Rust компилирует его fancy-regex (RFC 04, решение 4),
+  // Регекс с lookahead: Rust компилирует его fancy-regex (RFC 16, решение 4),
   // деградации на JS больше нет — обе ветки считают сигнал одинаково.
   setProfile({ name: 't', layout: { sensitive: 'ops/(?=pr)' } });
   checkScore('lookahead sensitive', { file: 'ops/pr/x.sh', line: 1, severity: 'major', model: 'm' }, {});

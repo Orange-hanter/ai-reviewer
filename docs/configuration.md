@@ -1,3 +1,11 @@
+---
+type: guide
+status: active
+owner: ai-reviewer
+source_of_truth: true
+last_updated: 2026-09-29
+---
+
 # Конфигурация
 
 Приоритет: **env / CLI (прогон) → профиль проекта (репозиторий) → дефолты движка**.
@@ -11,26 +19,43 @@ default-off — `1`/`true`/`yes`/`on` как вкл. Пустое/незадан
 ## CLI
 
 ```bash
-pr-review [--dry-run] [--diff path/to.patch] [--pr N] [--repo owner/repo]
+pr-review [--dry-run] [--diff path/to.patch] [--head-sha SHA] [--pr N] [--repo owner/repo]
 pr-review-eval [--fixtures dir] [--json]
-pr-review-gold [--case id]                  # shadow-прогон с LLM на gold-диффах
+pr-review-gold [--case id] [--jsonl out.jsonl]  # shadow-прогон с LLM на gold-диффах
+pr-review-benchmark [results.jsonl] | --findings f.json --meta meta.json | --gold-dir dir
+pr-review-gold-harvest <owner/repo…> [--emit dir] [--clean N] [--force]
+pr-review-gold-harvest --validate [dir]     # dir по умолчанию gold-public
 pr-review-metrics [path.jsonl]              # сводка по observability-логу
 pr-review-probe-models                      # доступность и латентность моделей
+pr-review-probe-cache [model] [--size N]    # даёт ли провайдер скидку за общий префикс
 pr-review-feedback [--dry-run] [--pr N] [--repo owner/repo]
 pr-review-feedback-batch [--dry-run] [--pr N]
+pr-review-structure --graph … --lcov … --facts-out …  # structure-контур, вне гейта
+pr-review-mcp                               # stdio MCP: агентный dry-run ревью
+pr-review-structure-mcp                     # stdio MCP structure-контура
 ```
 
 | Флаг | Назначение |
 |------|------------|
 | `--dry-run` | Не постить в GitHub; summary в stdout |
 | `--diff` | Offline-режим: unified diff из файла (без PR API) |
+| `--head-sha` | Пин коммита для file-diff (MCP и dry-run). Без флага при `--diff` `headSha` в артефакте пустой |
 | `--pr` / `--repo` | Явный PR (иначе `PR_NUMBER`, `GITHUB_REPOSITORY`) |
+| `gold --jsonl` | Записи прогона (`id`, `findings`, `wouldBlock`, `wallMs`…) в JSONL — вход для `pr-review-benchmark` |
+| `benchmark` | Оценка gold-результатов без LLM: JSON-массив/JSONL прогонов, пара `--findings` + `--meta` или `--gold-dir` (meta-only) |
+| `gold-harvest --emit` | Писать кандидатов в `<dir>/<id>/meta.json`; существующую мету не перезаписывает — разметка, поправленная руками, сохраняется |
+| `gold-harvest --force` | Перезаписать существующую `meta.json` |
+| `gold-harvest --clean N` | Добыть ещё N clean-контролей на репозиторий (без `N` — 2) |
+| `gold-harvest --validate` | Проверить набор: доставку диффа по пину (прогревает `REVIEW_GOLD_CACHE`) и локации; есть битые кейсы — exit 1 |
+
+Флаги `pr-review-structure` — [structure.md](structure.md); `pr-review-mcp` — раздел
+«Review MCP» ниже.
 
 ## Профиль
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `REVIEW_PROFILE` | автопоиск `.ai-reviewer.json` | Путь к [профилю проекта](profiles.md) |
+| `REVIEW_PROFILE` | автопоиск `.ai-reviewer.json`, затем `ai-reviewer.config.json` в корне | Путь к [профилю проекта](profiles.md) |
 
 ## GitHub
 
@@ -40,29 +65,35 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `GITHUB_REPOSITORY` | — | `owner/repo` |
 | `PR_NUMBER` | — | Номер PR |
 | `GITHUB_API_URL` | `https://api.github.com` | Enterprise API |
+| `GH_TOKEN` | — | Только gold-загрузчик ([`lib/gold-fetch.mjs`](../lib/gold-fetch.mjs)): после `GITHUB_TOKEN`, перед `gh auth token`; без токена — анонимно |
 
 ## Ollama / LLM
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `OLLAMA_API_KEY` | — | Обязателен для LLM-слоя |
-| `OLLAMA_BASE_URL` | `https://ollama.com/v1` | API base |
+| `LLM_API_KEY` | — | Ключ OpenAI-совместимого провайдера; приоритет над `OLLAMA_API_KEY` |
+| `LLM_BASE_URL` | — | API base; приоритет над `OLLAMA_BASE_URL` |
+| `OLLAMA_API_KEY` | — | Ключ, если `LLM_API_KEY` не задан. Без ключа LLM-слой не работает |
+| `OLLAMA_BASE_URL` | `https://ollama.com/v1` | API base, если `LLM_BASE_URL` не задан |
 | `REVIEW_MODE` | `moa` | `moa` \| `consensus` |
-| `MOA_REFERENCE_MODELS` | `kimi-k2.7-code,glm-5.2,deepseek-v4-flash` | Advisors (prose) |
-| `MOA_SPECIALIST_MODELS` | `security:deepseek-v4-flash,correctness:kimi-k2.7-code,architecture:glm-5.2` | Роль → модель |
+| `MOA_REFERENCE_MODELS` | `kimi-k2.7-code,glm-5.3,glm-5.3-flash` | Advisors (prose) |
+| `MOA_SPECIALIST_MODELS` | `security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3` | Роль → модель |
+| `MOA_SPECIALIST_{SECURITY,CORRECTNESS,ARCHITECTURE}_MODEL` | — | Модель одной роли; приоритет над её записью в `MOA_SPECIALIST_MODELS` |
 | `MOA_AGGREGATOR` | `minimax-m3` | Жюри-агрегатор (JSON) |
 | `MOA_REFERENCE_TEMPERATURE` | `0.3` | Advisors |
 | `MOA_AGGREGATOR_TEMPERATURE` | `0.4` | Aggregator |
-| `MOA_REFERENCE_MAX_TOKENS` | `12000` | Потолок ответа advisor'а |
+| `MOA_REFERENCE_MAX_TOKENS` | `6000` | Потолок ответа advisor'а. Страховка под лимит «не более 8 пунктов» из промпта роли (RFC 04) |
 | `OLLAMA_MODEL` | `kimi-k2.7-code` | Одиночная модель (consensus) |
 | `OLLAMA_MODELS` | — | Consensus mode: список моделей |
-| `OLLAMA_MODELS_FALLBACK` | `deepseek-v4-flash` | Аварийная замена упавшей модели |
+| `OLLAMA_MODELS_FALLBACK` | `deepseek-v4.1-flash` | Аварийная замена упавшей модели |
 | `REVIEW_JSON_MODE` | `1` | JSON-mode для structured output |
 | `REVIEW_TEMPERATURE` | `0.4` | Consensus mode |
 | `REVIEW_SEED` | `7` | Детерминизм (где поддерживается) |
 | `REVIEW_REASONING_EFFORT` | `low` | Reasoning effort advisor-вызовов (`none` — быстрее) |
+| `REVIEW_AGGREGATOR_REASONING_EFFORT` | `low` | Reasoning effort ПЕРВОЙ попытки JSON-вызовов (агрегатор жюри, verifier). Рассуждение провайдер считает completion-токенами: замер — 1903 completion-токена на находку у `minimax-m3` против 474 у `sonnet`, вся разница — reasoning. Каскад ретраев `chatJson` (пустой content / оборванный JSON) по-прежнему уходит в `none` и этой ручкой не управляется |
+| `REVIEW_PROMPT_LAYOUT` | `legacy` | `shared-prefix` — общая рамка и контекст чанка первыми, инструкция роли последней: все роли чанка делят побайтово одинаковый префикс, который провайдер может отдать из кэша. **Замер `pr-review-probe-cache` показал, что Ollama Cloud скидки за общий префикс не даёт** — включать имеет смысл только на провайдере с префиксным кэшем, проверив тем же пробником |
 | `REVIEW_HTTP_RETRIES` | `3` | Retry GitHub + Ollama |
-| `REVIEW_LLM_TIMEOUT_MS` | `240000` | Таймаут одной попытки LLM |
+| `REVIEW_LLM_TIMEOUT_MS` | `420000` | Таймаут одной попытки LLM. 240000 обрывали половину prose-вызовов (медиана kimi — 331 с): вход оплачен, ответа нет |
 | `REVIEW_PROVIDER_CONCURRENCY` | `12` | Глобальный cap параллельных LLM-вызовов (AIMD по 429) |
 | `REVIEW_PROVIDER_PER_MODEL` | `6` | Cap параллельных вызовов на модель |
 
@@ -72,10 +103,12 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 |------------|---------|----------|
 | `REVIEW_BLOCK_ON` | `critical,major` | Severity → exit 1 |
 | `REVIEW_BLOCK_SINGLE` | `critical` | Severity, которой хватает одной модели |
-| `REVIEW_CONSENSUS` | `1` (moa) / `2` (consensus) | Мин. моделей для кластера-блокера |
+| `REVIEW_CONSENSUS` | `1` (moa) / `2` (consensus) | Мин. моделей для кластера-блокера. В `moa` всегда `1` (значение зажимается); в `consensus` — не больше числа моделей |
 | `REVIEW_CONFIDENCE_MIN` | `0.8` | Блок только при confidence ≥ порога |
 | `REVIEW_LLM_REQUIRED` | `1` | Полный аутедж LLM блокирует merge (fail-closed); `0` — старое fail-open |
 | `REVIEW_INLINE_ON` | `critical,major` | Severity, которым положен inline (см. actionability) |
+| `REVIEW_STRICT` | `0` (или `strict: true` профиля) | Строгий гейт: кластер блокирует, только если в нём есть находка уровня блока от prescan или с `verifierStatus: verified`; то же условие для inline блокер-severity; advisory в строку не поднимаются и к verifier'у по доказуемости не допускаются. Включается env **или** профилем: `0` в env профильный `strict` не выключает |
+| `REVIEW_REQUIRE_QUOTE` | = `REVIEW_STRICT` | critical/major без `quote` (цитаты кода) отбрасываются при нормализации ответа модели |
 
 ## Маршрут находки (actionability)
 
@@ -87,6 +120,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_ACTIONABILITY_MIN` | `4` | Порог суммы весов сигналов для inline |
 | `REVIEW_MAX_ADVISORY_INLINE` | `5` | Сколько advisory максимум уходит в inline |
 | `REVIEW_VERIFY_ADVISORY` | `5` | Сколько лучших advisory отдать verifier'у |
+| `REVIEW_VERIFY_ADVISORY_MIN` | `REVIEW_ACTIONABILITY_MIN − 3` (= `1`) | Порог **допуска** advisory к verifier'у — отдельный от порога маршрута и намеренно ниже его на **вес сигнала `verified`** (3, см. `ACTIONABILITY_SIGNALS` в [`lib/actionability.mjs`](../lib/actionability.mjs)). Кандидатом становится всё, что *станет* доказуемым, если verifier подтвердит; окончательный порог inline остаётся `REVIEW_ACTIONABILITY_MIN`. Равные пороги давали курицу и яйцо: чтобы minor дошёл до verifier'а за +3, он должен был уже набрать 4 без него (docs/review-quality.md §2.2, P1) |
 | `REVIEW_MAX_INLINE` | `50` | Потолок inline-комментариев на прогон |
 
 ## Verifier (Pass B)
@@ -97,7 +131,34 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_VERIFIER_MODEL` | `deepseek-v4-pro` | Модель-судья (вне пула advisors) |
 | `REVIEW_VERIFIER_MAX` | `12` | Максимум кандидатов на проверку |
 | `REVIEW_VERIFIER_TEMPERATURE` | `0.2` | — |
+| `REVIEW_VERIFIER_CONTEXT_MARGIN` | `80` | ±строк вокруг каждой строки-кандидата в контексте verifier'а. Пересекающиеся окна сливаются, пропуски помечаются `… (строки N–M пропущены)` — реальные номера строк сохраняются. Файл, у которого хоть один кандидат без строки, отдаётся целиком. Второй проход смотрит одну-две строки на файл и делает это ДРУГОЙ моделью (кэш префикса advisor'ов не работает), поэтому целый файл до `REVIEW_MAX_FILE_LINES` строк он не окупает — см. [`lib/context-window.mjs`](../lib/context-window.mjs) |
+| `REVIEW_VERIFIER_SYMBOL_CARDS` | `0` | Карточки символов ([RFC 14](../proposals/14-symbol-cards.md), решение 4) во входе verifier'а: карточки файлов кандидатов, тем же отбором и с теми же лимитами, что у advisors и жюри. Без них верная находка «вызов не совпадает с сигнатурой» verifier'у недоказуема и не становится блокером; с ними verifier может подтвердить ложную интерпретацию сигнатуры — поэтому выключено до gold ×3. Включённый флаг входит в отпечаток конфигурации инкрементального прогона |
 | `REVIEW_VERIFIER_STRICT` | `1` | Нет вердикта → находка понижается до minor (fail-closed) |
+
+## Инкрементальный прогон
+
+Не ревьюить заново файлы, чей **вход для модели** (секция диффа + приложенный контекст) не
+изменился с прошлого прогона; их находки переносятся вместе с вердиктами жюри и verifier —
+см. [RFC 05](../proposals/05-incremental-review.md).
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_INCREMENTAL` | `0` | Включает инкрементальный прогон |
+| `REVIEW_INCREMENTAL_STATE` | `paths.incrementalState` профиля (`.ai-review/incremental/state.json`) | Файл состояния: хэши входа по файлам и находки прошлого прогона. Версия состояния 2: хэш входа — JSON `{diff, context}` (без NUL в исходнике), отпечаток конфигурации включает порог маршрута/допуска verifier и таймаут LLM |
+| `REVIEW_INCREMENTAL_FULL_EVERY` | `10` | Каждый N-й прогон полный — страховка от накопления дрейфа |
+
+В CI состояние нужно сохранять между прогонами (`actions/cache` на `.ai-review/incremental/`).
+Нет кэша — каждый прогон полный, то есть прежнее поведение. Прогон становится полным также при
+смене конфигурации (модели, роли, раскладка промпта, нарезка чанков, параметры гейта,
+порог маршрута/допуска verifier, таймаут LLM): находки прошлого прогона получены другим
+движком и сопоставлять их с новыми нельзя.
+
+В отпечаток конфигурации (`configFingerprint`, [`lib/incremental.mjs`](../lib/incremental.mjs))
+**не входят**: `REVIEW_REQUIRE_QUOTE`, `REVIEW_BLOCK_SINGLE`, `REVIEW_INLINE_ON`,
+`REVIEW_MAX_ADVISORY_INLINE`, температуры, reasoning effort, `MOA_REFERENCE_MAX_TOKENS`,
+настройки prescan. Их смена полного прогона не вызывает: перенесённые находки остаются
+полученными при прежних значениях до ближайшего полного прогона. Нужен эффект сразу —
+удалите файл состояния.
 
 ## Router
 
@@ -105,13 +166,18 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 |------------|---------|----------|
 | `REVIEW_ROUTER` | `1` | `0` — всегда полный прогон |
 
-Классы: lockfile / generated / rename-only → **skip**; docs-only → **light**; код → **full**.
+Классы: lockfile / generated / rename-only → **skip**; docs-only → **light**; ни одного
+файла-кода (только config `yml/yaml/json/toml/sh/sql`, docs, прочее) → **light**; хоть один
+файл-код → **full**. Список «кода» зашит в роутер (`LOGIC`/`CODE` в
+[`lib/router.mjs`](../lib/router.mjs), паритетно в `rust/src/router.rs`); `layout.logic`
+профиля его не меняет.
 
 ## Specialists / refutation
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `REVIEW_SPECIALISTS` | `1` (в moa) | Роли security/correctness/architecture вместо анонимных advisors |
+| `REVIEW_SPECIALISTS_MERGE` | `auto` | `auto` — один вызов на все роли, когда модель у них одна (три мнения одной модели независимы только на бумаге); `always` — сливать и при разных моделях; `never` — всегда по отдельности |
 
 ## Prescan (eslint + ast-grep)
 
@@ -152,7 +218,7 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `REVIEW_STRUCTURE` | `1` | Structure producer доступен |
+| `REVIEW_STRUCTURE` | `1` | Пишется в `cfg.structure.enabled`, но этот флаг никто не читает — **сейчас эффекта нет**: `pr-review-structure` работает при любом значении |
 | `REVIEW_STRUCTURE_GRAPH` | `GRAPH` | Graphify facts |
 | `REVIEW_STRUCTURE_GRAPH_REPORT` | `GRAPHIFY_REPORT` | Freshness |
 | `REVIEW_STRUCTURE_GRAPH_ANALYSIS` | `.graphify_analysis.json` рядом с graph.json | Communities/god-nodes; sidecar в каталоге graph.json, следует за override `GRAPH`/`REVIEW_STRUCTURE_GRAPH` |
@@ -169,9 +235,36 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_STRUCTURE_MAX_EDGES` | `15000` | Hard cap dependencies |
 | `REVIEW_STRUCTURE_HIGH_FAN_IN` | `5` | Hotspot threshold |
 | `REVIEW_STRUCTURE_MAX_UNRESOLVED_RATE` | `0.1` | Выше порога запрещён строгий `missing` |
-| `STRUCTURE_MCP_ROOT` | рабочий каталог процесса | Единственный корень, из которого MCP-серверу разрешено читать `factsPath`/`assessmentPath`. Пути приходят от клиента и проверяются через `realpath` (symlink наружу не проходит), выход за корень — ошибка `path escapes allowed root`. Задавайте явно: дефолт зависит от того, откуда запущен агент — см. [structure.md](structure.md#confinement-what-the-server-is-allowed-to-read) |
+| `STRUCTURE_EXPORT_ROOT` | cwd | Корень, за который не выходит запись `writeStructureExports`. Только для вызова через API без `rootDir`: `pr-review-structure` передаёт `rootDir` сам (`--repo-root` или cwd) и переменную не читает |
+| `STRUCTURE_MCP_ROOT` | `REVIEW_MCP_ROOT`, иначе рабочий каталог процесса | Единственный корень, из которого MCP-серверу разрешено читать `factsPath`/`assessmentPath`. Пути приходят от клиента и проверяются через `realpath` (symlink наружу не проходит), выход за корень — ошибка `path escapes allowed root`. Порядок: `STRUCTURE_MCP_ROOT` → `REVIEW_MCP_ROOT` → cwd; плейсхолдер `${…}` ≡ не задано; несуществующий путь — `exit 1` на старте. Задавайте явно: дефолт зависит от того, откуда запущен агент — см. [structure.md](structure.md#confinement--что-серверу-разрешено-читать) |
 
-Подробности протокола и MCP — в [structure.md](structure.md).
+## Review MCP (агентный dry-run)
+
+Отдельный stdio-сервер `pr-review-mcp` ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md), [RFC 10](../proposals/10-mcp-cold-start.md), [RFC 12](../proposals/12-mcp-long-run.md)). Это превью для агента, не merge-гейт: GitHub не пишется, даже если в env процесса есть `GITHUB_TOKEN`. Structure MCP — другой процесс (`STRUCTURE_MCP_ROOT` сюда не подставлять). Холодный старт плагина — `cursor-plugin/bin/install-local.sh`; Authenticate не нужен.
+
+В IDE вызывайте `review_run` с `wait: false`: RPC сразу отдаёт stub с `jobId`, MoA идёт в том же процессе. Обрыв `tools/call` ~30 с не убивает прогон, пока stdin жив. Поллинг — `review_findings` / `review_artifact` по `jobId`. `wait: true` (default) — прежнее синхронное поведение для тестов и CLI. Sidecar: `{root}/.ai-review/mcp/runs/{jobId}.json`.
+
+Пустой `review_prescan` на Rust-диффе (`skipped: no-eslint`, 0 находок) — ожидаемо: в пакете нет eslint по `.rs`. Потребительский ast-grep — opt-in профиля, не лечение транспорта.
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_MCP_ROOT` | лаунчер: корень engine | Единственный корень, из которого ревью-MCP читает `diffPath` / `priorExportPath` / sidecar / артефакты. `realpath`, symlink наружу не проходит. Плейсхолдер `${…}` ≡ не задано; битый путь — `exit 1` на старте |
+| `AI_REVIEWER_ROOT` | `.engine-root` / cwd-клон / `cursor-plugin/../..` | Клон пакета с `bin/pr-review-mcp.mjs`. Configure перебивает `.engine-root` |
+| `AI_REVIEWER_NODE` | `PATH`, `~/.local/bin/node`, Homebrew | Абсолютный путь к `node` ≥ 22, если GUI без `node` в PATH |
+| `REVIEW_MCP_EXTRA` | `0` | `1` — в `tools/list` появляются `blast_scope`, `actionability_explain`, `review_metrics` |
+
+`review_run` — всегда dry-run, но по умолчанию пишет артефакт: если `REVIEW_EXPORT_DRY_RUN` не
+задан в env сервера, прогону подставляется `1` ([`lib/review-mcp.mjs`](../lib/review-mcp.mjs)).
+
+Тулзы по умолчанию ([RFC 08](../proposals/08-review-mcp.md), [RFC 09](../proposals/09-cursor-plugin-mcp.md)):
+
+- `review_run` — полный MoA, пин `headSha` обязателен, единственный LLM; мьютекс `review already running` на **другой** пин. `wait` default true; `wait: false` — stub `status: running` + `jobId`
+- `review_findings` — страница того же прогона по `jobId` или `runFingerprint` (sidecar `{root}/.ai-review/mcp/runs/{jobId}.json`). Пока `running` — пустые findings, не `unknown runFingerprint`
+- `review_route` / `review_prescan` / `fp_check` / `fingerprint_check` / `review_artifact` — дешёвый контур без LLM
+
+Живой дифф (`review_run`, `review_route`, `review_prescan`): если корень — git и `uncommitted` не true, `headSha` сверяется префиксом с `rev-parse HEAD`; грязное дерево — ошибка `working tree dirty; pass uncommitted: true`. Не git — сверку пропускаем, `headSha` всё равно обязателен.
+
+В ответе `previewWouldBlock`, не `wouldBlock` сворма. Cursor Plugin — каталог [`cursor-plugin/`](../cursor-plugin/).
 
 ## Бюджеты
 
@@ -183,6 +276,14 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_CONCURRENCY` | `10` | Параллельных chunk-pipeline |
 | `REVIEW_MAX_FILE_LINES` | `1500` | Полный текст файла в контекст |
 | `REVIEW_MAX_CONTEXT_BYTES` | `180000` | Потолок контекста |
+| `REVIEW_SKIP_ADDED_FILE_CONTEXT` | `1` | Не прикладывать полный текст **добавленных** файлов: их дифф и есть содержимое целиком. `0` — прежнее поведение |
+| `REVIEW_CHUNK_ROUTING` | `1` | Чанк без исполняемого файла (нет кода, CI-конфигурации и чувствительных путей) обслуживает один агрегатор вместо жюри. `0` — всегда полный MoA |
+| `REVIEW_CONTEXT_MARGIN` | `40` | ±строк вокруг изменённых строк файла в контексте advisors и жюри ([RFC 07](../proposals/07-windowed-file-context.md)). Центр окон — `validLines` из `parseDiff` (RIGHT-номера `+`-строк и контекстных строк хунка), пересекающиеся окна сливаются, пропуски помечаются `… (строки N–M пропущены)`. Такой путь метится в карте PR как `[THIS PART, CONTEXT WINDOWED]` и включает запрет absence-claims даже на PR из одного чанка. **`0` — окна выключены**, файлы едут целиком: это откат решения. Ноль здесь значащий (читается `nonNegEnv`, не `numEnv`) |
+| `REVIEW_CONTEXT_WINDOW_MIN_CHARS` | `8000` | Файл, чья запись контекста короче этого, прикладывается целиком — окна не считаются. Порог снимает класс «маленький файл, плотные правки», где окна не экономят ни байта, а риск усечения берут целиком |
+| `REVIEW_SYMBOL_CARDS` | `1` | Карточки символов ([RFC 14](../proposals/14-symbol-cards.md)): для имён, которые вызывают **добавленные** строки JS/TS-файлов и чьё объявление модель не видит ни в диффе, ни в окне, в промпт advisors и жюри идёт строка объявления с диапазоном (`// lib/config.mjs:L212–L248` + заголовок без тела). Место берётся из графа Graphify (`resolveUniqueNode`, неоднозначное имя — без карточки), текст — из файла рабочего дерева; строка без имени символа значит устаревший граф, и карточки нет. Без `graph.json` фича молча выключена. Verifier карточек не получает. Карточки файла входят в хэш инкрементального прогона **без номеров строк** — сдвиг объявления не пере-ревьюит вызывателей, смена сигнатуры — пере-ревьюит. Включённая фича входит в отпечаток конфигурации: первый прогон после обновления движка — полный. `0` — откат, промпт и хэши как до RFC 14. Основание для включения по умолчанию — gold A/B в RFC 14 (вреда не найдено, по одному прогону) |
+| `REVIEW_SYMBOL_CARDS_MAX` | `20` | Карточек на чанк; приоритет — число добавленных строк, вызывающих символ |
+| `REVIEW_SYMBOL_CARDS_MAX_CHARS` | `3000` | Символов карточек на чанк (общий бюджет с короткими телами) |
+| `REVIEW_SYMBOL_CARDS_BODY_MAX_LINES` | `0` | Тело не длиннее N строк едет целиком, с пометкой `(full body)`; `0` — только объявление. Конец объявления ищет лексер пары скобок (`scanDeclaration` в `lib/symbol-cards.mjs`); не нашёл — карточка без диапазона и без тела |
 | `REVIEW_MAX_SYMBOLS` | `25` | Символов в blast-radius |
 | `REVIEW_MAX_DEPS_PER_SYMBOL` | `20` | Зависимостей на символ |
 | `REVIEW_GOD_NODE_THRESHOLD` | `20` | Порог «god node» в графе |
@@ -199,20 +300,48 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_EXPORT_DIR` | `paths.exportDir` профиля | Каталог экспорта |
 | `REVIEW_EXPORT_JSON` / `REVIEW_EXPORT_SARIF` | `1` | Что писать |
 | `REVIEW_EXPORT_SARIF_ALL` | `0` | В SARIF все находки, а не только блокеры |
+| `REVIEW_EXPORT_DRY_RUN` | `0` | Писать артефакт и при `--dry-run`; при `0` dry-run экспорт не пишет. Ревью-MCP по умолчанию ставит `1` |
+| `REVIEW_PRICE_JSON` | — | Цены моделей `{"<model>":{"in":$/1M,"out":$/1M}}`; ключ `*` или `default` — для остальных моделей. Задан → в `efficiencyMetrics` события `run_end` появляется `cost_usd`; битый JSON ≡ не задано |
 | `REVIEW_REASONING_STICKY` | `1` | Секция reasoning в sticky |
 
 ### Поля артефакта (`version: 2`)
 
 Артефакт `<toolName>.json` — машинный вывод прогона для внешнего потребителя
-(cod-doc ingest, оркестратор swarm). В каждой находке `findings[]` / `blockers[]`:
+(cod-doc ingest, оркестратор swarm); собирается в [`lib/export.mjs`](../lib/export.mjs),
+`EXPORT_VERSION = 2`. Необязательные поля (`router`, `verdict`, `llmFailed`, `fp`, `prescan`…) без значения
+в JSON отсутствуют, а не пустые.
+
+Верхний уровень:
 
 | Поле | Смысл |
 |------|-------|
-| `fp` | Отпечаток кода под находкой — **та же величина, что в футере sticky**. Ключ дедупликации между прогонами: код изменился → отпечаток другой → находка новая. Пусто, если строки нет в диффе |
+| `version`, `generatedAt` | Версия формата; ISO-время записи |
+| `pr` | `{number, title, url}` (`title` ≤ 200 символов) |
+| `headSha` | Ревьюенный коммит; пусто при `--diff` без `--head-sha` |
+| `reviewMode` | `moa` / `consensus` |
+| `router` | `{route, reason}` — маршрут роутера |
+| `wouldBlock` | Блокирует ли **этот** прогон |
+| `verdict` | `{sha, blocked, reproducibility}`; `reproducibility` — `{total, blocked, flaky}` по прогонам того же sha (от двух), иначе `null` |
+| `llmFailed`, `llmErrors` | Сбой LLM-слоя и его ошибки — только если были |
+| `counts`, `total` | Число находок по severity и всего |
+| `findings`, `blockers` | Находки, формат ниже |
+| `reasoning` | Выдержки рассуждений advisors |
+| `verifier`, `refutation` | Статистика Pass B и refutation |
+| `blast` | `{symbols_total, symbols_resolved, affected_nonempty, graph_status, skip_reason, affected_files, confidence, cross_community}` |
+| `swarm` | Контракт для оркестратора — [swarm.md](swarm.md) |
+| `prescan` | `{findings, scanned, skipped, byTool, error}` |
+
+В каждой находке `findings[]` / `blockers[]`:
+
+| Поле | Смысл |
+|------|-------|
+| `file`, `line`, `severity`, `model`, `confidence` | Место, уровень, модель-источник, уверенность |
+| `title`, `body`, `bodyTruncated` | Заголовок ≤ 200 символов; тело урезано до 400; флаг — было ли урезано |
+| `fp` | Отпечаток кода под находкой — **та же величина, что в футере sticky**. Ключ дедупликации между прогонами: код изменился → отпечаток другой → находка новая. Поля нет, если строки нет в диффе |
 | `verifierStatus` | `verified` / `rejected` / `downgraded` / `unverified` / `overflow` — вердикт Pass B |
 | `actionabilityScore` | Сумма весов сигналов доказуемости; есть у **каждой** находки |
 | `actionabilityPromoted` | Advisory, поднятая в строку по доказуемости (не блокер) |
-| `prescan`, `consensusBlock`, `refutationStatus`, `advisorClaims` | Откуда находка и что с ней сделали жюри и линтеры |
+| `prescan`, `consensusBlock`, `refutationStatus`, `advisorClaims` | Откуда находка и что с ней сделали жюри и линтеры; элемент `advisorClaims` — `{role, status, reason}` (`reason` ≤ 200) |
 
 Версия артефакта растёт и на аддитивных изменениях, поэтому потребитель обязан сверять её
 на «версия известна», а не на равенство: строгое `version == 1` сломается на `2`, где не
@@ -234,6 +363,8 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | `REVIEW_FEEDBACK_WRITE` | `1` | `0` — dry-run harvest |
 | `REVIEW_FEEDBACK_TRUSTED_AUTHORS` | `github-actions[bot]` | Чьи inline считаем своими |
 | `REVIEW_FEEDBACK_CONCURRENCY` | `6` | Параллельных запросов реакций |
+| `REVIEW_FEEDBACK_SINCE_DAYS` | `14` | `pr-review-feedback-batch`: PR, обновлённые за последние N дней |
+| `REVIEW_FEEDBACK_PR_LIMIT` | `30` | `pr-review-feedback-batch`: максимум PR за прогон (из последних 100 по `updated`) |
 | `REVIEW_FP_PROMOTE_MIN` | `2` | Сколько одинаковых FP → новый паттерн |
 | `REVIEW_FIXTURES_DIR` | fixtures пакета | Куда промоутить fixtures |
 | `REVIEW_GOLD_DIR` | gold пакета | Набор для shadow-прогона с LLM (`gold-public` — публичный набор) |
@@ -250,3 +381,32 @@ pr-review-feedback-batch [--dry-run] [--pr N]
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | — | Пуш итога прогона (необязательно) |
+
+## Rust-бинари
+
+26 модулей `lib/*.mjs` — обёртки над Rust-бинарями `rust/target/debug/<bin>` с эталонной
+JS-копией внутри. Бинари собирает `cargo build` в `rust/`; в чистом клоне их нет, и всё
+работает на JS.
+
+| Переменная | Смысл |
+|------------|-------|
+| `AI_REVIEWER_<MOD>_BIN` | Путь к бинарю вместо `rust/target/debug/<bin>` |
+| `AI_REVIEWER_<MOD>_FORCE_JS` | `1` — чистый JS (паритетные прогоны, отладка); другие значения не действуют |
+
+Порядок: `FORCE_JS=1` → JS; иначе `_BIN` или путь по умолчанию; файла нет → JS. Бинарь есть,
+но упал (non-zero exit) — ошибка пробрасывается, JS его не подменяет: молчаливая подмена
+скрыла бы регрессию Rust-кода. `LLM` и `GITHUB` уходят в JS и тогда, когда `fetch` подменён
+(тесты, DI).
+
+`<MOD>` (24 префикса; `<bin>` — он же в нижнем регистре, кроме оговорённых):
+
+| `<MOD>` | Модули |
+|---------|--------|
+| `ACTIONABILITY`, `DIFF`, `ENGINE`, `EXPORT`, `FINDINGS`, `GITHUB`, `LLM`, `PROMPT`, `REPORT`, `ROUTER`, `SPECIALISTS`, `VERIFIER` | одноимённые `lib/<mod>.mjs` |
+| `CONFIG` | `lib/config.mjs`, `lib/profile.mjs` |
+| `METRICS` | `lib/metrics.mjs`, `lib/observability.mjs` |
+| `JSON_REPAIR` | `lib/json.mjs` |
+| `STRUCTURE_{ASSESSMENTS,EVIDENCE,GRAPHIFY,LCOV,MCP,MUTATION,PROTOCOL,TESTS}` | `lib/structure-<x>.mjs` |
+| `SCIP` | `lib/structure-scip.mjs`, бинарь `structure_scip` |
+
+Пример: `AI_REVIEWER_JSON_REPAIR_FORCE_JS=1`.

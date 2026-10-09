@@ -43,6 +43,8 @@ function mkDeps({ reviews, graphify = { buildBlastRadius: async () => [] }, veri
   const deps = {
     log: () => {},
     die: (m) => { throw new Error(`die: ${m}`); },
+    // Дерево репозитория не читаем: иначе тест зависел бы от `git ls-files` каталога запуска.
+    repoFiles: async () => null,
     graphify,
     prescan: {
       run: async () => ({
@@ -108,6 +110,28 @@ test('pipeline: critical с confidence≥0.8 → блок (exit 1), inline + sti
   assert.equal(calls.postReview[0].inline[0].path, 'foo.ts');
   assert.equal(calls.postReview[0].inline[0].line, 3);
   assert.ok(calls.upsertSticky[0].includes('Merge заблокирован'));
+});
+
+test('pipeline: «модуля нет» о файле из дерева репозитория вне PR → снят как FP, merge не блокирует', async () => {
+  const absent = {
+    ...criticalReview,
+    findings: [{ ...criticalReview.findings[0], title: 'импорт несуществующего модуля', body: "Cannot find module './bar'" }],
+  };
+  const withTree = await runPipeline({
+    diff: CODE_DIFF, reviews: [absent],
+    mutateDeps: (deps) => { deps.repoFiles = async () => ['foo.ts', 'bar.ts']; },
+  });
+  assert.equal(withTree.code, 0, 'bar.ts есть в дереве — блокер ложный');
+  assert.ok(withTree.calls.upsertSticky[0].includes('Отфильтровано как известные FP (1)'));
+
+  const noTree = await runPipeline({ diff: CODE_DIFF, reviews: [absent] });
+  assert.equal(noTree.code, 1, 'дерево не прочитано — фильтр выключен, гейт как раньше');
+
+  const broken = await runPipeline({
+    diff: CODE_DIFF, reviews: [absent],
+    mutateDeps: (deps) => { deps.repoFiles = async () => { throw new Error('git сломан'); }; },
+  });
+  assert.equal(broken.code, 1, 'сбой чтения дерева — fail-open: фильтр выключен, прогон не падает');
 });
 
 test('pipeline: post-then-delete — старые инлайны чистятся ПОСЛЕ постинга, новые исключены', async () => {
@@ -259,6 +283,69 @@ test('pipeline: fail-closed пишет llm/gate observability и пингует 
   }
 });
 
+// Дифф по РЕАЛЬНОМУ файлу репозитория: readChangedFiles читает рабочий каталог, а окна
+// имеет смысл мерить только на файле, который длиннее порога и правится точечно.
+// lib/config.mjs — 20+ КБ и 400+ строк, два хунка на противоположных концах.
+const WINDOWED_DIFF = `diff --git a/lib/config.mjs b/lib/config.mjs
+--- a/lib/config.mjs
++++ b/lib/config.mjs
+@@ -30,1 +30,2 @@
+ // контекст хунка
++const nearTheTop = 1;
+@@ -400,1 +400,2 @@
+ // контекст хунка
++const nearTheBottom = 2;
+`;
+
+/** Прогон с записью чанков и события plan: и то и другое читается только тут. */
+async function runWindowed(env) {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-ctx-window-'));
+  let chunks = null;
+  try {
+    await runPipeline({
+      diff: WINDOWED_DIFF,
+      reviews: [{ model: 'm1', summary: 'ок', findings: [] }],
+      observabilityDir: dir,
+      env,
+      mutateDeps: (deps) => {
+        const orig = deps.engine.reviewAllModels;
+        deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
+      },
+    });
+    const records = (await readFile(join(dir, 'pr-review-runs.jsonl'), 'utf8'))
+      .trim().split('\n').map(JSON.parse);
+    return { chunks, plan: records.find((r) => r.type === 'plan') };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('pipeline: окна контекста режут вход чанков, blast-radius считается по полному файлу', async () => {
+  const on = await runWindowed({});
+  const off = await runWindowed({ REVIEW_CONTEXT_MARGIN: '0' });
+
+  assert.equal(on.plan.contextWindows.margin, 40, 'дефолт RFC 07');
+  assert.equal(on.plan.contextWindows.files, 1, 'lib/config.mjs длиннее порога и правится точечно');
+  assert.ok(on.plan.contextWindows.after < on.plan.contextWindows.before,
+    `контекст урезан: ${on.plan.contextWindows.before} → ${on.plan.contextWindows.after}`);
+  assert.deepEqual(on.chunks[0].windowedPaths, ['lib/config.mjs']);
+  assert.ok(on.plan.chunkPlan[0].context_chars < off.plan.chunkPlan[0].context_chars,
+    'в чанк уехало меньше символов, чем без окон');
+
+  // Порядок стадий (RFC 07, решение 4): символы blast-radius берутся из ПОЛНОГО текста.
+  // Поставь окна раньше — и здесь молча станет меньше символов.
+  assert.equal(on.plan.symbols, off.plan.symbols, 'blast-radius те же символы с окнами и без');
+});
+
+test('pipeline: REVIEW_CONTEXT_MARGIN=0 — контекст прежний, чанки без windowedPaths (откат)', async () => {
+  const off = await runWindowed({ REVIEW_CONTEXT_MARGIN: '0' });
+  assert.equal(off.plan.contextWindows.margin, 0, '0 — значащее значение, а не повод взять дефолт 40');
+  assert.equal(off.plan.contextWindows.files, 0);
+  assert.equal(off.plan.contextWindows.after, off.plan.contextWindows.before, 'ничего не урезано');
+  assert.equal(off.chunks[0].windowedPaths, undefined, 'поля нет → карта PR про окна молчит');
+  assert.equal(off.plan.chunkPlan[0].windowed_paths, 0);
+});
+
 test('export R9: fp/verifierStatus/actionabilityScore в артефакте, fp совпадает с футером sticky', async () => {
   // Регресс, ради которого тест написан: `fp` считался только внутри buildSummary — в список
   // для футера. В артефакт уходил тот же массив находок, но без отпечатка, и потребитель
@@ -390,4 +477,266 @@ test('pipeline: sticky throw после postReview — ошибка не мол�
   );
   assert.deepEqual(calls.order.slice(0, 2), ['post', 'delete'], 'inline успел уйти до sticky');
   assert.ok(calls.order.includes('sticky'), 'upsertSticky вызывался и упал');
+});
+
+// --- инкрементальный прогон (RFC 05) ---
+
+const TWO_FILE_DIFF = `diff --git a/foo.ts b/foo.ts
+--- a/foo.ts
++++ b/foo.ts
+@@ -1,2 +1,3 @@
+ const a = 1;
+-const b = 2;
++const b = 3;
++export function foo() { return a; }
+diff --git a/bar.ts b/bar.ts
+--- a/bar.ts
++++ b/bar.ts
+@@ -1,1 +1,2 @@
+ const c = 1;
++export function bar() { return c; }
+`;
+
+// Дифф, в котором изменился ТОЛЬКО foo.ts: вход по bar.ts побайтово тот же.
+const TWO_FILE_DIFF_V2 = TWO_FILE_DIFF.replace('const b = 3;', 'const b = 4;');
+
+const barCritical = {
+  model: 'm1', summary: 'нашёл баг в bar', verdict: 'changes_requested',
+  findings: [{
+    file: 'bar.ts', line: 2, severity: 'critical', title: 'блокер в bar', body: 'детали',
+    confidence: 0.9, model: 'm1', quote: 'export function bar() { return c; }',
+  }],
+};
+
+async function runIncremental(diff, stateFile, extraEnv = {}, reviews = [barCritical]) {
+  return runPipeline({
+    diff,
+    reviews,
+    env: { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateFile, ...extraEnv },
+  });
+}
+
+test('инкрементально: неизменившийся файл не ревьюится заново, его блокер переносится', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    const first = await runIncremental(TWO_FILE_DIFF, stateFile);
+    assert.equal(first.code, 1, 'первый прогон блокирует');
+    assert.equal(first.calls.engineRuns, 1);
+    const state = JSON.parse(await readFile(stateFile, 'utf8'));
+    assert.equal(state.findings.length, 1, 'находка сохранена для переноса');
+    assert.ok(state.hashes['bar.ts'] && state.hashes['foo.ts'], 'хэши входа по обоим файлам');
+
+    const noFindings = { model: 'm1', summary: 'по foo чисто', verdict: 'comment', findings: [] };
+    const second = await runIncremental(TWO_FILE_DIFF_V2, stateFile, {}, [noFindings]);
+    assert.equal(second.code, 1, 'блокер по неизменившемуся файлу НЕ потерян');
+    const sticky = second.calls.upsertSticky[0];
+    assert.ok(sticky.includes('блокер в bar'), 'перенесённая находка в отчёте');
+    assert.ok(sticky.includes('Инкрементальный прогон'), 'в отчёте сказано, что часть PR не ревьюилась заново');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('инкрементально: изменившийся файл теряет прошлую находку — её решает свежий прогон', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr2-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    const fooCritical = {
+      model: 'm1', summary: 'баг в foo', verdict: 'changes_requested',
+      findings: [{
+        file: 'foo.ts', line: 3, severity: 'critical', title: 'блокер в foo', body: 'детали',
+        confidence: 0.9, model: 'm1',
+      }],
+    };
+    await runIncremental(TWO_FILE_DIFF, stateFile, {}, [fooCritical]);
+    const clean = { model: 'm1', summary: 'чисто', verdict: 'approve', findings: [] };
+    const second = await runIncremental(TWO_FILE_DIFF_V2, stateFile, {}, [clean]);
+    assert.equal(second.code, 0, 'находка по изменённому файлу не переносится — блокировки нет');
+    assert.ok(!second.calls.upsertSticky[0].includes('блокер в foo'), 'старая находка не всплыла');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('инкрементально: смена конфигурации заставляет прогон быть полным', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr3-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    await runIncremental(TWO_FILE_DIFF, stateFile);
+    const noFindings = { model: 'm1', summary: 'чисто', verdict: 'comment', findings: [] };
+    const second = await runIncremental(TWO_FILE_DIFF, stateFile, { OLLAMA_MODELS: 'm3,m4' }, [noFindings]);
+    assert.equal(second.code, 0, 'перенос не выполнен: прогон полный, находок нет');
+    assert.ok(!second.calls.upsertSticky[0].includes('Инкрементальный прогон'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('инкрементально: без изменений LLM не вызывается, отчёт собран из переноса', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr4-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    await runIncremental(TWO_FILE_DIFF, stateFile);
+    const second = await runIncremental(TWO_FILE_DIFF, stateFile, {}, []);
+    assert.equal(second.calls.engineRuns, 0, 'ни одного вызова движка');
+    assert.equal(second.code, 1, 'перенесённый блокер по-прежнему блокирует');
+    assert.ok(second.calls.upsertSticky[0].includes('блокер в bar'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('инкрементально: выключено по умолчанию — состояние не пишется', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr5-'));
+  const stateFile = join(dir, 'state.json');
+  try {
+    await runPipeline({
+      diff: TWO_FILE_DIFF,
+      reviews: [barCritical],
+      env: { REVIEW_INCREMENTAL_STATE: stateFile },
+    });
+    await assert.rejects(() => readFile(stateFile, 'utf8'), 'файла состояния нет');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// Существующие инкрементальные тесты гоняются в REVIEW_MODE=consensus / REVIEW_VERIFIER=0:
+// applyRefutation и Pass B не вызываются, и перенос «до» них не падал бы. Этот кейс —
+// ровно тот, из-за которого carry стоит после verifier: во втором прогоне жюри по bar
+// молчит, strict без вердикта опустил бы подтверждённый блокер до minor.
+test('инкрементально: перенесённый блокер переживает verifier strict второго прогона', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr-ver-'));
+  const stateFile = join(dir, 'state.json');
+  const verifyAll = async (candidates) => candidates.map((_, i) => ({ candidateIndex: i, decision: 'verified' }));
+  try {
+    const first = await runPipeline({
+      diff: TWO_FILE_DIFF,
+      reviews: [barCritical],
+      verifyFindings: verifyAll,
+      env: {
+        REVIEW_INCREMENTAL: '1',
+        REVIEW_INCREMENTAL_STATE: stateFile,
+        REVIEW_VERIFIER: '1',
+      },
+    });
+    assert.equal(first.code, 1, 'первый прогон: verifier подтвердил блокер');
+
+    const second = await runPipeline({
+      diff: TWO_FILE_DIFF_V2,
+      reviews: [{ model: 'm1', summary: 'по foo чисто', verdict: 'comment', findings: [] }],
+      verifyFindings: async () => [],
+      env: {
+        REVIEW_INCREMENTAL: '1',
+        REVIEW_INCREMENTAL_STATE: stateFile,
+        REVIEW_VERIFIER: '1',
+      },
+    });
+    assert.equal(second.code, 1,
+      'если carry был бы до Pass B, пустые вердикты + REVIEW_VERIFIER_STRICT опустили бы бар до minor');
+    assert.ok(second.calls.upsertSticky[0].includes('блокер в bar'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Порог допуска advisory к verifier'у (P1, docs/review-quality.md §2.2)
+// ---------------------------------------------------------------------------
+
+// minor в логическом файле с confidence ≥ 0.8 и предложенным фиксом: confidence(+1) +
+// suggestion(+1) + logicFile(+1) = 3 балла при пороге маршрута 4. Ровно тот класс находок,
+// который в замере R2 не доезжал ни до verifier'а, ни до строки.
+//
+// Фабрика, а не константа: пайплайн ходит по ТЕМ ЖЕ объектам находок (маршрут и verifier
+// пишут вердикты прямо в них), поэтому общий литерал протёк бы вердиктом из теста в тест.
+const advisoryMinorReview = () => ({
+  model: 'm1', summary: 'мелочь', verdict: 'comment',
+  findings: [{
+    file: 'foo.ts', line: 2, severity: 'minor', title: 'магическое число', body: 'вынести в константу',
+    confidence: 0.9, suggestion: 'const B = 3;', model: 'm1',
+  }],
+});
+
+/** Прогон с перехватом того, что реально ушло в engine.verifyFindings. */
+async function runWithVerifierSpy(env) {
+  const seen = [];
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF,
+    reviews: [advisoryMinorReview()],
+    verifyFindings: async (candidates) => {
+      // Скор снимаем СРАЗУ: дальше по пайплайну маршрут пересчитает его в тех же объектах.
+      seen.push(...candidates.map((c) => ({ line: c.line, score: c.actionabilityScore })));
+      return candidates.map((_, i) => ({ candidateIndex: i, decision: 'verified' }));
+    },
+    env: { REVIEW_VERIFIER: '1', ...env },
+  });
+  return { code, calls, seen };
+}
+
+test('verifier: minor со скором 3 (ниже порога маршрута) допущен по пониженному порогу и после verified уходит в строку', async () => {
+  const { code, calls, seen } = await runWithVerifierSpy({});
+  assert.equal(code, 0, 'minor не блокирует merge даже подтверждённым');
+  assert.equal(seen.length, 1, 'находка дошла до verifier — курица и яйцо разорваны');
+  assert.deepEqual(seen[0], { line: 2, score: 3 }, 'до verifier у неё ровно 3 балла при пороге 4');
+  assert.deepEqual(
+    calls.postReview[0].inline.map((c) => [c.path, c.line]),
+    [['foo.ts', 2]],
+    '3 + вес(verified)=3 → 6 ≥ 4: находка занимает строку',
+  );
+});
+
+test('verifier: REVIEW_VERIFY_ADVISORY_MIN=99 — та же находка до verifier не доезжает и в строку не идёт', async () => {
+  const { code, calls, seen } = await runWithVerifierSpy({ REVIEW_VERIFY_ADVISORY_MIN: '99' });
+  assert.equal(code, 0);
+  assert.equal(seen.length, 0, 'порог допуска недостижим — кандидатов нет');
+  assert.deepEqual(calls.postReview[0].inline, [], 'без подтверждения находка в строку не идёт');
+  assert.ok(calls.upsertSticky[0].includes('магическое число'), 'но из отчёта не исчезает');
+});
+
+test('observability: событие actionability несёт гистограмму скоров и топ причин свода', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-actionability-'));
+  try {
+    await runPipeline({
+      diff: CODE_DIFF,
+      reviews: [advisoryMinorReview()],
+      observabilityDir: dir,
+    });
+    const records = (await readFile(join(dir, 'pr-review-runs.jsonl'), 'utf8'))
+      .trim().split('\n').map(JSON.parse);
+    const ev = records.find((r) => r.type === 'actionability');
+    assert.ok(ev, 'событие есть');
+    assert.equal(ev.threshold, 4);
+    assert.equal(ev.inline, 0);
+    assert.equal(ev.outside, 1);
+    assert.deepEqual(ev.histogram, { 3: 1 }, 'скор → число находок');
+    assert.deepEqual(
+      ev.topOutsideReasons.map((r) => r.key).sort(),
+      ['confidence', 'logicFile', 'suggestion'],
+      'причины отдаются КЛЮЧАМИ сигналов, а не формулировками из комментария',
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('pipeline: runDetailed отдаёт артефакт с cli.headSha на file-diff, без GitHub', async () => {
+  const tmp = join(tmpdir(), `pr-review-headsha-${process.pid}-${Math.random().toString(36).slice(2)}.patch`);
+  await writeFile(tmp, CODE_DIFF);
+  try {
+    const cfg = loadReviewConfig({
+      ...ENV,
+      REVIEW_EXPORT: '0',
+    }, { dryRun: true, diffFile: tmp, repo: '', prNumber: 0, headSha: 'abc1234deadbeef' });
+    const { deps, calls } = mkDeps({ reviews: [criticalReview] });
+    const detailed = await createReviewPipeline(cfg, deps).runDetailed();
+    assert.equal(detailed.artifact.headSha, 'abc1234deadbeef');
+    assert.equal(detailed.exitCode, 1);
+    assert.equal(detailed.wouldBlock, true);
+    assert.equal(calls.postReview.length, 0, 'dry-run не постит review');
+    assert.equal(calls.upsertSticky.length, 0);
+  } finally {
+    await rm(tmp, { force: true });
+  }
 });

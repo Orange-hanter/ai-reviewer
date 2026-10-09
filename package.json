@@ -1,6 +1,6 @@
 {
   "name": "ai-reviewer",
-  "version": "0.2.4",
+  "version": "0.4.0",
   "description": "AI code review engine: MoA/consensus LLM pipeline, deterministic prescan, blast-radius, eval fixtures, GitHub feedback loop",
   "type": "module",
   "license": "UNLICENSED",
@@ -14,12 +14,16 @@
     "pr-review-gold": "./bin/pr-review-gold.mjs",
     "pr-review-metrics": "./bin/pr-review-metrics.mjs",
     "pr-review-probe-models": "./bin/pr-review-probe-models.mjs",
+    "pr-review-probe-cache": "./bin/pr-review-probe-cache.mjs",
     "pr-review-feedback": "./bin/pr-review-feedback.mjs",
     "pr-review-feedback-batch": "./bin/pr-review-feedback-batch.mjs",
     "pr-review-benchmark": "./bin/pr-review-benchmark.mjs",
     "pr-review-gold-harvest": "./bin/pr-review-gold-harvest.mjs",
+    "pr-review-scout": "./bin/pr-review-scout.mjs",
+    "pr-review-symbol-cards-probe": "./bin/pr-review-symbol-cards-probe.mjs",
     "pr-review-structure": "./bin/pr-review-structure.mjs",
-    "pr-review-structure-mcp": "./bin/pr-review-structure-mcp.mjs"
+    "pr-review-structure-mcp": "./bin/pr-review-structure-mcp.mjs",
+    "pr-review-mcp": "./bin/pr-review-mcp.mjs"
   },
   "exports": {
     ".": "./index.mjs",
@@ -46,8 +50,10 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "eval": "node bin/pr-review-eval.mjs",
+    "scout": "node bin/pr-review-scout.mjs",
     "check": "npm test && npm run eval && npm run check:rust",
-    "check:rust": "cargo build --manifest-path rust/Cargo.toml && cargo test --manifest-path rust/Cargo.toml",
+    "check:rust": "cargo build --manifest-path rust/Cargo.toml && cargo test --manifest-path rust/Cargo.toml && npm run check:parity",
+    "check:parity": "for f in rust/parity/*.parity.mjs; do echo \"— $f\"; node \"$f\" || exit 1; done",
     "benchmark:public": "REVIEW_PROFILE=profiles/public-benchmark.json REVIEW_GOLD_DIR=gold-public node bin/pr-review-gold.mjs --jsonl .ai-review/benchmark-public.jsonl && node bin/pr-review-benchmark.mjs .ai-review/benchmark-public.jsonl"
   }
 }

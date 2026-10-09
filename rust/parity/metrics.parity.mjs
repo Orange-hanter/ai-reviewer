@@ -250,4 +250,4 @@ if (failures.length) {
   }
   process.exit(1);
 }
-console.log(`PARITY OK: metrics — ${compared} сравнений, расхождений нет`);
+console.log(`OK: metrics parity — ${compared} сравнений, расхождений нет`);

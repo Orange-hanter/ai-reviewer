@@ -32,13 +32,13 @@ pub const SPECIALIST_ROLES: [&str; 3] = ["security", "correctness", "architectur
 
 /// Bulk-дефолт ролей (lib/constants.mjs DEFAULT_MOA_SPECIALIST_MODELS).
 pub const DEFAULT_MOA_SPECIALIST_MODELS: &str =
-    "security:deepseek-v4-flash,correctness:kimi-k2.7-code,architecture:glm-5.2";
+    "security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3";
 
 /// Семантические дефолты ролей (не зависят от порядка MOA_REFERENCE_MODELS).
 pub const ROLE_DEFAULT_MODEL: [(&str, &str); 3] = [
-    ("security", "deepseek-v4-flash"),
+    ("security", "glm-5.3-flash"),
     ("correctness", "kimi-k2.7-code"),
-    ("architecture", "glm-5.2"),
+    ("architecture", "glm-5.3"),
 ];
 
 fn role_default(role: &str) -> Option<&'static str> {
@@ -428,9 +428,9 @@ mod tests {
         let env = json!({});
         let a = parse_specialist_assignments(&env, &[]);
         assert_eq!(a[0]["role"], "security");
-        assert_eq!(a[0]["model"], "deepseek-v4-flash");
+        assert_eq!(a[0]["model"], "glm-5.3-flash");
         assert_eq!(a[1]["model"], "kimi-k2.7-code");
-        assert_eq!(a[2]["model"], "glm-5.2");
+        assert_eq!(a[2]["model"], "glm-5.3");
 
         // bulk override + per-role override побеждает bulk
         let env = json!({
@@ -445,7 +445,7 @@ mod tests {
         // пустой bulk → дефолт; пустой per-role → не override
         let env = json!({ "MOA_SPECIALIST_MODELS": "", "MOA_SPECIALIST_SECURITY_MODEL": "  " });
         let a = parse_specialist_assignments(&env, &[]);
-        assert_eq!(a[0]["model"], "deepseek-v4-flash");
+        assert_eq!(a[0]["model"], "glm-5.3-flash");
     }
 
     #[test]

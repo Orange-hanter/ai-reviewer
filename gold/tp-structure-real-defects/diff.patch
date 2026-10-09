@@ -1,0 +1,1653 @@
+diff --git a/lib/structure-assessments.mjs b/lib/structure-assessments.mjs
+new file mode 100644
+index 0000000..fc9fb51
+--- /dev/null
++++ b/lib/structure-assessments.mjs
+@@ -0,0 +1,327 @@
++import { assessmentFingerprint, STRUCTURE_ASSESSMENT_SCHEMA, temporalAlignment } from './structure-protocol.mjs';
++import { sha256, stableId } from './structure-evidence.mjs';
++
++function ratio(part, total) {
++  return total > 0 ? part / total : null;
++}
++
++export function assessDependencyRisk(facts, coverageObservations, {
++  highFanIn = 5,
++} = {}) {
++  const incoming = new Map();
++  for (const edge of facts?.dependencies || []) {
++    if (!incoming.has(edge.to)) incoming.set(edge.to, []);
++    incoming.get(edge.to).push(edge);
++  }
++  const executionBySubject = new Map((coverageObservations || [])
++    .filter((item) => item.level === 'function_execution')
++    .map((item) => [item.subjectRef, item]));
++  const contractsByEntity = new Map();
++  for (const contract of facts?.contracts || []) {
++    if (!contractsByEntity.has(contract.entityRef)) contractsByEntity.set(contract.entityRef, []);
++    contractsByEntity.get(contract.entityRef).push(contract);
++  }
++  const hotspots = [];
++  for (const entity of facts?.entities || []) {
++    const edges = incoming.get(entity.observedId) || [];
++    const execution = executionBySubject.get(entity.observedId);
++    if (edges.length >= highFanIn) {
++      hotspots.push({
++        entityRef: entity.observedId,
++        contractRefs: (contractsByEntity.get(entity.observedId) || []).map((item) => item.id).sort(),
++        fanIn: edges.length,
++        executionStatus: execution?.status || 'unavailable',
++        crossBoundaryCallers: edges.filter((edge) => edge.crossBoundary).length,
++        confidence: edges.every((edge) => ['exact', 'extracted'].includes(edge.confidence)) ? 'extracted' : 'inferred',
++      });
++    }
++  }
++  hotspots.sort((a, b) => b.fanIn - a.fanIn || a.entityRef.localeCompare(b.entityRef));
++  return {
++    highFanIn: hotspots,
++    crossBoundaryEdges: (facts?.dependencies || []).filter((edge) => edge.crossBoundary).length,
++    godNodes: (facts?.entities || []).filter((entity) => entity.isGodNode).map((entity) => entity.observedId).sort(),
++  };
++}
++
++export function assessDataQuality(facts, coverageObservations, {
++  graphStatus = 'unknown',
++  testInventoryComplete = false,
++  truncated = false,
++  missingThreshold = 0.1,
++} = {}) {
++  const functions = (coverageObservations || []).filter((item) => item.level === 'function_execution');
++  const unresolved = functions.filter((item) => ['unresolved', 'ambiguous'].includes(item.confidence)).length;
++  const unresolvedJoinRate = ratio(unresolved, functions.length) || 0;
++  return {
++    graphStatus,
++    truncated: Boolean(truncated),
++    testInventoryComplete: Boolean(testInventoryComplete),
++    functionObservations: functions.length,
++    unresolvedFunctionJoins: unresolved,
++    unresolvedJoinRate,
++    missingAllowed: graphStatus === 'fresh'
++      && !truncated
++      && testInventoryComplete
++      && unresolvedJoinRate <= missingThreshold,
++    entityCount: facts?.entities?.length || 0,
++    edgeCount: facts?.dependencies?.length || 0,
++  };
++}
++
++function scenarioAssertionKinds(kind) {
++  switch (kind) {
++    case 'error_path': return ['throws', 'rejects', 'http_status', 'property'];
++    case 'boundary_value': return ['property', 'equality'];
++    case 'invariant': return ['property'];
++    case 'integration': return ['http_status', 'equality'];
++    default: return ['equality', 'http_status', 'property'];
++  }
++}
++
++function scenarioId(obligation, contractRefs) {
++  return stableId('scenario', obligation.id, obligation.kind, contractRefs.join(','));
++}
++
++export function assessContractScenarios({
++  facts,
++  obligations,
++  coverageObservations,
++  propertyResults = [],
++  alignment = 'unknown',
++  dataQuality,
++  evidenceCeiling = 'static_inventory',
++}) {
++  const contractById = new Map((facts?.contracts || []).map((contract) => [contract.id, contract]));
++  const executionByEntity = new Map((coverageObservations || [])
++    .filter((item) => item.level === 'function_execution')
++    .map((item) => [item.subjectRef, item]));
++  const tests = facts?.testCases || [];
++  const propertiesByObligation = new Map(propertyResults.map((result) => [result.obligationRef, result]));
++  const out = [];
++
++  for (const obligation of obligations || []) {
++    const contractRefs = [...new Set((obligation.contractRefs || []).filter((id) => contractById.has(id)))].sort();
++    const resolution = contractRefs.length === 1 ? 'unique' : contractRefs.length > 1 ? 'ambiguous' : 'unresolved';
++    const scenario = {
++      id: scenarioId(obligation, contractRefs),
++      obligationRef: obligation.id,
++      contractRefs,
++      testCaseRefs: [],
++      kind: obligation.kind,
++      status: 'unverifiable',
++      statusReason: 'insufficient evidence',
++      contractResolution: resolution,
++      confidence: 'unresolved',
++      evidence: [`obligation:${obligation.id}:${obligation.contentHash}`],
++      missingEvidence: [],
++    };
++    if (obligation.status !== 'confirmed') {
++      scenario.statusReason = 'obligation is draft';
++      scenario.missingEvidence.push('confirmed_obligation');
++      out.push(scenario);
++      continue;
++    }
++    if (alignment !== 'aligned') {
++      scenario.statusReason = `temporal alignment is ${alignment}`;
++      scenario.missingEvidence.push('temporal_alignment');
++      out.push(scenario);
++      continue;
++    }
++    if (resolution !== 'unique') {
++      scenario.statusReason = `contract resolution is ${resolution}`;
++      scenario.missingEvidence.push(resolution === 'ambiguous' ? 'unique_contract' : 'contract_link');
++      out.push(scenario);
++      continue;
++    }
++    const contract = contractById.get(contractRefs[0]);
++    const matchingTests = tests.filter((testCase) => (testCase.targetContractRefs || []).includes(contract.id));
++    const execution = executionByEntity.get(contract.entityRef);
++    const acceptedAssertions = new Set(scenarioAssertionKinds(obligation.kind));
++    const assertionTests = matchingTests.filter((testCase) => (
++      (testCase.assertions || []).some((assertion) => acceptedAssertions.has(assertion.kind))
++    ));
++    const property = propertiesByObligation.get(obligation.id);
++    scenario.testCaseRefs = matchingTests.map((testCase) => testCase.id).sort();
++    if (matchingTests.length) scenario.evidence.push(...matchingTests.map((testCase) => `test:${testCase.id}`));
++    if (execution) scenario.evidence.push(...execution.evidence);
++    if (assertionTests.length) scenario.evidence.push(...assertionTests.map((testCase) => `assertion:${testCase.id}`));
++    if (property?.status === 'passed') scenario.evidence.push(`property:${property.propertyId}:${property.seed || ''}`);
++
++    const hasTest = matchingTests.length > 0;
++    const executed = execution?.status === 'covered';
++    const assertionBound = assertionTests.length > 0;
++    const propertyBound = property?.status === 'passed' && property.confidence === 'exact';
++    const cappedByAggregate = evidenceCeiling === 'aggregate_lcov'
++      && ['error_path', 'boundary_value', 'invariant'].includes(obligation.kind);
++    const covered = hasTest && executed
++      && (obligation.kind === 'happy_path' ? assertionBound || propertyBound : assertionBound && propertyBound)
++      && !cappedByAggregate;
++    if (covered) {
++      scenario.status = 'covered';
++      scenario.statusReason = 'test link, execution and scenario-specific evidence satisfied';
++      scenario.confidence = propertyBound ? 'exact' : 'extracted';
++    } else if (hasTest || executed || assertionBound || propertyBound) {
++      scenario.status = 'partial';
++      scenario.statusReason = cappedByAggregate
++        ? 'aggregate coverage cannot prove this edge case'
++        : 'some evidence exists but scenario threshold is not met';
++      scenario.confidence = hasTest && executed ? 'inferred' : 'heuristic';
++      if (!hasTest) scenario.missingEvidence.push('linked_test');
++      if (!executed) scenario.missingEvidence.push('function_execution');
++      if (!assertionBound) scenario.missingEvidence.push('scenario_assertion');
++      if (['error_path', 'boundary_value', 'invariant'].includes(obligation.kind) && !propertyBound) {
++        scenario.missingEvidence.push('confirmed_property');
++      }
++      if (cappedByAggregate) scenario.missingEvidence.push('per_test_evidence');
++    } else if (dataQuality?.missingAllowed) {
++      scenario.status = 'missing';
++      scenario.statusReason = 'fresh complete inventory contains no linked test evidence';
++      scenario.confidence = 'extracted';
++      scenario.missingEvidence.push('linked_test', 'function_execution');
++    } else {
++      scenario.statusReason = 'inventory quality does not allow a missing conclusion';
++      scenario.missingEvidence.push('complete_test_inventory');
++    }
++    scenario.evidence = [...new Set(scenario.evidence)].sort();
++    scenario.missingEvidence = [...new Set(scenario.missingEvidence)].sort();
++    out.push(scenario);
++  }
++  return out.sort((a, b) => a.id.localeCompare(b.id));
++}
++
++export function buildStructureHints({
++  facts,
++  dependencyRisk,
++  dataQuality,
++  scenarios,
++  mutationObservations = [],
++}) {
++  const hints = [];
++  const add = (ruleId, subjectRefs, priority, remediationTarget, remediation, evidence, missingEvidence, confidence) => {
++    hints.push({
++      id: stableId('hint', ruleId, ...subjectRefs),
++      ruleId,
++      priority,
++      subjectRefs: [...new Set(subjectRefs)].sort(),
++      evidence: [...new Set(evidence || [])].sort(),
++      missingEvidence: [...new Set(missingEvidence || [])].sort(),
++      remediationTarget,
++      remediation,
++      promptSnippet: remediation,
++      confidence,
++    });
++  };
++  if (dataQuality.graphStatus !== 'fresh') {
++    add('structure.graph_stale', ['structure:graph'], 'info', 'code',
++      'Rebuild the Graphify graph at the pinned commit before strict conclusions.',
++      [`graph-status:${dataQuality.graphStatus}`], ['fresh_graph'], 'exact');
++  }
++  for (const scenario of scenarios || []) {
++    if (scenario.status === 'covered') continue;
++    const priority = scenario.status === 'missing' ? 'high' : 'medium';
++    add('scenario.must_obligation_gap', [scenario.obligationRef, ...scenario.contractRefs],
++      priority, 'test', `Add or strengthen a focused ${scenario.kind} test for ${scenario.obligationRef}.`,
++      scenario.evidence, scenario.missingEvidence, scenario.confidence);
++  }
++  for (const hotspot of dependencyRisk?.highFanIn || []) {
++    if (hotspot.executionStatus === 'covered') continue;
++    add('coverage.function_unexecuted_high_fan_in',
++      [hotspot.entityRef, ...(hotspot.contractRefs || [])], 'high', 'test',
++      `Add a regression test for the high fan-in entity (${hotspot.fanIn} incoming dependencies).`,
++      [`fan-in:${hotspot.fanIn}`], ['function_execution'], hotspot.confidence);
++  }
++  for (const mutant of mutationObservations || []) {
++    if (!['survived', 'no_coverage'].includes(mutant.mutationStatus)) continue;
++    add('scenario.surviving_contract_mutant', [mutant.subjectRef], 'high', 'test',
++      `Add an assertion that kills the ${mutant.mutator} mutant at ${mutant.path}:${mutant.line}.`,
++      mutant.evidence, ['mutation_killed'], mutant.confidence);
++  }
++  return hints.sort((a, b) => a.id.localeCompare(b.id));
++}
++
++export function buildStructureAssessment({
++  factsPayload,
++  obligationsExport,
++  lcov,
++  coverageObservations = [],
++  propertyResults = [],
++  mutation = { observations: [] },
++  receipts = [],
++  testRun = {},
++  thresholds = {},
++  generatedAt = new Date().toISOString(),
++}) {
++  const headSha = factsPayload.provenance.headSha;
++  const alignment = temporalAlignment({
++    factsHeadSha: headSha,
++    testHeadSha: testRun.headSha || headSha,
++    obligationsHeadSha: obligationsExport?.headSha,
++  });
++  const dataQuality = assessDataQuality(factsPayload.facts, coverageObservations, {
++    graphStatus: factsPayload.provenance.graphStatus,
++    testInventoryComplete: factsPayload.provenance.providerCapabilities?.testInventory === true,
++    truncated: factsPayload.provenance.truncated,
++    missingThreshold: thresholds.unresolvedJoinRate ?? 0.1,
++  });
++  const dependencyRisk = assessDependencyRisk(factsPayload.facts, coverageObservations, thresholds);
++  const scenarios = assessContractScenarios({
++    facts: factsPayload.facts,
++    obligations: obligationsExport?.obligations || [],
++    coverageObservations,
++    propertyResults,
++    alignment,
++    dataQuality,
++    evidenceCeiling: lcov ? 'aggregate_lcov' : 'static_inventory',
++  });
++  const hints = buildStructureHints({
++    facts: factsPayload.facts,
++    dependencyRisk,
++    dataQuality,
++    scenarios,
++    mutationObservations: mutation.observations,
++  });
++  const obligationsRevision = obligationsExport?.revision || 'none';
++  // без явного hash дискриминатором служит хэш канонического содержимого,
++  // иначе разные payload'ы схлопываются в sha256('none')
++  const coverageHash = lcov?.hash || (lcov ? sha256(lcov) : sha256('none'));
++  const thresholdsHash = sha256(thresholds);
++  const fingerprint = assessmentFingerprint({
++    facts: factsPayload.fingerprint,
++    obligationsRevision,
++    coverageHash,
++    thresholdsHash,
++  });
++  return {
++    schemaRef: STRUCTURE_ASSESSMENT_SCHEMA,
++    version: 1,
++    kind: 'structure_assessment',
++    generatedAt,
++    fingerprint,
++    factsFingerprint: factsPayload.fingerprint,
++    obligationsRevision,
++    obligationContentHashes: Object.fromEntries((obligationsExport?.obligations || [])
++      .map((item) => [item.id, item.contentHash]).sort(([a], [b]) => a.localeCompare(b))),
++    coverageHash,
++    thresholdsHash,
++    testRun: {
++      id: String(testRun.id || `local-${headSha.slice(0, 12)}`),
++      headSha: String(testRun.headSha || headSha),
++      producedAt: testRun.producedAt || generatedAt,
++    },
++    temporalAlignment: alignment,
++    coverageObservations: [...coverageObservations, ...(mutation.observations || [])]
++      .sort((a, b) => a.id.localeCompare(b.id)),
++    assessments: {
++      codeCoverage: {
++        totals: lcov?.totals || null,
++        files: lcov?.files?.length || 0,
++      },
++      dependencyRisk,
++      contractScenarios: scenarios,
++      dataQuality,
++    },
++    hints,
++    receipts,
++  };
++}
+diff --git a/lib/structure-context.mjs b/lib/structure-context.mjs
+new file mode 100644
+index 0000000..eb1b810
+--- /dev/null
++++ b/lib/structure-context.mjs
+@@ -0,0 +1,131 @@
++const DEFAULT_CONTEXT_LIMITS = Object.freeze({
++  maxSeeds: 20,
++  maxEdges: 50,
++  maxObligations: 10,
++  maxGaps: 15,
++  maxBytes: 32 * 1024,
++  maxDepth: 1,
++});
++
++function estimateTokens(value) {
++  return Math.ceil(JSON.stringify(value).length / 4);
++}
++
++function matchesScope(entity, scopeRefs) {
++  if (!scopeRefs.length) return false;
++  return scopeRefs.some((scope) => (
++    entity.observedId === scope
++    || entity.boundaryId === scope
++    || entity.path === scope
++    || entity.path.startsWith(`${scope.replace(/\/+$/, '')}/`)
++  ));
++}
++
++export function buildStructureContext({
++  facts,
++  assessment,
++  headSha,
++  snapshotFingerprint,
++  scopeRefs = [],
++  taskRef = null,
++  contractRefs = [],
++  tokenBudget = 8000,
++  dependencyDepth = 1,
++  limits = {},
++}) {
++  if (!headSha && !snapshotFingerprint) {
++    throw new Error('structure_context requires pinned headSha or snapshotFingerprint');
++  }
++  if (headSha && facts.provenance.headSha !== headSha) {
++    throw new Error(`pinned headSha ${headSha} does not match facts ${facts.provenance.headSha}`);
++  }
++  if (snapshotFingerprint && facts.fingerprint !== snapshotFingerprint) {
++    throw new Error(`snapshot fingerprint ${snapshotFingerprint} does not match facts`);
++  }
++  if (assessment.factsFingerprint !== facts.fingerprint) {
++    throw new Error('assessment does not reference the supplied facts snapshot');
++  }
++  const cap = { ...DEFAULT_CONTEXT_LIMITS, ...limits };
++  cap.maxDepth = Math.min(dependencyDepth, cap.maxDepth);
++  const entityById = new Map(facts.facts.entities.map((entity) => [entity.observedId, entity]));
++  const contractById = new Map(facts.facts.contracts.map((contract) => [contract.id, contract]));
++  const seedIds = new Set();
++  for (const entity of facts.facts.entities) {
++    if (matchesScope(entity, scopeRefs)) seedIds.add(entity.observedId);
++  }
++  for (const contractRef of contractRefs) {
++    const contract = contractById.get(contractRef);
++    if (contract) seedIds.add(contract.entityRef);
++  }
++  const queue = [...seedIds].slice(0, cap.maxSeeds).map((id) => ({ id, depth: 0 }));
++  const selectedIds = new Set(queue.map((item) => item.id));
++  const selectedEdges = [];
++  const selectedEdgeIds = new Set();
++  while (queue.length && selectedEdges.length < cap.maxEdges) {
++    const current = queue.shift();
++    if (current.depth >= cap.maxDepth) continue;
++    for (const edge of facts.facts.dependencies) {
++      if (selectedEdges.length >= cap.maxEdges) break;
++      if (edge.from !== current.id && edge.to !== current.id) continue;
++      const edgeId = edge.id || `${edge.from}→${edge.to}:${edge.relation}`;
++      if (selectedEdgeIds.has(edgeId)) continue;
++      selectedEdgeIds.add(edgeId);
++      selectedEdges.push(edge);
++      const other = edge.from === current.id ? edge.to : edge.from;
++      if (!selectedIds.has(other)) {
++        selectedIds.add(other);
++        queue.push({ id: other, depth: current.depth + 1 });
++      }
++    }
++  }
++  const selectedEntities = [...selectedIds].map((id) => entityById.get(id)).filter(Boolean);
++  const selectedContracts = facts.facts.contracts.filter((contract) => (
++    selectedIds.has(contract.entityRef) || contractRefs.includes(contract.id)
++  ));
++  const selectedContractIds = new Set(selectedContracts.map((contract) => contract.id));
++  const scenarios = assessment.assessments.contractScenarios
++    .filter((scenario) => scenario.contractRefs.some((id) => selectedContractIds.has(id)))
++    .slice(0, cap.maxGaps);
++  const obligationIds = new Set(scenarios.map((scenario) => scenario.obligationRef));
++  const hints = assessment.hints.filter((hint) => (
++    hint.subjectRefs.some((ref) => selectedIds.has(ref) || selectedContractIds.has(ref) || obligationIds.has(ref))
++  )).slice(0, cap.maxGaps);
++  const boundaries = facts.facts.boundaries.filter((boundary) => (
++    selectedEntities.some((entity) => entity.boundaryId === boundary.id)
++  ));
++  const result = {
++    version: 1,
++    kind: 'structure_context',
++    pinned: {
++      headSha: facts.provenance.headSha,
++      factsFingerprint: facts.fingerprint,
++      assessmentFingerprint: assessment.fingerprint,
++      obligationsRevision: assessment.obligationsRevision,
++    },
++    temporalAlignment: assessment.temporalAlignment,
++    taskRef,
++    scopeRefs,
++    boundaries,
++    entities: selectedEntities,
++    contracts: selectedContracts,
++    dependencies: selectedEdges,
++    scenarios,
++    hints,
++    suggestedFiles: [...new Set([
++      ...selectedEntities.map((entity) => entity.path),
++      ...facts.facts.testCases
++        .filter((testCase) => testCase.targetContractRefs.some((id) => selectedContractIds.has(id)))
++        .map((testCase) => testCase.path),
++    ])].sort(),
++    truncated: seedIds.size > cap.maxSeeds || selectedEdges.length >= cap.maxEdges,
++  };
++  result.tokenEstimate = estimateTokens(result);
++  if (Buffer.byteLength(JSON.stringify(result)) > cap.maxBytes || result.tokenEstimate > tokenBudget) {
++    result.dependencies = result.dependencies.slice(0, Math.max(0, Math.floor(result.dependencies.length / 2)));
++    result.entities = result.entities.slice(0, cap.maxSeeds);
++    result.hints = result.hints.slice(0, Math.max(1, Math.floor(cap.maxGaps / 2)));
++    result.truncated = true;
++    result.tokenEstimate = estimateTokens(result);
++  }
++  return result;
++}
+diff --git a/lib/structure-drift.mjs b/lib/structure-drift.mjs
+new file mode 100644
+index 0000000..efcf35b
+--- /dev/null
++++ b/lib/structure-drift.mjs
+@@ -0,0 +1,221 @@
++import { stableId } from './structure-evidence.mjs';
++
++function normalized(value) {
++  return String(value || '').replace(/\(\)+$/, '').replace(/^\./, '').toLowerCase();
++}
++
++function contractLabel(contract, entityById) {
++  return normalized(entityById.get(contract.entityRef)?.label);
++}
++
++export function suggestObligationLinks(obligations, facts, { limit = 5 } = {}) {
++  const entityById = new Map((facts?.entities || []).map((entity) => [entity.observedId, entity]));
++  return (obligations || [])
++    .filter((obligation) => !(obligation.contractRefs || []).length)
++    .map((obligation) => {
++      const statement = normalized(obligation.statement);
++      const docPath = normalized(obligation.docRef);
++      const candidates = (facts?.contracts || []).map((contract) => {
++        const entity = entityById.get(contract.entityRef);
++        const label = contractLabel(contract, entityById);
++        let score = 0;
++        const reasons = [];
++        if (label && new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(statement)) {
++          score += 5;
++          reasons.push('symbol-mentioned');
++        }
++        if (entity?.path && docPath && docPath.split('/').some((part) => part.length > 2 && entity.path.toLowerCase().includes(part))) {
++          score += 2;
++          reasons.push('document-path-overlap');
++        }
++        if (obligation.moduleRef && entity?.boundaryId?.includes(String(obligation.moduleRef))) {
++          score += 3;
++          reasons.push('module-boundary');
++        }
++        if (contract.kind === 'signature') {
++          score += 1;
++          reasons.push('semantic-signature');
++        }
++        return {
++          contractRef: contract.id,
++          entityRef: contract.entityRef,
++          score,
++          confidence: score >= 6 ? 'extracted' : score >= 3 ? 'inferred' : 'heuristic',
++          reasons,
++        };
++      }).filter((candidate) => candidate.score > 0)
++        .sort((a, b) => b.score - a.score || a.contractRef.localeCompare(b.contractRef))
++        .slice(0, limit);
++      return {
++        obligationRef: obligation.id,
++        candidates,
++        resolution: candidates.length === 1 && candidates[0].score >= 6 ? 'unique' : candidates.length ? 'ambiguous' : 'unresolved',
++      };
++    })
++    .sort((a, b) => a.obligationRef.localeCompare(b.obligationRef));
++}
++
++function finding(ruleId, subjectRefs, {
++  priority = 'medium',
++  remediationTarget,
++  summary,
++  evidence = [],
++  missingEvidence = [],
++  snapshotFingerprint,
++}) {
++  // subjectRefs канонизируются до хэширования, иначе порядок ломает реконсиляцию
++  const refs = [...new Set(subjectRefs)].sort();
++  const fingerprint = stableId('structure-finding', ruleId, ...refs);
++  return {
++    id: fingerprint,
++    fingerprint,
++    ruleId,
++    priority,
++    status: 'open',
++    subjectRefs: refs,
++    remediationTarget,
++    summary,
++    evidence: [...new Set(evidence)].sort(),
++    missingEvidence: [...new Set(missingEvidence)].sort(),
++    firstSeenSnapshot: snapshotFingerprint,
++    lastSeenSnapshot: snapshotFingerprint,
++    resolvedBySnapshot: null,
++  };
++}
++
++export function computeStructureDrift({
++  facts,
++  assessment,
++  obligationsExport,
++  confirmedClaims = [],
++  linkSuggestions = null,
++}) {
++  const findings = [];
++  const contractIds = new Set((facts.facts?.contracts || []).map((contract) => contract.id));
++  const entityIds = new Set((facts.facts?.entities || []).map((entity) => entity.observedId));
++  const suggestions = linkSuggestions || suggestObligationLinks(obligationsExport?.obligations, facts.facts);
++  const suggestionByObligation = new Map(suggestions.map((item) => [item.obligationRef, item]));
++  if (facts.provenance.graphStatus !== 'fresh') {
++    findings.push(finding('structure.graph_stale', ['structure:graph'], {
++      priority: 'info',
++      remediationTarget: 'code',
++      summary: 'Rebuild the structure graph at the pinned commit.',
++      evidence: [`graph-status:${facts.provenance.graphStatus}`],
++      missingEvidence: ['fresh_graph'],
++      snapshotFingerprint: assessment.fingerprint,
++    }));
++  }
++  for (const obligation of obligationsExport?.obligations || []) {
++    if (obligation.status !== 'confirmed') continue;
++    const linked = (obligation.contractRefs || []).filter((ref) => contractIds.has(ref));
++    if (!obligation.contractRefs?.length) {
++      const suggestion = suggestionByObligation.get(obligation.id);
++      findings.push(finding('docs.obligation_unlinked', [obligation.id], {
++        remediationTarget: 'claim',
++        summary: `Confirm a code contract link for ${obligation.id}.`,
++        evidence: suggestion?.candidates?.map((candidate) => `candidate:${candidate.contractRef}:${candidate.score}`) || [],
++        missingEvidence: ['confirmed_contract_link'],
++        snapshotFingerprint: assessment.fingerprint,
++      }));
++    } else if (!linked.length) {
++      findings.push(finding('docs.contract_link_broken', [obligation.id, ...obligation.contractRefs], {
++        priority: 'high',
++        remediationTarget: 'docs',
++        summary: `Documented contract link for ${obligation.id} does not exist in the pinned snapshot.`,
++        evidence: [`obligation:${obligation.id}:${obligation.contentHash}`],
++        missingEvidence: ['existing_contract'],
++        snapshotFingerprint: assessment.fingerprint,
++      }));
++    }
++  }
++  for (const claim of confirmedClaims || []) {
++    if (claim.status !== 'confirmed') continue;
++    const exists = claim.kind === 'entity_exists' ? entityIds.has(claim.subjectRef) : contractIds.has(claim.subjectRef);
++    if (!exists) {
++      findings.push(finding('contract.confirmed_claim_drift', [claim.id, claim.subjectRef], {
++        priority: 'high',
++        remediationTarget: 'docs',
++        summary: `Confirmed ${claim.kind} claim no longer resolves to observed code.`,
++        evidence: [`claim:${claim.id}:${claim.contentHash || ''}`],
++        missingEvidence: ['observed_subject'],
++        snapshotFingerprint: assessment.fingerprint,
++      }));
++    }
++  }
++  for (const scenario of assessment.assessments?.contractScenarios || []) {
++    if (!['missing', 'partial'].includes(scenario.status)) continue;
++    findings.push(finding('scenario.must_obligation_gap', [scenario.obligationRef, ...scenario.contractRefs], {
++      priority: scenario.status === 'missing' ? 'high' : 'medium',
++      remediationTarget: 'test',
++      summary: `Scenario ${scenario.kind} is ${scenario.status}: ${scenario.statusReason}`,
++      evidence: scenario.evidence,
++      missingEvidence: scenario.missingEvidence,
++      snapshotFingerprint: assessment.fingerprint,
++    }));
++  }
++  return {
++    version: 1,
++    kind: 'structure_drift',
++    factsFingerprint: facts.fingerprint,
++    assessmentFingerprint: assessment.fingerprint,
++    obligationsRevision: obligationsExport?.revision || 'none',
++    temporalAlignment: assessment.temporalAlignment,
++    findings: findings.sort((a, b) => a.fingerprint.localeCompare(b.fingerprint)),
++    linkSuggestions: suggestions,
++  };
++}
++
++export function reconcileStructureFindings(previous, current, snapshotFingerprint) {
++  const previousByFingerprint = new Map((previous || []).map((item) => [item.fingerprint, item]));
++  const currentByFingerprint = new Map((current || []).map((item) => [item.fingerprint, item]));
++  const out = [];
++  for (const item of current || []) {
++    const prior = previousByFingerprint.get(item.fingerprint);
++    out.push(prior ? {
++      ...prior,
++      ...item,
++      status: item.status === 'resolved' ? 'resolved' : 'open',
++      firstSeenSnapshot: prior.firstSeenSnapshot || item.firstSeenSnapshot,
++      lastSeenSnapshot: snapshotFingerprint,
++    } : item);
++  }
++  for (const prior of previous || []) {
++    if (currentByFingerprint.has(prior.fingerprint)) continue;
++    out.push({
++      ...prior,
++      status: prior.ruleId === 'docs.obligation_unlinked' ? 'superseded' : 'pending_verify',
++      lastSeenSnapshot: snapshotFingerprint,
++      resolvedBySnapshot: null,
++    });
++  }
++  return out.sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
++}
++
++export function applyStructureWaivers(findings, waivers, now = new Date()) {
++  const active = new Map((waivers || [])
++    .filter((waiver) => waiver.owner && waiver.reason && waiver.expiresAt
++      && Date.parse(waiver.expiresAt) > now.getTime())
++    .map((waiver) => [waiver.findingFingerprint, waiver]));
++  return (findings || []).map((item) => {
++    const waiver = active.get(item.fingerprint);
++    return waiver ? { ...item, suppressed: true, waiver } : { ...item, suppressed: false };
++  });
++}
++
++export function triageStructureFindings(findings, { limit = 20 } = {}) {
++  const rank = { high: 3, medium: 2, info: 1 };
++  return (findings || [])
++    .filter((item) => !item.suppressed && !['resolved', 'superseded'].includes(item.status))
++    .sort((a, b) => (rank[b.priority] || 0) - (rank[a.priority] || 0)
++      || a.ruleId.localeCompare(b.ruleId)
++      || a.fingerprint.localeCompare(b.fingerprint))
++    .slice(0, limit)
++    .map((item) => ({
++      ...item,
++      explain: [
++        item.summary,
++        item.missingEvidence.length ? `Missing: ${item.missingEvidence.join(', ')}` : 'Evidence threshold satisfied.',
++      ],
++      nextAction: item.remediationTarget,
++    }));
++}
+diff --git a/lib/structure-evidence.mjs b/lib/structure-evidence.mjs
+new file mode 100644
+index 0000000..d219535
+--- /dev/null
++++ b/lib/structure-evidence.mjs
+@@ -0,0 +1,91 @@
++// generic-хелперы живут в lib/util.mjs; здесь — реэкспорт для обратной совместимости
++import { normalizeRepoPath, sha256 } from './util.mjs';
++
++export { canonicalJson, normalizeRepoPath, sha256, stableId } from './util.mjs';
++
++export const EVIDENCE_RECEIPT_VERSION = 1;
++export const TRUST_TIERS = Object.freeze(['signed_ci', 'trusted_local', 'untrusted']);
++export const EVIDENCE_CEILINGS = Object.freeze([
++  'static_inventory',
++  'aggregate_lcov',
++  'per_test_execution',
++  'assertion_bound',
++  'mutation_bound',
++  'property_bound',
++  'contract_verified',
++]);
++
++const SHA256_RE = /^[0-9a-f]{64}$/;
++const HEAD_SHA_RE = /^[0-9a-f]{7,64}$/i;
++
++function strings(values, max = 100) {
++  return [...new Set((values || []).map((value) => String(value).trim()).filter(Boolean))]
++    .slice(0, max)
++    .sort();
++}
++
++export function validateEvidenceReceipt(receipt) {
++  const errors = [];
++  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return ['receipt must be an object'];
++  if (receipt.version !== EVIDENCE_RECEIPT_VERSION) errors.push('version must be 1');
++  for (const field of ['provider', 'toolVersion', 'capability', 'headSha', 'configHash', 'scopeHash', 'observedAt']) {
++    if (!String(receipt[field] || '').trim()) errors.push(`${field} is required`);
++  }
++  if (!HEAD_SHA_RE.test(String(receipt.headSha || ''))) errors.push('headSha must be a git-like hex sha');
++  if (!SHA256_RE.test(String(receipt.configHash || ''))) errors.push('configHash must be sha256');
++  if (!SHA256_RE.test(String(receipt.scopeHash || ''))) errors.push('scopeHash must be sha256');
++  if (!receipt.artifact || typeof receipt.artifact !== 'object') errors.push('artifact is required');
++  else {
++    if (!String(receipt.artifact.uri || '').trim()) errors.push('artifact.uri is required');
++    if (!SHA256_RE.test(String(receipt.artifact.sha256 || ''))) errors.push('artifact.sha256 must be sha256');
++  }
++  if (!receipt.observation || typeof receipt.observation !== 'object') errors.push('observation is required');
++  else if (!String(receipt.observation.type || '').trim()) errors.push('observation.type is required');
++  if (!TRUST_TIERS.includes(receipt.trustTier)) errors.push('invalid trustTier');
++  if (!EVIDENCE_CEILINGS.includes(receipt.evidenceCeiling)) errors.push('invalid evidenceCeiling');
++  if (!Array.isArray(receipt.limitations)) errors.push('limitations must be an array');
++  if (Number.isNaN(Date.parse(String(receipt.observedAt || '')))) errors.push('observedAt must be ISO-8601');
++  for (const ref of receipt.subjectRefs || []) {
++    if (!String(ref || '').trim()) errors.push('subjectRefs cannot contain empty values');
++  }
++  if (receipt.observation?.path != null) {
++    try { normalizeRepoPath(receipt.observation.path); } catch (error) { errors.push(error.message); }
++  }
++  return errors;
++}
++
++export function createEvidenceReceipt(input) {
++  const observation = { ...(input.observation || {}) };
++  delete observation.covered;
++  if (observation.path != null) observation.path = normalizeRepoPath(observation.path);
++  const receipt = {
++    version: EVIDENCE_RECEIPT_VERSION,
++    provider: String(input.provider || '').trim(),
++    toolVersion: String(input.toolVersion || '').trim(),
++    capability: String(input.capability || '').trim(),
++    headSha: String(input.headSha || '').trim(),
++    testRunId: input.testRunId == null ? null : String(input.testRunId),
++    configHash: String(input.configHash || ''),
++    scopeHash: String(input.scopeHash || ''),
++    subjectRefs: strings(input.subjectRefs),
++    artifact: {
++      uri: String(input.artifact?.uri || '').trim(),
++      sha256: String(input.artifact?.sha256 || ''),
++    },
++    observation,
++    trustTier: input.trustTier || 'trusted_local',
++    evidenceCeiling: input.evidenceCeiling || 'static_inventory',
++    limitations: strings(input.limitations, 50),
++    complete: input.complete !== false,
++    truncated: input.truncated === true,
++    exitStatus: Number.isInteger(input.exitStatus) ? input.exitStatus : null,
++    observedAt: input.observedAt || new Date().toISOString(),
++  };
++  const errors = validateEvidenceReceipt(receipt);
++  if (errors.length) throw new Error(`invalid evidence receipt: ${errors.join('; ')}`);
++  return receipt;
++}
++
++export function receiptRef(receipt) {
++  return `receipt:${sha256(receipt)}`;
++}
+diff --git a/lib/structure-identity.mjs b/lib/structure-identity.mjs
+new file mode 100644
+index 0000000..81fc1f3
+--- /dev/null
++++ b/lib/structure-identity.mjs
+@@ -0,0 +1,71 @@
++function continuityKey(entity) {
++  return `${entity.qualifiedName || entity.label}\0${entity.kind}\0${entity.signature || ''}`;
++}
++
++export function reconcileIdentity(currentEntities, previousEntities = []) {
++  const previousByObserved = new Map(previousEntities.map((entity) => [entity.observedId, entity]));
++  const previousByContinuity = new Map();
++  for (const entity of previousEntities) {
++    const key = continuityKey(entity);
++    if (!previousByContinuity.has(key)) previousByContinuity.set(key, []);
++    previousByContinuity.get(key).push(entity);
++  }
++  const matchedPrevious = new Set();
++  const events = [];
++  const entities = currentEntities.map((entity) => {
++    const exact = previousByObserved.get(entity.observedId);
++    if (exact) {
++      matchedPrevious.add(exact.observedId);
++      return { ...entity, lineageId: exact.lineageId || exact.observedId };
++    }
++    const candidates = (previousByContinuity.get(continuityKey(entity)) || [])
++      .filter((candidate) => !matchedPrevious.has(candidate.observedId));
++    if (candidates.length === 1) {
++      const previous = candidates[0];
++      matchedPrevious.add(previous.observedId);
++      const pathChanged = previous.path !== entity.path;
++      const labelChanged = previous.label !== entity.label;
++      const kind = pathChanged && labelChanged ? 'moved_renamed' : pathChanged ? 'moved' : 'renamed';
++      events.push({
++        kind,
++        from: previous.observedId,
++        to: entity.observedId,
++        confidence: 'extracted',
++        evidence: [`identity:${previous.path}:${previous.label}->${entity.path}:${entity.label}`],
++      });
++      return { ...entity, lineageId: previous.lineageId || previous.observedId };
++    }
++    if (candidates.length > 1) {
++      events.push({
++        kind: 'identity_unresolved',
++        from: null,
++        to: entity.observedId,
++        confidence: 'ambiguous',
++        evidence: candidates.map((candidate) => `identity-candidate:${candidate.observedId}`).sort(),
++      });
++      return { ...entity, lineageId: null };
++    }
++    events.push({
++      kind: 'created',
++      from: null,
++      to: entity.observedId,
++      confidence: 'exact',
++      evidence: [`identity:new:${entity.observedId}`],
++    });
++    return entity;
++  });
++  for (const previous of previousEntities) {
++    if (matchedPrevious.has(previous.observedId)) continue;
++    events.push({
++      kind: 'removed',
++      from: previous.observedId,
++      to: null,
++      confidence: 'extracted',
++      evidence: [`identity:absent:${previous.observedId}`],
++    });
++  }
++  // JSON.stringify кортежа, а не ':'-конкат: id с ':' не ломают стабильность сортировки
++  const sortKey = (event) => JSON.stringify([event.kind, event.from || '', event.to || '']);
++  events.sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
++  return { entities, events };
++}
+diff --git a/lib/structure-mutation.mjs b/lib/structure-mutation.mjs
+new file mode 100644
+index 0000000..02557b2
+--- /dev/null
++++ b/lib/structure-mutation.mjs
+@@ -0,0 +1,101 @@
++import { normalizeRepoPath, stableId } from './structure-evidence.mjs';
++
++const MUTANT_STATUS = new Map([
++  ['Killed', 'killed'],
++  ['Survived', 'survived'],
++  ['NoCoverage', 'no_coverage'],
++  ['Timeout', 'timeout'],
++  ['CompileError', 'compile_error'],
++  ['RuntimeError', 'runtime_error'],
++  ['Ignored', 'ignored'],
++]);
++
++function locationOf(mutant) {
++  const location = mutant.location || {};
++  return {
++    line: Number(location.start?.line || mutant.line || 0) || null,
++    endLine: Number(location.end?.line || location.start?.line || mutant.line || 0) || null,
++  };
++}
++
++function contractForMutant(path, location, contracts, entitiesById) {
++  const candidates = [];
++  for (const contract of contracts || []) {
++    const entity = entitiesById.get(contract.entityRef);
++    if (!entity || entity.path !== path) continue;
++    if (entity.line && location.line && entity.line > location.line) continue;
++    if (entity.endLine && location.line && entity.endLine < location.line) continue;
++    candidates.push({ contract, entity });
++  }
++  candidates.sort((a, b) => {
++    const aDistance = Math.abs((a.entity.line || location.line || 0) - (location.line || 0));
++    const bDistance = Math.abs((b.entity.line || location.line || 0) - (location.line || 0));
++    return aDistance - bDistance;
++  });
++  return candidates[0]?.contract || null;
++}
++
++export function parseMutationReport(report, facts, { scopeContractRefs = [] } = {}) {
++  const entitiesById = new Map((facts?.entities || []).map((entity) => [entity.observedId, entity]));
++  const allowed = new Set(scopeContractRefs || []);
++  const observations = [];
++  const warnings = [];
++  const files = report?.files && typeof report.files === 'object' ? report.files : {};
++  for (const [rawPath, file] of Object.entries(files)) {
++    let path;
++    try { path = normalizeRepoPath(rawPath); } catch (error) {
++      warnings.push(error.message);
++      continue;
++    }
++    for (const mutant of file?.mutants || []) {
++      const location = locationOf(mutant);
++      const contract = contractForMutant(path, location, facts?.contracts || [], entitiesById);
++      if (allowed.size && (!contract || !allowed.has(contract.id))) continue;
++      const mutationStatus = MUTANT_STATUS.get(mutant.status) || String(mutant.status || 'unknown').toLowerCase();
++      observations.push({
++        id: stableId('mutant', path, mutant.id, mutant.mutatorName, location.line),
++        level: 'contract_edge_coverage',
++        subjectRef: contract?.id || `file:${path}`,
++        contractRef: contract?.id || null,
++        path,
++        line: location.line,
++        endLine: location.endLine,
++        mutator: String(mutant.mutatorName || mutant.type || 'unknown'),
++        replacement: mutant.replacement == null ? null : String(mutant.replacement),
++        status: mutationStatus === 'killed' ? 'covered'
++          : ['survived', 'no_coverage'].includes(mutationStatus) ? 'uncovered' : 'partial',
++        mutationStatus,
++        killedBy: [...new Set(mutant.killedByTests || mutant.killedBy || [])].map(String).sort(),
++        confidence: contract ? 'exact' : 'heuristic',
++        evidence: [`mutation:${path}:${mutant.id}`],
++      });
++    }
++  }
++  observations.sort((a, b) => a.id.localeCompare(b.id));
++  return {
++    observations,
++    warnings,
++    summary: {
++      total: observations.length,
++      killed: observations.filter((item) => item.mutationStatus === 'killed').length,
++      survived: observations.filter((item) => item.mutationStatus === 'survived').length,
++      noCoverage: observations.filter((item) => item.mutationStatus === 'no_coverage').length,
++      timeout: observations.filter((item) => item.mutationStatus === 'timeout').length,
++    },
++  };
++}
++
++export function criticalContractRefs(facts, dependencyRisk, obligations) {
++  const must = new Set((obligations || [])
++    .filter((obligation) => obligation.status === 'confirmed' && obligation.priority === 'must')
++    .flatMap((obligation) => obligation.contractRefs || []));
++  for (const hotspot of dependencyRisk?.highFanIn || []) must.add(hotspot.contractRef || hotspot.entityRef);
++  for (const entity of facts?.entities || []) {
++    if (entity.isGodNode) {
++      for (const contract of facts.contracts || []) {
++        if (contract.entityRef === entity.observedId) must.add(contract.id);
++      }
++    }
++  }
++  return [...must].filter(Boolean).sort();
++}
+diff --git a/lib/structure-protocol.mjs b/lib/structure-protocol.mjs
+new file mode 100644
+index 0000000..b4816a2
+--- /dev/null
++++ b/lib/structure-protocol.mjs
+@@ -0,0 +1,137 @@
++import { normalizeRepoPath, sha256 } from './structure-evidence.mjs';
++
++export const STRUCTURE_PROTOCOL_VERSION = 1;
++export const STRUCTURE_FACTS_VERSION = STRUCTURE_PROTOCOL_VERSION;
++export const STRUCTURE_FACTS_SCHEMA = 'code-structure/structure-facts.v1';
++export const STRUCTURE_ASSESSMENT_SCHEMA = 'code-structure/structure-assessment.v1';
++export const OBLIGATIONS_SCHEMA = 'code-structure/obligations-export.v1';
++export const OBLIGATIONS_EXPORT_SCHEMA = OBLIGATIONS_SCHEMA;
++
++export const DEFAULT_STRUCTURE_LIMITS = Object.freeze({
++  maxBytes: 20 * 1024 * 1024,
++  maxEntities: 5000,
++  maxEdges: 15000,
++  maxTests: 10000,
++  maxObligations: 10000,
++  maxPathLength: 1000,
++  maxStringLength: 10000,
++  maxDepth: 30,
++});
++
++export function assertPayloadSize(text, limits = DEFAULT_STRUCTURE_LIMITS) {
++  const bytes = Buffer.byteLength(String(text || ''));
++  if (bytes > limits.maxBytes) throw new Error(`structure payload exceeds ${limits.maxBytes} bytes`);
++  return bytes;
++}
++
++function inspectValue(value, limits, depth = 0) {
++  if (depth > limits.maxDepth) throw new Error(`structure payload nesting exceeds ${limits.maxDepth}`);
++  if (typeof value === 'string' && value.length > limits.maxStringLength) {
++    throw new Error(`structure payload string exceeds ${limits.maxStringLength} characters`);
++  }
++  if (Array.isArray(value)) {
++    for (const item of value) inspectValue(item, limits, depth + 1);
++  } else if (value && typeof value === 'object') {
++    for (const item of Object.values(value)) inspectValue(item, limits, depth + 1);
++  }
++}
++
++function assertKind(payload, kind, schemaRef) {
++  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(`${kind} payload must be an object`);
++  if (payload.version !== STRUCTURE_PROTOCOL_VERSION) throw new Error(`unsupported ${kind} version: ${payload.version}`);
++  if (payload.kind !== kind) throw new Error(`expected kind=${kind}`);
++  if (payload.schemaRef !== schemaRef) throw new Error(`expected schemaRef=${schemaRef}`);
++}
++
++function assertPaths(records, pathField = 'path') {
++  for (const record of records || []) {
++    if (record?.[pathField] != null) normalizeRepoPath(record[pathField]);
++  }
++}
++
++export function validateStructureFacts(payload, limits = DEFAULT_STRUCTURE_LIMITS) {
++  assertKind(payload, 'structure_facts', STRUCTURE_FACTS_SCHEMA);
++  inspectValue(payload, limits);
++  const facts = payload.facts || {};
++  if (!Array.isArray(facts.boundaries) || !Array.isArray(facts.entities)
++    || !Array.isArray(facts.contracts) || !Array.isArray(facts.dependencies)
++    || !Array.isArray(facts.testCases)) {
++    throw new Error('structure facts arrays are required');
++  }
++  if (facts.entities.length > limits.maxEntities) throw new Error('entity limit exceeded');
++  if (facts.dependencies.length > limits.maxEdges) throw new Error('dependency limit exceeded');
++  if (facts.testCases.length > limits.maxTests) throw new Error('test case limit exceeded');
++  assertPaths(facts.entities);
++  assertPaths(facts.testCases);
++  for (const boundary of facts.boundaries) {
++    for (const path of boundary.paths || []) {
++      if (normalizeRepoPath(path).length > limits.maxPathLength) throw new Error('path length limit exceeded');
++    }
++  }
++  if (!/^[0-9a-f]{64}$/.test(String(payload.fingerprint || ''))) throw new Error('facts fingerprint must be sha256');
++  return payload;
++}
++
++export function validateObligationsExport(payload, limits = DEFAULT_STRUCTURE_LIMITS) {
++  assertKind(payload, 'obligations_export', OBLIGATIONS_SCHEMA);
++  inspectValue(payload, limits);
++  if (!Array.isArray(payload.obligations)) throw new Error('obligations array is required');
++  if (payload.obligations.length > limits.maxObligations) throw new Error('obligation limit exceeded');
++  for (const obligation of payload.obligations) {
++    if (!obligation?.id || !obligation?.contentHash || !obligation?.statement) {
++      throw new Error('obligation id, contentHash and statement are required');
++    }
++  }
++  return payload;
++}
++
++export function validateStructureAssessment(payload, limits = DEFAULT_STRUCTURE_LIMITS) {
++  assertKind(payload, 'structure_assessment', STRUCTURE_ASSESSMENT_SCHEMA);
++  inspectValue(payload, limits);
++  for (const field of ['fingerprint', 'factsFingerprint', 'coverageHash', 'thresholdsHash']) {
++    if (!/^[0-9a-f]{64}$/.test(String(payload[field] || ''))) throw new Error(`${field} must be sha256`);
++  }
++  if (!['aligned', 'mismatch', 'unknown'].includes(payload.temporalAlignment)) {
++    throw new Error('invalid temporalAlignment');
++  }
++  if (!Array.isArray(payload.coverageObservations)
++    || !Array.isArray(payload.assessments?.contractScenarios)
++    || !Array.isArray(payload.hints)
++    || !Array.isArray(payload.receipts)) {
++    throw new Error('assessment arrays are required');
++  }
++  return payload;
++}
++
++export function parseStructurePayload(text, limits = DEFAULT_STRUCTURE_LIMITS) {
++  assertPayloadSize(text, limits);
++  const payload = JSON.parse(text);
++  if (payload?.kind === 'structure_facts') return validateStructureFacts(payload, limits);
++  if (payload?.kind === 'structure_assessment') return validateStructureAssessment(payload, limits);
++  if (payload?.kind === 'obligations_export') return validateObligationsExport(payload, limits);
++  throw new Error(`unsupported structure payload kind: ${payload?.kind}`);
++}
++
++export function factsFingerprint({ headSha, providerVersion, configHash, scope }) {
++  return sha256(['structure_facts', headSha, providerVersion, configHash, scope || ''].join('\0'));
++}
++
++export function assessmentFingerprint({ facts, obligationsRevision, coverageHash, thresholdsHash }) {
++  return sha256([
++    'structure_assessment',
++    facts,
++    obligationsRevision || 'none',
++    coverageHash,
++    thresholdsHash,
++  ].join('\0'));
++}
++
++export function temporalAlignment({ factsHeadSha, testHeadSha, obligationsHeadSha }) {
++  const facts = String(factsHeadSha || '');
++  const test = String(testHeadSha || '');
++  const docs = String(obligationsHeadSha || '');
++  if (!facts || !test) return 'unknown';
++  if (facts !== test) return 'mismatch';
++  if (docs && docs !== facts) return 'mismatch';
++  return 'aligned';
++}
+diff --git a/lib/structure-tests.mjs b/lib/structure-tests.mjs
+new file mode 100644
+index 0000000..b9a158b
+--- /dev/null
++++ b/lib/structure-tests.mjs
+@@ -0,0 +1,142 @@
++import { stableId } from './structure-evidence.mjs';
++
++const TEST_DECLARATION_RE = /\b(?:it|test|specify)\s*\(\s*(['"`])(.+?)\1/g;
++const ASSERTION_PATTERNS = [
++  ['throws', /\b(?:toThrow|throws|assert\.throws)\b/],
++  ['rejects', /\b(?:rejects|assert\.rejects)\b/],
++  ['http_status', /\b(?:status|statusCode|toHaveStatus)\s*(?:\(|[=:])\s*(?:4\d\d|5\d\d)/],
++  ['equality', /\b(?:toEqual|toBe|deepEqual|strictEqual|assert\.equal)\b/],
++  ['property', /\b(?:fc\.assert|property|forall|forAll)\b/],
++];
++
++function frameworkForPath(path, source) {
++  if (/\bvitest\b/.test(source)) return 'vitest';
++  if (/\bjest\b/.test(source)) return 'jest';
++  if (/\bnode:test\b/.test(source)) return 'node:test';
++  if (/\.spec\./.test(path)) return 'unknown-spec';
++  return 'unknown-test';
++}
++
++function lineAt(source, offset) {
++  return source.slice(0, offset).split('\n').length;
++}
++
++function assertionsIn(source) {
++  return ASSERTION_PATTERNS
++    .filter(([, pattern]) => pattern.test(source))
++    .map(([kind]) => ({ kind, confidence: 'heuristic' }));
++}
++
++function normalizedLabel(value) {
++  return String(value || '').replace(/\(\)+$/, '').replace(/^\./, '').toLowerCase();
++}
++
++export function extractTestCasesFromSource(path, source, contracts = [], entities = []) {
++  // label контракта может отсутствовать (SCIP-контракты: entityRef/kind/signature) —
++  // выводим из сущности по entityRef
++  const labelByEntityRef = new Map((entities || []).map((entity) => [entity.observedId, entity.label]));
++  const out = [];
++  TEST_DECLARATION_RE.lastIndex = 0;
++  let match;
++  while ((match = TEST_DECLARATION_RE.exec(source))) {
++    const start = match.index;
++    const next = source.slice(TEST_DECLARATION_RE.lastIndex).search(TEST_DECLARATION_RE);
++    const end = next >= 0 ? TEST_DECLARATION_RE.lastIndex + next : Math.min(source.length, start + 6000);
++    const body = source.slice(start, end);
++    const targetContractRefs = [];
++    for (const contract of contracts) {
++      const label = normalizedLabel(
++        contract.label || contract.entityLabel || labelByEntityRef.get(contract.entityRef) || '',
++      );
++      if (label && new RegExp(`\\b${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(body)) {
++        targetContractRefs.push(contract.id);
++      }
++    }
++    const name = match[2].trim();
++    const line = lineAt(source, start);
++    out.push({
++      id: stableId('test', path, line, name),
++      name,
++      path,
++      line,
++      framework: frameworkForPath(path, source),
++      targetContractRefs: [...new Set(targetContractRefs)].sort(),
++      assertions: assertionsIn(body),
++      confidence: 'heuristic',
++      evidence: [`source:test-declaration:${path}:${line}`],
++    });
++  }
++  return out;
++}
++
++export function mergeTestCases(...groups) {
++  const byId = new Map();
++  for (const testCase of groups.flat()) {
++    const previous = byId.get(testCase.id);
++    if (!previous) {
++      byId.set(testCase.id, testCase);
++      continue;
++    }
++    byId.set(testCase.id, {
++      ...previous,
++      ...testCase,
++      targetContractRefs: [...new Set([
++        ...(previous.targetContractRefs || []),
++        ...(testCase.targetContractRefs || []),
++      ])].sort(),
++      assertions: [...(previous.assertions || []), ...(testCase.assertions || [])]
++        .filter((item, index, all) => all.findIndex((candidate) => candidate.kind === item.kind) === index),
++      evidence: [...new Set([...(previous.evidence || []), ...(testCase.evidence || [])])].sort(),
++    });
++  }
++  return [...byId.values()].sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.name.localeCompare(b.name));
++}
++
++export function generatePropertyDrafts(obligations) {
++  return (obligations || [])
++    .filter((obligation) => obligation.status === 'confirmed'
++      && ['boundary_value', 'invariant', 'error_path'].includes(obligation.kind))
++    .map((obligation) => {
++      const generators = obligation.kind === 'boundary_value'
++        ? ['minimum', 'maximum', 'below_minimum', 'above_maximum', 'empty']
++        : obligation.kind === 'error_path'
++          ? ['invalid', 'empty', 'malformed']
++          : ['valid_domain'];
++      return {
++        id: stableId('property', obligation.id, obligation.contentHash),
++        obligationRef: obligation.id,
++        status: 'draft',
++        kind: obligation.kind,
++        statement: obligation.statement,
++        preconditions: [],
++        generators,
++        invariant: obligation.statement,
++        expectedFailures: obligation.kind === 'error_path' ? ['invalid_input_rejected'] : [],
++        semanticHash: obligation.contentHash,
++        requiresConfirmation: true,
++        evidence: [`obligation:${obligation.id}:${obligation.contentHash}`],
++      };
++    })
++    .sort((a, b) => a.id.localeCompare(b.id));
++}
++
++export function parsePropertyReport(report, drafts = []) {
++  const byId = new Map(drafts.map((draft) => [draft.id, draft]));
++  return (report?.properties || []).map((property) => {
++    const draft = byId.get(property.propertyId);
++    const stale = !draft || draft.semanticHash !== property.semanticHash;
++    return {
++      propertyId: property.propertyId,
++      obligationRef: draft?.obligationRef || property.obligationRef || null,
++      status: stale ? 'stale' : (property.failed ? 'failed' : 'passed'),
++      numRuns: Number(property.numRuns || 0),
++      discardCount: Number(property.discardCount || 0),
++      seed: property.seed == null ? null : String(property.seed),
++      shrinkPath: property.shrinkPath == null ? null : String(property.shrinkPath),
++      counterexample: property.counterexample ?? null,
++      semanticHash: property.semanticHash || '',
++      confidence: stale ? 'unresolved' : 'exact',
++      evidence: [`property-report:${property.propertyId}`],
++    };
++  }).sort((a, b) => a.propertyId.localeCompare(b.propertyId));
++}
+diff --git a/lib/structure.mjs b/lib/structure.mjs
+new file mode 100644
+index 0000000..f453e7d
+--- /dev/null
++++ b/lib/structure.mjs
+@@ -0,0 +1,378 @@
++import { execFile as execFileCb } from 'node:child_process';
++import { readFile as readFileDefault } from 'node:fs/promises';
++import { dirname, join, resolve } from 'node:path';
++import { promisify } from 'node:util';
++import { createEvidenceReceipt, normalizeRepoPath, sha256 } from './structure-evidence.mjs';
++import {
++  factsFingerprint, OBLIGATIONS_EXPORT_SCHEMA, STRUCTURE_FACTS_SCHEMA, STRUCTURE_FACTS_VERSION,
++  validateObligationsExport, validateStructureAssessment, validateStructureFacts,
++} from './structure-protocol.mjs';
++import { buildStructureViews, extractGraphifyFacts } from './structure-graphify.mjs';
++import { extractScipFacts, mergeScipWithGraphify, readScipIndex } from './structure-scip.mjs';
++import { lcovObservations, parseLcov } from './structure-lcov.mjs';
++import {
++  extractTestCasesFromSource, generatePropertyDrafts, mergeTestCases, parsePropertyReport,
++} from './structure-tests.mjs';
++import { criticalContractRefs, parseMutationReport } from './structure-mutation.mjs';
++import { assessDependencyRisk, buildStructureAssessment } from './structure-assessments.mjs';
++import { reconcileIdentity } from './structure-identity.mjs';
++import {
++  applyStructureWaivers, computeStructureDrift, suggestObligationLinks, triageStructureFindings,
++} from './structure-drift.mjs';
++
++const execFileP = promisify(execFileCb);
++export const STRUCTURE_TOOL_VERSION = '1.0.0';
++
++async function optionalText(path, readFile) {
++  if (!path) return null;
++  try { return await readFile(path, 'utf8'); } catch { return null; }
++}
++
++async function optionalJson(path, readFile) {
++  const text = await optionalText(path, readFile);
++  if (text == null) return null;
++  return JSON.parse(text);
++}
++
++function graphStatus(report, headSha) {
++  if (!report) return 'unknown';
++  const built = String(report).match(/Built from commit:\s*`?([0-9a-f]{7,64})`?/i)?.[1];
++  if (!built) return 'unknown';
++  return headSha.startsWith(built) || built.startsWith(headSha) ? 'fresh' : 'stale';
++}
++
++async function gitValue(exec, cwd, args, fallback) {
++  try {
++    const { stdout } = await exec('git', ['-C', cwd, ...args], { timeout: 5000, maxBuffer: 1024 * 1024 });
++    return String(stdout).trim() || fallback;
++  } catch {
++    return fallback;
++  }
++}
++
++function contractsWithLabels(facts) {
++  const entities = new Map((facts.entities || []).map((entity) => [entity.observedId, entity]));
++  return (facts.contracts || []).map((contract) => ({
++    ...contract,
++    label: entities.get(contract.entityRef)?.label || '',
++  }));
++}
++
++async function enrichTestsFromSources(facts, repoRoot, readFile) {
++  const testPaths = [...new Set([
++    ...(facts.testCases || []).map((testCase) => testCase.path),
++    ...(facts.entities || [])
++      .filter((entity) => /(?:^|\/)(?:test|tests|__tests__|e2e)(?:\/|$)|\.(?:test|spec)\.[^.]+$/i.test(entity.path))
++      .map((entity) => entity.path),
++  ])].sort();
++  const scanned = [];
++  const contracts = contractsWithLabels(facts);
++  for (const path of testPaths.slice(0, 1000)) {
++    try {
++      const source = await readFile(resolve(repoRoot, normalizeRepoPath(path)), 'utf8');
++      scanned.push(...extractTestCasesFromSource(path, source, contracts, facts.entities || []));
++    } catch { /* graph-only test case remains available */ }
++  }
++  return mergeTestCases(facts.testCases || [], scanned);
++}
++
++function applyBoundaries(facts) {
++  const boundaries = facts.boundaries || [];
++  const fallback = boundaries.find((item) => item.kind === 'repository')?.id || 'boundary:repository';
++  const entities = facts.entities.map((entity) => ({ ...entity, boundaryId: entity.boundaryId || fallback }));
++  const byId = new Map(entities.map((entity) => [entity.observedId, entity]));
++  const dependencies = facts.dependencies.map((edge) => {
++    const from = byId.get(edge.from);
++    const to = byId.get(edge.to);
++    return {
++      ...edge,
++      crossBoundary: Boolean(from && to && from.boundaryId !== to.boundaryId),
++      crossCommunity: edge.crossCommunity || Boolean(
++        from?.community != null && to?.community != null && from.community !== to.community
++      ),
++    };
++  });
++  return { ...facts, entities, dependencies };
++}
++
++function artifactReceipt({
++  provider, toolVersion, capability, headSha, configHash, scopeHash,
++  uri, contents, observation, trustTier, evidenceCeiling, limitations, generatedAt,
++}) {
++  return createEvidenceReceipt({
++    provider,
++    toolVersion,
++    capability,
++    headSha,
++    configHash,
++    scopeHash,
++    artifact: { uri, sha256: sha256(contents) },
++    observation,
++    trustTier,
++    evidenceCeiling,
++    limitations,
++    observedAt: generatedAt,
++  });
++}
++
++export async function analyzeStructure(options = {}, deps = {}) {
++  const readFile = deps.readFile || readFileDefault;
++  const exec = deps.execFileP || execFileP;
++  const repoRoot = resolve(options.repoRoot || process.cwd());
++  const generatedAt = options.generatedAt || new Date().toISOString();
++  const headSha = String(options.headSha
++    || await gitValue(exec, repoRoot, ['rev-parse', 'HEAD'], '0000000'));
++  const branchRef = String(options.branchRef
++    || await gitValue(exec, repoRoot, ['symbolic-ref', '--short', 'HEAD'], 'unknown'));
++  const scope = options.scope ? normalizeRepoPath(options.scope) : '';
++  const configInput = {
++    scope,
++    includeAmbiguous: options.includeAmbiguous === true,
++    layout: options.layout || {},
++    maxEntities: options.maxEntities || 5000,
++    maxEdges: options.maxEdges || 15000,
++  };
++  const configHash = sha256(configInput);
++  const scopeHash = sha256(scope || '.');
++  const trustTier = options.trustTier || 'trusted_local';
++  const warnings = [];
++  const receipts = [];
++
++  const graphText = options.graphText ?? await optionalText(options.graphPath, readFile);
++  let graph = { nodes: [], links: [] };
++  if (graphText) {
++    try {
++      graph = JSON.parse(graphText);
++    } catch (error) {
++      throw new Error(`invalid structure graph JSON (${options.graphPath || 'memory:graph.json'}): ${error.message}`);
++    }
++  }
++  const graphReport = options.graphReportText ?? await optionalText(options.graphReportPath, readFile);
++  const analysis = options.graphAnalysis
++    || await optionalJson(options.graphAnalysisPath
++      || (options.graphPath ? join(dirname(options.graphPath), '.graphify_analysis.json') : ''), readFile);
++  const currentGraphStatus = graphText ? graphStatus(graphReport, headSha) : 'missing';
++  let extracted = extractGraphifyFacts(graph, {
++    analysis,
++    layout: options.layout || {},
++    scope,
++    includeAmbiguous: options.includeAmbiguous,
++    maxEntities: configInput.maxEntities,
++    maxEdges: configInput.maxEdges,
++  });
++  warnings.push(...extracted.warnings);
++  if (graphText) {
++    receipts.push(artifactReceipt({
++      provider: 'graphify',
++      toolVersion: options.graphifyVersion || 'unknown',
++      capability: 'topology',
++      headSha,
++      configHash,
++      scopeHash,
++      uri: options.graphPath || 'memory:graph.json',
++      contents: graphText,
++      observation: { type: 'graph_inventory', value: { nodes: graph.nodes?.length || 0, edges: (graph.links || graph.edges || []).length } },
++      trustTier,
++      evidenceCeiling: 'static_inventory',
++      limitations: ['symbol kinds and source ranges may be heuristic'],
++      generatedAt,
++    }));
++  } else warnings.push('graph unavailable');
++
++  const scipPath = options.scipPath;
++  if (scipPath || options.scipIndex) {
++    try {
++      const index = options.scipIndex || await readScipIndex(scipPath);
++      const scip = extractScipFacts(index, {
++        scope,
++        maxEntities: configInput.maxEntities,
++        maxEdges: configInput.maxEdges,
++      });
++      extracted = mergeScipWithGraphify(scip, extracted);
++      // in-memory index без исходных байтов: receipt аттестует ре-сериализацию JSON;
++      // caller с сериализованным индексом может передать точные байты через scipBuffer
++      const scipContents = options.scipBuffer || (scipPath ? await readFile(scipPath) : Buffer.from(JSON.stringify(index)));
++      receipts.push(artifactReceipt({
++        provider: 'scip-typescript',
++        toolVersion: options.scipVersion || '0.4.0',
++        capability: 'semantic_symbols',
++        headSha,
++        configHash,
++        scopeHash,
++        uri: scipPath || 'memory:index.scip',
++        contents: scipContents,
++        observation: { type: 'symbol_inventory', value: { entities: scip.entities.length, references: scip.dependencies.length } },
++        trustTier,
++        evidenceCeiling: 'static_inventory',
++        limitations: ['SCIP relationships are references, not runtime calls'],
++        generatedAt,
++      }));
++    } catch {
++      // error.message может содержать внутренние пути — в diagnostics уходит только категория
++      warnings.push('SCIP unavailable: index could not be decoded');
++    }
++  }
++
++  extracted = applyBoundaries(extracted);
++  extracted.testCases = await enrichTestsFromSources(extracted, repoRoot, readFile);
++  const previous = options.previousFacts?.facts?.entities || [];
++  const identity = reconcileIdentity(extracted.entities, previous);
++  extracted.entities = identity.entities;
++  const facts = {
++    boundaries: extracted.boundaries,
++    entities: extracted.entities,
++    contracts: extracted.contracts,
++    dependencies: extracted.dependencies,
++    testCases: extracted.testCases,
++  };
++  const providerVersion = [
++    `graphify:${options.graphifyVersion || 'unknown'}`,
++    scipPath || options.scipIndex ? `scip:${options.scipVersion || '0.4.0'}` : 'scip:none',
++  ].join('|');
++  const fingerprint = factsFingerprint({ headSha, providerVersion, configHash, scope });
++  const factsPayload = {
++    schemaRef: STRUCTURE_FACTS_SCHEMA,
++    version: STRUCTURE_FACTS_VERSION,
++    kind: 'structure_facts',
++    generatedAt,
++    fingerprint,
++    provenance: {
++      headSha,
++      branchRef,
++      prNumber: options.prNumber || null,
++      isDefaultBranch: options.isDefaultBranch === true,
++      toolVersion: STRUCTURE_TOOL_VERSION,
++      configHash,
++      scope,
++      graphStatus: currentGraphStatus,
++      providerCapabilities: extracted.capabilities,
++      warnings: [...new Set(warnings)].sort(),
++      truncated: extracted.truncated === true,
++    },
++    facts,
++    identityEvents: identity.events,
++    views: buildStructureViews(facts),
++    receipts,
++  };
++  validateStructureFacts(factsPayload);
++
++  const obligationsExport = options.obligationsExport
++    || await optionalJson(options.obligationsPath, readFile)
++    || {
++      schemaRef: OBLIGATIONS_EXPORT_SCHEMA,
++      version: 1,
++      kind: 'obligations_export',
++      project: options.project || 'unknown',
++      revision: 'none',
++      headSha: null,
++      exportedAt: generatedAt,
++      obligations: [],
++    };
++  validateObligationsExport(obligationsExport);
++
++  const lcovText = options.lcovText ?? await optionalText(options.lcovPath, readFile);
++  const lcov = lcovText ? parseLcov(lcovText, { repoRoot }) : null;
++  const entityByPath = new Map();
++  for (const entity of facts.entities) {
++    if (!entityByPath.has(entity.path)) entityByPath.set(entity.path, []);
++    entityByPath.get(entity.path).push(entity);
++  }
++  const coverageObservations = lcov ? lcovObservations(lcov, entityByPath) : [];
++  const assessmentReceipts = [];
++  if (lcovText) {
++    assessmentReceipts.push(artifactReceipt({
++      provider: 'lcov',
++      toolVersion: options.lcovVersion || '1',
++      capability: 'aggregate_coverage',
++      headSha: options.testHeadSha || headSha,
++      configHash,
++      scopeHash,
++      uri: options.lcovPath || 'memory:lcov.info',
++      contents: lcovText,
++      observation: { type: 'coverage_inventory', value: lcov.totals },
++      trustTier,
++      evidenceCeiling: 'aggregate_lcov',
++      limitations: ['aggregate LCOV cannot prove which test executed a function'],
++      generatedAt,
++    }));
++  }
++
++  const propertyDrafts = generatePropertyDrafts(obligationsExport.obligations);
++  const propertyReport = options.propertyReport || await optionalJson(options.propertyReportPath, readFile);
++  const propertyResults = propertyReport ? parsePropertyReport(propertyReport, propertyDrafts) : [];
++  const preliminaryRisk = assessDependencyRisk(facts, coverageObservations, options.thresholds);
++  const mutationReportText = options.mutationReport
++    ? null
++    : await optionalText(options.mutationReportPath, readFile);
++  let mutationReport = options.mutationReport || null;
++  if (!mutationReport && mutationReportText) {
++    try {
++      mutationReport = JSON.parse(mutationReportText);
++    } catch {
++      // невалидный JSON — не роняем прогон, evidence по мутациям просто отсутствует
++      warnings.push(`mutation report ignored: invalid JSON (${options.mutationReportPath})`);
++    }
++  }
++  const mutation = mutationReport
++    ? parseMutationReport(mutationReport, facts, {
++        scopeContractRefs: criticalContractRefs(facts, preliminaryRisk, obligationsExport.obligations),
++      })
++    : { observations: [], warnings: [], summary: { total: 0, killed: 0, survived: 0, noCoverage: 0, timeout: 0 } };
++  if (mutationReport) {
++    assessmentReceipts.push(artifactReceipt({
++      provider: 'mutation-testing-elements',
++      toolVersion: String(mutationReport.schemaVersion || options.mutationVersion || 'unknown'),
++      capability: 'mutation_testing',
++      headSha: options.testHeadSha || headSha,
++      configHash,
++      scopeHash,
++      uri: options.mutationReportPath || 'memory:mutation.json',
++      // для файла — сырые байты с диска, in-memory отчёт аттестует ре-сериализацию
++      contents: mutationReportText ?? JSON.stringify(mutationReport),
++      observation: { type: 'mutation_inventory', value: mutation.summary },
++      trustTier,
++      evidenceCeiling: 'mutation_bound',
++      limitations: ['equivalent mutants may survive without indicating a test defect'],
++      generatedAt,
++    }));
++  }
++
++  const assessmentPayload = buildStructureAssessment({
++    factsPayload,
++    obligationsExport,
++    lcov,
++    coverageObservations,
++    propertyResults,
++    mutation,
++    receipts: assessmentReceipts,
++    testRun: {
++      id: options.testRunId,
++      headSha: options.testHeadSha || headSha,
++      producedAt: options.testProducedAt || generatedAt,
++    },
++    thresholds: options.thresholds || {},
++    generatedAt,
++  });
++  validateStructureAssessment(assessmentPayload);
++  const linkSuggestions = suggestObligationLinks(obligationsExport.obligations, facts);
++  const drift = computeStructureDrift({
++    facts: factsPayload,
++    assessment: assessmentPayload,
++    obligationsExport,
++    confirmedClaims: options.confirmedClaims || [],
++    linkSuggestions,
++  });
++  drift.findings = applyStructureWaivers(drift.findings, options.waivers || []);
++  return {
++    facts: factsPayload,
++    assessment: assessmentPayload,
++    propertyDrafts,
++    drift,
++    triage: triageStructureFindings(drift.findings),
++    diagnostics: {
++      warnings: [...new Set([...warnings, ...(lcov?.warnings || []), ...mutation.warnings])].sort(),
++      scipUsed: Boolean(scipPath || options.scipIndex) && receipts.some((item) => item.provider === 'scip-typescript'),
++      evidenceCeiling: lcov ? 'aggregate_lcov' : 'static_inventory',
++    },
++  };
++}

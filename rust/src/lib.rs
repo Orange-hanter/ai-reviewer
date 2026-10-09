@@ -35,7 +35,7 @@ pub mod structure_tests;
 pub mod triage;
 pub mod verifier;
 
-// RFC 04: модули единого бинаря.
+// RFC 16: модули единого бинаря.
 // Список пре-сеян в задаче T03 и заморожен: каждая последующая задача наполняет
 // свои файлы, но не правит этот блок (см. proposals/04-standalone-rust-binary.md).
 pub mod astgrep;

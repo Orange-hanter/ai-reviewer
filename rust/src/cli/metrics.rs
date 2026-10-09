@@ -1,5 +1,5 @@
 //! Подкоманда `pr-review metrics` — порт bin/pr-review-metrics.mjs.
-//! Заполняется в задаче T29 (RFC 04).
+//! Заполняется в задаче T29 (RFC 16).
 
 use std::path::PathBuf;
 
@@ -12,5 +12,5 @@ pub struct Args {
 }
 
 pub fn run(_args: Args) -> anyhow::Result<i32> {
-    anyhow::bail!("подкоманда ещё не реализована (см. RFC 04)")
+    anyhow::bail!("подкоманда ещё не реализована (см. RFC 16)")
 }

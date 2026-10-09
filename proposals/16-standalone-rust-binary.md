@@ -1,4 +1,4 @@
-# 04 — Standalone Rust-бинарь: завершение порта и cutover
+# 16 — Standalone Rust-бинарь: завершение порта и cutover
 
 > Категория: 🔵 Архитектура · Риск: высокий · Зависимости: нет (гейт и structure переезжают вместе)
 
@@ -384,7 +384,7 @@ T08 замораживает сигнатуры трейтов до того, к
 
 | # | Суть | DoD |
 |---|---|---|
-| T01 | RFC 04 + строка в `proposals/README.md` | чек-лист «Готов к декомпозиции» закрыт |
+| T01 | RFC 16 + строка в `proposals/README.md` | чек-лист «Готов к декомпозиции» закрыт |
 | T02 | перенос незакоммиченных `export`/`metrics`/`triage` из основного чекаута | `cargo build && cargo test`; `node rust/parity/{export,metrics}.parity.mjs`; `npm test` |
 | T03 | `[[bin]] pr-review`, deps (`fancy-regex`, `include_dir`, `tempfile`, `assert_cmd`, `reqwest`+rustls), 9 заглушек `src/cli/*.rs`, пре-сев `pub mod` | `cargo build`; `pr-review --help` показывает 9 подкоманд; `cargo test` |
 

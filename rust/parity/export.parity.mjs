@@ -350,4 +350,4 @@ if (failures.length) {
   }
   process.exit(1);
 }
-console.log(`PARITY OK: export — ${compared} сравнений, расхождений нет`);
+console.log(`OK: export parity — ${compared} сравнений, расхождений нет`);

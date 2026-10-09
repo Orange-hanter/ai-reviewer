@@ -1,4 +1,4 @@
-//! Подкоманды единого бинаря `pr-review` (RFC 04, решение 1).
+//! Подкоманды единого бинаря `pr-review` (RFC 16, решение 1).
 //!
 //! Каждый модуль объявляет `pub struct Args` (`#[derive(clap::Args)]`) и
 //! `pub fn run(args: Args) -> anyhow::Result<i32>`; `src/main.rs` только

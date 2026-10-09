@@ -18,7 +18,7 @@
  *   3. fingerprint/attachFingerprints/filterStalePriorFindings на text-картах
  *      из parseDiff (тот же дифф, что в тестах) + ручные карты с коллизиями;
  *   4. сравнение log-сообщений для дедупа, carry-over и FP-фильтра;
- *   5. FP-фильтр (RFC 04, T07): matchesKnownFalsePositive/filterFalsePositiveFindings
+ *   5. FP-фильтр (RFC 16, T07): matchesKnownFalsePositive/filterFalsePositiveFindings
  *      на всех находках fixtures/ с changedPaths из diff.patch кейса + литеральные
  *      кейсы паттернов + свой набор (opts.patterns) и пустой набор.
  *

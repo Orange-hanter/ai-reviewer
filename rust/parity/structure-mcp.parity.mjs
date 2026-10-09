@@ -5,7 +5,7 @@
  * Запуск: node rust/parity/structure-mcp.parity.mjs   (требует cargo build)
  *
  * Архитектура порта — (b): серверный stdio-цикл с Content-Length-фреймингом
- * остаётся в JS (bin/pr-review-structure-mcp.mjs, транспорт без изменений), в
+ * остаётся в JS (bin/pr-review-structure-mcp.mjs через lib/mcp-stdio.mjs), в
  * Rust уходит доменная логика ответа на запрос (опы бинаря structure_mcp:
  * handleRequest для «чистых» методов и buildStructureContext для tools/call).
  * Поэтому сравнение идёт КАНАЛЬНОЕ: обе стороны прогоняются через один и тот же

@@ -14,7 +14,7 @@
 //!   его исходник приходит аргументом (как MARKERS в findings), компилируется
 //!   с `(?i)` (профиль собирает `new RegExp(raw, 'i')`). Поле профиля пишет
 //!   потребитель в диалекте JS RegExp, поэтому оно компилируется `fancy-regex`
-//!   (RFC 04, решение 4): lookahead и прочий backtracking-синтаксис поддержаны,
+//!   (RFC 16, решение 4): lookahead и прочий backtracking-синтаксис поддержаны,
 //!   «мягкой» деградации на JS больше нет. Базовый регекс движка остаётся на
 //!   крейте `regex` — он наш, линейный и в backtracking не нуждается.
 //!   Отличия семантики fancy-regex от JS RegExp разобраны в `crate::fp_patterns`.
@@ -202,12 +202,19 @@ pub fn score_actionability(finding: &Value, ctx: &ScoreCtx) -> (i32, Vec<SignalH
             .all(|c| c.get("status").and_then(Value::as_str) == Some("verified"))
     {
         add("jury");
-    } else if claims.iter().any(|c| {
-        matches!(
-            c.get("status").and_then(Value::as_str),
-            Some("rejected") | Some("downgraded")
-        )
-    }) {
+    } else if finding.get("refutationStatus").and_then(Value::as_str) != Some("downgraded")
+        && claims.iter().any(|c| {
+            matches!(
+                c.get("status").and_then(Value::as_str),
+                Some("rejected") | Some("downgraded")
+            )
+        })
+    {
+        // RFC 06: один вердикт жюри — один штраф. Если refutation уже понизила severity
+        // (`refutationStatus === 'downgraded'`), второй раз за тот же факт не вычитаем: иначе одна
+        // понижённая претензия из пяти держит потолок в 1 балл при пороге маршрута 4. Сигнал
+        // остаётся для случая, когда severity не менялась: часть claims отклонена, но есть
+        // verified — decideRefutation дал `keep`.
         add("juryDowngraded");
     }
     if js_truthy(finding.get("consensus").unwrap_or(&Value::Null)) {
@@ -667,6 +674,41 @@ mod tests {
     }
 
     #[test]
+    fn refutation_downgraded_suppresses_jury_penalty() {
+        // RFC 06: refutation уже понизила severity — второй штраф за тот же вердикт не берём.
+        let base = json!({
+            "file": "a.ts", "line": 1, "severity": "minor", "model": "m", "confidence": 0.9,
+            "advisorClaims": [
+                {"status": "downgraded"}, {"status": "verified"}, {"status": "verified"},
+                {"status": "verified"}, {"status": "verified"},
+            ],
+        });
+        let mut suppressed = base.clone();
+        suppressed["refutationStatus"] = json!("downgraded");
+        let (score, reasons) = score_actionability(&suppressed, &ctx());
+        let keys: Vec<&str> = reasons.iter().map(|r| r.key).collect();
+        assert_eq!(keys, vec!["confidence"]);
+        assert_eq!(score, 1);
+
+        // severity не менялась (`kept`) — штраф на месте.
+        let mut kept = base.clone();
+        kept["refutationStatus"] = json!("kept");
+        let (kept_score, kept_reasons) = score_actionability(&kept, &ctx());
+        let kept_keys: Vec<&str> = kept_reasons.iter().map(|r| r.key).collect();
+        assert_eq!(kept_keys, vec!["juryDowngraded", "confidence"]);
+        assert_eq!(kept_score, -1);
+
+        // verifier-штраф RFC 06 не трогает.
+        let mut verifier = base.clone();
+        verifier["refutationStatus"] = json!("downgraded");
+        verifier["verifierStatus"] = json!("downgraded");
+        let (v_score, v_reasons) = score_actionability(&verifier, &ctx());
+        let v_keys: Vec<&str> = v_reasons.iter().map(|r| r.key).collect();
+        assert_eq!(v_keys, vec!["juryDowngraded", "confidence"]);
+        assert_eq!(v_score, -1);
+    }
+
+    #[test]
     fn sensitive_path_base_and_profile_extra() {
         let base = json!({"file": "app/server/auth/login.ts", "line": 1, "severity": "major", "model": "m"});
         let (score, _) = score_actionability(&base, &ctx());
@@ -684,7 +726,7 @@ mod tests {
 
     #[test]
     fn sensitive_source_supports_lookahead() {
-        // RFC 04, решение 4: layout.sensitive — данные потребителя, компилируется
+        // RFC 16, решение 4: layout.sensitive — данные потребителя, компилируется
         // fancy-regex, поэтому JS-синтаксис с lookahead больше не роняет бинарь
         // (раньше это включало «мягкую» деградацию обёртки на чистый JS).
         let ctx = ScoreCtxArg {
