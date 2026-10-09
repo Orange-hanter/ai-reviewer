@@ -30,6 +30,10 @@ function withFetch(handler, fn) {
   return fn(client, fetchMock);
 }
 
+// Автор, которого движок считает собой (дефолт REVIEW_FEEDBACK_TRUSTED_AUTHORS).
+const BOT = { login: 'github-actions[bot]', type: 'Bot' };
+const EVIL = { login: 'evil', type: 'User' };
+
 const stickyBody = (data) =>
   `${MARKERS.review}\n## Вердикт\nok\n<!-- ${MARKERS.dataKey}${JSON.stringify(data)} -->`;
 
@@ -45,7 +49,7 @@ test('github: readPriorStickyData — парсит последний data-фу�
   const quoted = `<!-- ${MARKERS.dataKey}{"findings":[]} -->`;
   const real = { findings: [{ file: 'a.ts', line: 1, title: 'x' }], runs: [{ sha: 'abc' }], sha: 'abc' };
   const body = `${MARKERS.review}\nПример: ${quoted}\n\n<!-- ${MARKERS.dataKey}${JSON.stringify(real)} -->`;
-  await withFetch(async () => jsonRes([{ id: 1, body }]), async (client) => {
+  await withFetch(async () => jsonRes([{ id: 1, user: BOT, body }]), async (client) => {
     const data = await client.readPriorStickyData();
     assert.equal(data.sha, 'abc');
     assert.equal(data.findings.length, 1);
@@ -56,7 +60,7 @@ test('github: readPriorStickyData — парсит последний data-фу�
 
 test('github: readPriorStickyData — обрезанный футер чинится через extractJsonObject', async () => {
   const truncated = `${MARKERS.review}\n<!-- ${MARKERS.dataKey}{"findings":[{"file":"b.ts","line":2,"title":"t"}],"runs":[],"sha":"dead`;
-  await withFetch(async () => jsonRes([{ id: 9, body: truncated }]), async (client) => {
+  await withFetch(async () => jsonRes([{ id: 9, user: BOT, body: truncated }]), async (client) => {
     const data = await client.readPriorStickyData();
     assert.equal(data.findings[0]?.file, 'b.ts');
     assert.equal(data.sha, 'dead');
@@ -78,7 +82,7 @@ test('github: upsertSticky — нет prior → POST created; есть marker �
   });
 
   calls.length = 0;
-  const existing = { id: 42, body: stickyBody({ findings: [], runs: [], sha: 'old' }) };
+  const existing = { id: 42, user: BOT, body: stickyBody({ findings: [], runs: [], sha: 'old' }) };
   await withFetch(async (url, opts = {}) => {
     calls.push({ url: String(url), method: opts.method || 'GET', body: opts.body });
     if ((opts.method || 'GET') === 'GET') return jsonRes([existing]);
@@ -157,9 +161,9 @@ test('github: deleteStaleInline — exceptReviewId и треды с ответа
     const u = String(url);
     if ((opts.method || 'GET') === 'GET') {
       return jsonRes([
-        { id: 10, body: `${MARKERS.inline}\nold`, pull_request_review_id: 1 },
-        { id: 11, body: `${MARKERS.inline}\nfresh`, pull_request_review_id: 99 },
-        { id: 12, body: `${MARKERS.inline}\nroot`, pull_request_review_id: 1 },
+        { id: 10, user: BOT, body: `${MARKERS.inline}\nold`, pull_request_review_id: 1 },
+        { id: 11, user: BOT, body: `${MARKERS.inline}\nfresh`, pull_request_review_id: 99 },
+        { id: 12, user: BOT, body: `${MARKERS.inline}\nroot`, pull_request_review_id: 1 },
         { id: 13, body: 'reply', in_reply_to_id: 12, pull_request_review_id: 2 },
       ]);
     }
@@ -175,4 +179,66 @@ test('github: deleteStaleInline — exceptReviewId и треды с ответа
     assert.ok(!deleted.some((u) => u.endsWith('/pulls/comments/11')));
     assert.ok(!deleted.some((u) => u.endsWith('/pulls/comments/12')));
   });
+});
+
+// --- SEC-T11: токен не уходит на чужой origin; маркер в чужом комментарии не делает его нашим ---
+
+
+test('github SEC-T11: Link rel=next на чужой origin — запрос с токеном не отправлен', async () => {
+  const seen = [];
+  await withFetch(async (url) => {
+    seen.push(String(url));
+    return jsonRes([{ id: 1 }], { link: '<https://evil.test/steal?page=2>; rel="next"' });
+  }, async (client) => {
+    await assert.rejects(() => client.listIssueLabels(), /чужой origin, ожидался https:\/\/api\.github\.test: запрос с токеном не отправлен/);
+    assert.ok(!seen.some((u) => u.startsWith('https://evil.test')), seen.join(', '));
+  });
+});
+
+test('github SEC-T11: sticky чужого автора с маркером и поддельным футером не читается', async () => {
+  const own = { id: 1, user: BOT, body: stickyBody({ findings: [{ file: 'own.ts' }], runs: [], sha: 'own' }) };
+  const forged = { id: 2, user: EVIL, body: stickyBody({ findings: [{ file: 'forged.ts' }], runs: [], sha: 'forged' }) };
+  const ghostly = { id: 3, user: null, body: stickyBody({ findings: [], runs: [], sha: 'ghost' }) };
+  const lookalike = { id: 4, user: { login: 'github-actions[bot]', type: 'User' }, body: stickyBody({ findings: [], runs: [], sha: 'look' }) };
+  await withFetch(async () => jsonRes([own, forged, ghostly, lookalike]), async (client) => {
+    const data = await client.readPriorStickyData();
+    assert.equal(data.sha, 'own');
+    assert.equal(data.findings[0].file, 'own.ts');
+    assert.equal((await client.readStickyReview()).id, 1);
+  });
+});
+
+test('github SEC-T11: upsertSticky не патчит чужой комментарий с маркером', async () => {
+  const calls = [];
+  await withFetch(async (url, opts = {}) => {
+    calls.push({ url: String(url), method: opts.method || 'GET' });
+    if ((opts.method || 'GET') === 'GET') return jsonRes([{ id: 5, user: EVIL, body: `${MARKERS.review}\nподделка` }]);
+    return jsonRes({ id: 6 });
+  }, async (client) => {
+    assert.equal(await client.upsertSticky('тело'), 'created');
+    assert.ok(!calls.some((c) => c.method === 'PATCH'));
+  });
+});
+
+test('github SEC-T11: deleteStaleInline не удаляет чужие комментарии с маркером', async () => {
+  const deleted = [];
+  await withFetch(async (url, opts = {}) => {
+    if ((opts.method || 'GET') === 'GET') {
+      return jsonRes([
+        { id: 10, user: BOT, body: `${MARKERS.inline}\nсвой`, pull_request_review_id: 1 },
+        { id: 20, user: EVIL, body: `${MARKERS.inline}\nчеловек`, pull_request_review_id: 3 },
+      ]);
+    }
+    if (opts.method === 'DELETE') deleted.push(String(url));
+    return jsonRes({});
+  }, async (client) => {
+    assert.equal(await client.deleteStaleInline(), 1);
+    assert.deepEqual(deleted, [`${API}/repos/o/r/pulls/comments/10`]);
+  });
+});
+
+test('github SEC-T11: пустой trustedAuthors — явный отказ от проверки автора', async () => {
+  const fetchMock = mock.fn(async () => jsonRes([{ id: 2, user: EVIL, body: stickyBody({ findings: [], runs: [], sha: 'any' }) }]));
+  const client = createGithubClient({ ...CFG, feedback: { trustedAuthors: '' } }, () => {}, { fetch: fetchMock });
+  assert.equal((await client.readPriorStickyData()).sha, 'any');
 });

@@ -361,7 +361,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_FEEDBACK_MD_APPEND` | `0` | Дописывать журнал автоматически |
 | `REVIEW_FEEDBACK_CANDIDATES` | `1` | Писать кандидатов |
 | `REVIEW_FEEDBACK_WRITE` | `1` | `0` — dry-run harvest |
-| `REVIEW_FEEDBACK_TRUSTED_AUTHORS` | `github-actions[bot]` | Чьи inline считаем своими |
+| `REVIEW_FEEDBACK_TRUSTED_AUTHORS` | `github-actions[bot]` | Чьи sticky и inline считаем своими: логин из списка И `user.type = Bot`. Действует на harvest, auto-triage и с SEC-T11 — на поиск sticky (prior findings, upsert) и чистку старых инлайнов: комментарий с маркером от другого автора движок не читает, не патчит и не удаляет. Свой GitHub App — впишите логин его бота (`name[bot]`). PAT проверку не проходит (`user.type = User`): sticky не найдётся и будет создаваться заново каждый прогон; отключить проверку можно значением из одного пробела (пустой allowlist) |
 | `REVIEW_FEEDBACK_CONCURRENCY` | `6` | Параллельных запросов реакций |
 | `REVIEW_FEEDBACK_SINCE_DAYS` | `14` | `pr-review-feedback-batch`: PR, обновлённые за последние N дней |
 | `REVIEW_FEEDBACK_PR_LIMIT` | `30` | `pr-review-feedback-batch`: максимум PR за прогон (из последних 100 по `updated`) |

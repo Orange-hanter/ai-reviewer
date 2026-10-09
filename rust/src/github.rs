@@ -37,6 +37,7 @@ use crate::constants::{extract_sticky_footer_raw, has_marker};
 use crate::json_repair::extract_json_object;
 use crate::llm::{backoff_ms, is_transient, LogSink};
 use crate::profile::Markers;
+use crate::triage::{is_trusted_review_author, parse_trusted_authors};
 use crate::traits::{
     DeleteStaleOpts, GhCallOpts, GithubApi, LoadedDiff, PostReviewParams, PostReviewResult,
     PullRequestRef, StickyData, ThreadComment, ThreadRef,
@@ -49,7 +50,7 @@ pub const REQUEST_TIMEOUT_MS: u64 = 30_000;
 /// `guard < 50` в ghList: максимум страниц за один list.
 pub const MAX_LIST_PAGES: usize = 50;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct GhRequest {
     pub api: String,
     pub token: String,
@@ -64,14 +65,49 @@ pub struct GhRequest {
     pub accept: Option<String>,
 }
 
+/// Токен в `Debug` не печатается: запрос попадает в `{:?}` ошибок и логов.
+impl std::fmt::Debug for GhRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GhRequest")
+            .field("api", &self.api)
+            .field("token", &"***")
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
+}
+
+/// `new URL(x).origin` из JS; `None` — не URL или непрозрачный origin (`"null"`).
+fn url_origin(x: &str) -> Option<String> {
+    let origin = reqwest::Url::parse(x).ok()?.origin();
+    origin.is_tuple().then(|| origin.ascii_serialization())
+}
+
 impl GhRequest {
-    /// ghRaw: абсолютный URL проходит как есть, относительный клеится к api.
-    pub fn url(&self) -> String {
-        if self.path.starts_with("http") {
-            self.path.clone()
-        } else {
-            format!("{}{}", self.api, self.path)
+    /// ghRaw: относительный путь клеится к api; абсолютный URL (Link `rel="next"`)
+    /// проходит, только если его origin совпадает с origin api.
+    ///
+    /// SEC-T11: запрос несёт `Authorization: Bearer`, и абсолютный URL из Link
+    /// уводил бы токен туда, куда укажет ответ. Перенаправления (3xx) отдельной
+    /// проверки не требуют: reqwest снимает Authorization при смене origin.
+    pub fn url(&self) -> Result<String, GhError> {
+        if !self.path.starts_with("http") {
+            return Ok(format!("{}{}", self.api, self.path));
         }
+        let api_origin = url_origin(&self.api);
+        if api_origin.is_some() && url_origin(&self.path) == api_origin {
+            return Ok(self.path.clone());
+        }
+        Err(gh_error(
+            format!(
+                "GitHub {} {} → чужой origin, ожидался {}: запрос с токеном не отправлен",
+                self.method,
+                self.path,
+                api_origin.as_deref().unwrap_or(&self.api)
+            ),
+            None,
+            false,
+        ))
     }
 
     pub fn accept(&self) -> &str {
@@ -147,7 +183,7 @@ pub fn gh_raw_with(
         .method
         .parse::<reqwest::Method>()
         .map_err(|e| gh_error(format!("метод '{}': {e}", req.method), None, false))?;
-    let url = req.url();
+    let url = req.url()?;
     let accept = req.accept().to_string();
     let body = req
         .body
@@ -344,6 +380,10 @@ pub struct GithubConfig {
     /// `cfg.httpRetries` (`REVIEW_HTTP_RETRIES`, дефолт 3). `0` — валидное значение
     /// «без ретраев», поэтому дефолт подставляется только при отсутствии поля.
     pub http_retries: u32,
+    /// `cfg.feedback.trustedAuthors` (`REVIEW_FEEDBACK_TRUSTED_AUTHORS`): чьи
+    /// комментарии с маркером движок считает своими. Пустой список — доверять всем
+    /// (тот же явный отказ, что у harvest и auto-triage).
+    pub trusted_authors: Vec<String>,
 }
 
 impl Default for GithubConfig {
@@ -358,6 +398,7 @@ impl Default for GithubConfig {
             pr_number: 0,
             tool_name: "ai-review".to_string(),
             http_retries: 3,
+            trusted_authors: parse_trusted_authors(None),
         }
     }
 }
@@ -393,6 +434,7 @@ impl GithubConfig {
                 .and_then(Value::as_u64)
                 .map(|n| n as u32)
                 .unwrap_or(d.http_retries),
+            trusted_authors: parse_trusted_authors(cfg.pointer("/feedback/trustedAuthors")),
         }
     }
 }
@@ -402,9 +444,10 @@ impl GithubConfig {
 ///
 /// Что здесь важно и легко потерять при перечитывании:
 ///
-/// - **sticky ищется с конца** (`[...comments].reverse().find`), а маркер сверяется
-///   по НАЧАЛУ тела ([`has_marker`]): процитированный маркер в чужом комментарии не
-///   должен делать его нашим;
+/// - **sticky ищется с конца** (`[...comments].reverse().find`), маркер сверяется
+///   по НАЧАЛУ тела ([`has_marker`]), а автор — по `trusted_authors` (SEC-T11):
+///   ни процитированный, ни вписанный в начало чужого комментария маркер не делает
+///   его нашим;
 /// - **post-then-delete**: `post_review` идёт раньше `delete_stale_inline`, и id
 ///   свежего review приходит сюда через `except_review_id` — при сбое постинга старые
 ///   инлайны остаются на месте;
@@ -506,12 +549,28 @@ impl RealGithubClient {
         }
     }
 
-    /// `[...comments].reverse().find((c) => hasMarker(c.body, MARKERS.review))`.
+/// Комментарий наш: тело начинается с маркера И автор доверенный
+    /// (`isOwnComment` в lib/github.mjs).
+    ///
+    /// SEC-T11: маркер — публичная строка, и любой участник PR может начать с неё
+    /// свой комментарий. Без проверки автора поддельный футер уезжал в prior
+    /// findings (промпт, Δ-блок, отчёт), upsert патчил чужой комментарий, а чистка
+    /// инлайнов удаляла комментарии людей.
+    fn is_own(&self, c: &Value, marker: &str) -> bool {
+        if !has_marker(c.get("body").and_then(Value::as_str).unwrap_or(""), marker) {
+            return false;
+        }
+        let user = c.get("user").filter(|u| u.is_object());
+        // `c.user?.login` с JS-falsy: null/пустая строка — автора нет.
+        let login = user
+            .and_then(|u| u.get("login"))
+            .filter(|l| l.as_str().is_some_and(|s| !s.is_empty()));
+        is_trusted_review_author(login, &self.cfg.trusted_authors, user)
+    }
+
+    /// `[...comments].reverse().find((c) => isOwnComment(c, MARKERS.review))`.
     fn find_sticky<'a>(&self, comments: &'a [Value]) -> Option<&'a Value> {
-        comments
-            .iter()
-            .rev()
-            .find(|c| has_marker(c.get("body").and_then(Value::as_str).unwrap_or(""), &self.markers.review))
+        comments.iter().rev().find(|c| self.is_own(c, &self.markers.review))
     }
 
     /// Лента issue-комментариев PR — общий источник sticky для трёх методов.
@@ -680,8 +739,7 @@ impl GithubApi for RealGithubClient {
                 .filter_map(|c| c.get("in_reply_to_id").and_then(Value::as_u64))
                 .collect();
             for c in &comments {
-                let body = c.get("body").and_then(Value::as_str).unwrap_or("");
-                if !has_marker(body, &self.markers.inline) {
+                if !self.is_own(c, &self.markers.inline) {
                     continue;
                 }
                 // Только что запощенный review (post-then-delete: при сбое постинга
