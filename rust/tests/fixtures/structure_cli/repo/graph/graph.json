@@ -1,0 +1,104 @@
+{
+  "nodes": [
+    {
+      "id": "api",
+      "label": "validate()",
+      "file_type": "code",
+      "source_file": "src/auth.ts",
+      "source_location": "L10",
+      "_callable": true,
+      "community": 1
+    },
+    {
+      "id": "caller1",
+      "label": "login()",
+      "file_type": "code",
+      "source_file": "src/login.ts",
+      "source_location": "L4",
+      "_callable": true,
+      "community": 2
+    },
+    {
+      "id": "caller2",
+      "label": "refresh()",
+      "file_type": "code",
+      "source_file": "src/refresh.ts",
+      "source_location": "L5",
+      "_callable": true,
+      "community": 2
+    },
+    {
+      "id": "iface",
+      "label": "TokenValidator",
+      "file_type": "code",
+      "source_file": "src/contracts.ts",
+      "source_location": "L1",
+      "_callable_class": true,
+      "community": 1
+    },
+    {
+      "id": "impl",
+      "label": "JwtValidator",
+      "file_type": "code",
+      "source_file": "src/auth.ts",
+      "source_location": "L2",
+      "_callable_class": true,
+      "community": 1
+    },
+    {
+      "id": "test",
+      "label": "reject invalid token()",
+      "file_type": "code",
+      "source_file": "test/auth.test.ts",
+      "source_location": "L3",
+      "_callable": true,
+      "community": 3
+    },
+    {
+      "id": "util",
+      "label": "helper()",
+      "file_type": "code",
+      "source_file": "lib/ünï/helper.ts",
+      "source_location": "L7",
+      "_callable": true
+    }
+  ],
+  "links": [
+    {
+      "source": "caller1",
+      "target": "api",
+      "relation": "calls",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "source": "caller2",
+      "target": "api",
+      "relation": "calls",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "source": "test",
+      "target": "api",
+      "relation": "calls",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "source": "impl",
+      "target": "iface",
+      "relation": "implements",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "source": "api",
+      "target": "util",
+      "relation": "calls",
+      "confidence": "INFERRED"
+    },
+    {
+      "source": "util",
+      "target": "caller1",
+      "relation": "calls",
+      "confidence": "AMBIGUOUS"
+    }
+  ]
+}

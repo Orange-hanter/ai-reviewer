@@ -1,0 +1,13 @@
+TN:
+SF:src/auth.ts
+FN:10,validate
+FNDA:2,validate
+DA:10,2
+DA:11,0
+BRDA:11,0,0,0
+end_of_record
+SF:src/login.ts
+FN:4,login
+FNDA:1,login
+DA:4,1
+end_of_record

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1",
+  "files": {
+    "src/auth.ts": {
+      "mutants": [
+        {
+          "id": "m1",
+          "mutatorName": "ConditionalExpression",
+          "replacement": "true",
+          "status": "Survived",
+          "location": {
+            "start": {
+              "line": 10,
+              "column": 0
+            },
+            "end": {
+              "line": 10,
+              "column": 8
+            }
+          },
+          "killedByTests": []
+        }
+      ]
+    }
+  }
+}

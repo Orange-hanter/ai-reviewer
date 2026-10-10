@@ -461,7 +461,7 @@ T08 замораживает сигнатуры трейтов до того, к
 | ✅ T19 | `structure_drift.rs` | `cargo test structure_drift::` |
 | ✅ T20 | `structure_export.rs` | `cargo test structure_export::` |
 | ✅ T21 | `structure.rs` — glue `analyze_structure`, git exec; без импорта pipeline/engine/github/llm | `cargo test structure::` |
-| T22 | подкоманда `structure` ← `bin/pr-review-structure.mjs` | `assert_cmd`-тест: `facts.json` совпадает с JS на фикстуре |
+| ✅ T22 | подкоманда `structure` ← `bin/pr-review-structure.mjs` | `assert_cmd`-тест: `facts.json` совпадает с JS на фикстуре |
 | ✅ T40 | (сделано в рамках T23) `mcp_stdio.rs` ← `lib/mcp-stdio.mjs`: общий stdio-транспорт MCP (Content-Length-кадры, частичные чтения, batch, oversized 8 МБ, notifications) + handshake-модули `structure-mcp-handshake`/`structure-mcp-tools` (RFC 10: handshake без домена) | `cargo test mcp_stdio::` |
 | ✅ T23 | подкоманда `structure-mcp` поверх T40 (Content-Length framing, 8 МБ, batch, сигналы) | `cargo test --test structure_mcp_stdio` |
 
