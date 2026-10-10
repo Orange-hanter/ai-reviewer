@@ -43,6 +43,7 @@ use ai_reviewer::findings::{
     normalize_finding, resolve_blockers, same_finding_key, soft_consensus_for_blast_cluster, Gate, LineText,
     PriorFileRec,
 };
+use ai_reviewer::absent_path::RepoPathIndex;
 use ai_reviewer::fp_patterns::{default_fp_patterns, load_fp_patterns, parse_fp_patterns_text, FpPattern};
 
 /// Набор FP-паттернов: либо вшитый (разобран один раз), либо собранный под запрос.
@@ -306,10 +307,22 @@ fn run() -> Result<()> {
         }
         "filterFalsePositiveFindings" => {
             let patterns = patterns_arg(obj)?;
+            // repoIndexFiles — `repoIndex.files` JS-стороны (уже нормализованы и проверены
+            // на «чужое дерево» в buildRepoPathIndex); нет поля — семейство 7 выключено.
+            let repo_index = match obj.get("repoIndexFiles") {
+                None | Some(Value::Null) => None,
+                Some(Value::Array(a)) => Some(RepoPathIndex::from_files(
+                    a.iter()
+                        .map(|v| v.as_str().map(str::to_string).context("repoIndexFiles должен быть массивом строк"))
+                        .collect::<Result<Vec<_>>>()?,
+                )),
+                Some(_) => bail!("аргумент 'repoIndexFiles' должен быть массивом"),
+            };
             let outcome = filter_false_positive_findings(
                 &findings_arg("findings")?,
                 &changed_paths_arg(obj)?,
                 patterns.as_slice(),
+                repo_index.as_ref(),
             );
             json!({ "kept": outcome.kept, "logs": outcome.logs })
         }

@@ -43,6 +43,8 @@ pub struct FixtureCase {
     pub expected: Value,
     pub gate: Value,
     pub verifier_verdicts: Option<Vec<Value>>,
+    /// `repo-files.txt` (путь на строку) — дерево репозитория для FP-семейства 7.
+    pub repo_files: Option<Vec<String>>,
 }
 
 /// Загружает все валидные кейсы из `fixturesDir`, отсортированные по id.
@@ -90,6 +92,15 @@ fn load_case(dir: &Path) -> anyhow::Result<Option<FixtureCase>> {
         .and_then(|v| serde_json::from_value::<VerifierPayload>(v).ok())
         .map(|p| p.verdicts);
 
+    // Дерево репозитория потребителя (по пути на строку) — для FP-семейства 7.
+    let repo_files = fs::read_to_string(dir.join("repo-files.txt")).ok().map(|t| {
+        t.split('\n')
+            .map(crate::findings::js_trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    });
+
     let dir_name = dir
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -104,6 +115,7 @@ fn load_case(dir: &Path) -> anyhow::Result<Option<FixtureCase>> {
         expected: meta.expected,
         gate: meta.gate,
         verifier_verdicts,
+        repo_files,
     }))
 }
 
