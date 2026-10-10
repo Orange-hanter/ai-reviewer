@@ -192,7 +192,7 @@ pub struct GhCallOpts {
 
 /// Незакрытый review-тред PR (`lib/github.mjs:242-249`).
 ///
-/// Отдаётся auto-triage (`lib/triage.mjs:73-108`). `triage::decide_auto_triage`
+/// Отдаётся auto-triage (`lib/triage.mjs:73-108`, `triage::run_auto_triage`). `triage::decide_auto_triage`
 /// принимает `&Value`, поэтому на входе в него тред сериализуется
 /// (`serde_json::to_value`) — форма ключей совпадает один в один.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
