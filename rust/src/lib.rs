@@ -12,6 +12,8 @@
 pub mod absent_path;
 pub mod actionability;
 pub mod config;
+// RFC 16 T35: окна контекста (lib/context-window.mjs); в замороженном блоке T03 модуля нет.
+pub mod context_window;
 pub mod diff;
 pub mod engine;
 pub mod export;
