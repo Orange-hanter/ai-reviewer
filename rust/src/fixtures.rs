@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn loads_real_fixtures_from_repo_root() {
         let cases = load_fixtures(&repo_root().join("fixtures")).unwrap();
-        // Фикстуры = спека; сейчас валидных кейсов 16 (fixtures/structure без meta.json пропускается).
+        // Фикстуры = спека; сейчас валидных кейсов 17 (fixtures/structure без meta.json пропускается).
         assert!(!cases.is_empty(), "не загрузился ни один fixture-кейс");
         // id отсортированы
         let mut ids: Vec<&str> = cases.iter().map(|c| c.id.as_str()).collect();
