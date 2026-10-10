@@ -28,6 +28,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+use crate::absent_path::{find_absent_but_existing_path, RepoPathIndex};
 use crate::fp_patterns::{match_fp_patterns, FpPattern};
 
 pub const BLAST_FINDING_SOURCE: &str = "blast-radius";
@@ -682,21 +683,41 @@ pub struct FpFilterOutcome {
 }
 
 /// `filterFalsePositiveFindings`: снимает находки, чей `title + body` попал в
-/// известный FP-паттерн. Возвращает индексы, а не сами находки: обёртка
-/// накладывает результат на ИСХОДНЫЕ объекты (семантика разделяемых ссылок).
+/// известный FP-паттерн, затем — при `repo_index` — FP-семейство 7 (`absent_path`):
+/// «файла нет» о пути, который есть в дереве репозитория. Возвращает индексы, а не сами
+/// находки: обёртка накладывает результат на ИСХОДНЫЕ объекты (семантика разделяемых
+/// ссылок). Логи — в порядке JS: сначала все снятые паттернами, потом все снятые по дереву.
 pub fn filter_false_positive_findings(
     findings: &[Value],
     changed_paths: &[String],
     patterns: &[FpPattern],
+    repo_index: Option<&RepoPathIndex>,
 ) -> FpFilterOutcome {
     let mut out = FpFilterOutcome::default();
+    let mut after_patterns = Vec::with_capacity(findings.len());
     for (i, f) in findings.iter().enumerate() {
         let text = finding_fp_text(f);
         if matches_known_false_positive(&text, changed_paths, patterns) {
             out.logs
                 .push(format!("filtered false finding: {}", js_or_empty_raw(f.get("title"))));
         } else {
-            out.kept.push(i);
+            after_patterns.push(i);
+        }
+    }
+    for i in after_patterns {
+        let f = &findings[i];
+        // Только LLM-находки: prescan (`import/no-unresolved` и т.п.) резолвит настоящим
+        // резолвером проекта с его алиасами — перебивать его упрощённым нельзя;
+        // blast-radius о существовании файлов не судит.
+        let from_llm = !f.get("prescan").is_some_and(js_truthy)
+            && f.get("source").and_then(Value::as_str) != Some(BLAST_FINDING_SOURCE);
+        let existing = if from_llm { find_absent_but_existing_path(f, repo_index) } else { None };
+        match existing {
+            Some(path) => out.logs.push(format!(
+                "filtered false finding (путь есть в репозитории: {path}): {}",
+                js_or_empty_raw(f.get("title"))
+            )),
+            None => out.kept.push(i),
         }
     }
     out
@@ -1127,7 +1148,7 @@ mod tests {
             json!({"file": "server/foo.ts", "line": 6, "severity": "minor", "title": "проблема", "body": "файл foo.ts отсутствует в диффе"}),
             json!({"file": "server/foo.ts", "line": 7, "severity": "major", "title": "реальный баг", "body": "null pointer при пустом вводе"}),
         ];
-        let out = filter_false_positive_findings(&findings, &changed, fp());
+        let out = filter_false_positive_findings(&findings, &changed, fp(), None);
         assert_eq!(out.kept, vec![2], "остаётся только реальная находка");
         assert_eq!(
             out.logs,
@@ -1151,9 +1172,10 @@ mod tests {
             &mk(),
             &paths(&["ops/observability/hermes/prometheus.yml"]),
             fp(),
+            None,
         );
         assert!(scoped.kept.is_empty(), "на observability-путях — отфильтровано");
-        let unscoped = filter_false_positive_findings(&mk(), &paths(&["app/server/api.ts"]), fp());
+        let unscoped = filter_false_positive_findings(&mk(), &paths(&["app/server/api.ts"]), fp(), None);
         assert_eq!(unscoped.kept, vec![0], "вне observability — requiresPath не сработал");
     }
 
@@ -1278,7 +1300,7 @@ mod tests {
     #[test]
     fn fp_empty_pattern_set_keeps_all() {
         let findings = vec![json!({"title": "нет e2e тестов", "body": ""})];
-        let out = filter_false_positive_findings(&findings, &paths(&["app/e2e/a.spec.ts"]), &[]);
+        let out = filter_false_positive_findings(&findings, &paths(&["app/e2e/a.spec.ts"]), &[], None);
         assert_eq!(out.kept, vec![0]);
         assert!(out.logs.is_empty());
     }

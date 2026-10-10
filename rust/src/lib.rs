@@ -8,6 +8,8 @@
 //! findings.json из fixtures/). Логика сравнения появится в Фазе 1
 //! после порта diff/findings из lib/*.mjs.
 
+// RFC 16 T34: FP-семейство 7 (`findings` зависит от него — без модуля не собрать).
+pub mod absent_path;
 pub mod actionability;
 pub mod config;
 pub mod diff;

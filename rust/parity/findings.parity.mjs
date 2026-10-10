@@ -20,7 +20,10 @@
  *   4. сравнение log-сообщений для дедупа, carry-over и FP-фильтра;
  *   5. FP-фильтр (RFC 16, T07): matchesKnownFalsePositive/filterFalsePositiveFindings
  *      на всех находках fixtures/ с changedPaths из diff.patch кейса + литеральные
- *      кейсы паттернов + свой набор (opts.patterns) и пустой набор.
+ *      кейсы паттернов + свой набор (opts.patterns) и пустой набор;
+ *   6. FP-семейство 7 (RFC 16, T34): filterFalsePositiveFindings с repoIndex —
+ *      фикстуры с repo-files.txt, кейсы test/absent-path.test.mjs и комбинаторный набор
+ *      формулировок × путей × границ (Unicode, суррогаты у среза 40, \s JS vs Rust).
  *
  * createFindingsFormatter/classify после Фазы 1, шага 5 портированы в бинарь
  * actionability и сравниваются в rust/parity/actionability.parity.mjs.
@@ -462,11 +465,101 @@ checkFilterFp('patternsFile absent → пакетный набор', [
 ], ['app/e2e/a.spec.ts'], { patternsFile: resolve(REPO, 'no-such-file.jsonl') });
 
 // ---------------------------------------------------------------------------
+// FP-семейство 7 (repoIndex): «файла нет» о пути, который есть в дереве
+// ---------------------------------------------------------------------------
+
+const { buildRepoPathIndex } = await import('../../lib/absent-path.mjs');
+let absentChecked = 0;
+
+for (const { dir, findings } of fixtureFindings) {
+  let repoFiles;
+  try {
+    repoFiles = readFileSync(resolve(REPO, 'fixtures', dir, 'repo-files.txt'), 'utf8')
+      .split('\n').map((x) => x.trim()).filter(Boolean);
+  } catch { continue; }
+  const { files } = parseDiff(readFileSync(resolve(REPO, 'fixtures', dir, 'diff.patch'), 'utf8'));
+  const changed = [...files.keys()];
+  checkFilterFp(`${dir} repoIndex`, findings, changed, { repoIndex: buildRepoPathIndex(repoFiles, changed) });
+  absentChecked += findings.length;
+}
+
+const TREE = [
+  'src/a.ts', 'src/helpers.ts', 'src/lib/db/index.ts', 'config/app.json', 'src/data.json', 'src/esm.ts',
+  'packages/x/lib/cache/index.ts', 'apps/y/lib/cache/index.ts', 'src/auth/guard.ts', 'config/csp.json',
+  'py/pkg/__init__.py', 'py/pkg/mod.py', 'src/комп/вид.ts', 'src/v1.5/x.ts', 'web/App.vue', 'src/x.cjs',
+];
+const absentIndex = buildRepoPathIndex(TREE, ['src/a.ts']);
+const PATHS = [
+  '`./helpers`', '`src/helpers.ts`', "'@/lib/db'", '`~/lib/db`', 'helpers.ts', '`config/app.json`',
+  "'./data'", "'@/lib/cache'", "'./esm.js'", '`../src/helpers`', '`src/missing.ts`', 'https://x.io/a.ts',
+  '`py/pkg`', '`./mod`', '`/src/helpers.ts`', '`src/helpers.ts:12`', '`src/helpers.ts:3-5`', '1.5',
+  '`src/комп/вид.ts`', '`App.vue`', '`./x.cjs`', '`../../../etc/passwd`', '(src/helpers.ts)', '"src/helpers.ts",',
+];
+const AFTER = [
+  'не существует', 'не существует в репозитории', 'не найден', 'не найдена в проекте', 'отсутствует в репозитории',
+  'нет в репозитории', 'не резолвится', 'does not exist', "doesn't exist in the repo", 'doesn’t exist',
+  'is missing', 'is absent from the codebase', 'not found', 'cannot be resolved', "can't be found",
+  'could not be found in this workspace', '— указывает на несуществующий файл', 'points to a nonexistent module',
+  'refers to non-existent path', 'не найден в списке провайдеров', 'is missing the directive', 'не существует как политика',
+  'не существует1', 'не существует_x', 'not found.', 'not found; дальше', 'not found!', 'не найден -  x', 'не найден\u0085',
+  'не найден﻿', 'НЕ СУЩЕСТВУЕТ', 'NOT FOUND', 'not found', 'не найден', 'doesn\'t\texist',
+];
+const BEFORE = [
+  'Cannot find module ', 'импорт несуществующего модуля ', 'несуществующий файл ', 'не существующий путь ',
+  'отсутствующий импорт: ', 'unable to resolve ', 'module not found: ', 'unresolved import of ', 'nonexistent ',
+  'no such file ', 'missing module (', 'несуществующую функцию foo в ', 'not found in ', 'Kelvin K ',
+  'x'.repeat(60) + ' Cannot find module ', '😀'.repeat(19) + 'Cannot find module ', 'Cannot find module ' + '😀'.repeat(12),
+  'xCannot find module ', '_nonexistent ', 'missing file:',
+];
+const PREFIXES = ['', 'Если ', 'When ', 'in case ', 'ENOENT: ', 'exists ( ', 'Импорт ', 'Файл '];
+const FILES = ['src/a.ts', 'src/b.py', 'other/x.ts', 'README.md', '', 'web/App.vue', 'py/pkg/run.py'];
+
+const absentCases = [];
+for (const p of PATHS) {
+  for (const a of AFTER) absentCases.push(`${p} ${a}`);
+  for (const b of BEFORE) absentCases.push(`${b}${p}`);
+}
+for (const pre of PREFIXES) {
+  absentCases.push(`${pre}\`src/helpers.ts\` не существует`, `${pre}Cannot find module './helpers'`);
+}
+absentCases.push(
+  'Импорт `./helpers` указывает на несуществующий файл',
+  'helpers.ts не найден — сборка упадёт',
+  'The file `config/app.json` does not exist in the repo.',
+  'Экспорт `parse` не найден в `src/helpers.ts`',
+  'валидация отсутствует в `src/helpers.ts`',
+  'Файл `src/helpers.ts`xне существует',
+  'a.ts. b.ts; `src/helpers.ts` не существует! ещё',
+  'первое. `src/helpers.ts`\nне существует',
+  'Файл src/helpers.ts~/x не существует',
+  'файл src/helpers.ts-x не существует',
+  '`a/b/c`.ts не найден',
+);
+
+for (const [fi, file] of FILES.entries()) {
+  const batch = absentCases.map((body, i) => ({
+    file, line: i + 1, severity: 'major', title: i % 7 === 0 ? body : `t${i}`, body: i % 7 === 0 ? '' : body, model: 'm',
+  }));
+  batch.push(
+    { file, line: 1, severity: 'major', title: 'p', body: "Cannot find module './helpers'", model: 'eslint', prescan: true },
+    { file, line: 1, severity: 'major', title: 'b', body: "Cannot find module './helpers'", source: 'blast-radius' },
+    { file, line: 1, severity: 'major', title: 0, body: null, model: 'm' },
+    { line: 1, severity: 'major', title: 'без file', body: '`src/helpers.ts` не существует', model: 'm' },
+  );
+  checkFilterFp(`absent-path file#${fi}`, batch, ['src/a.ts'], { repoIndex: absentIndex });
+  absentChecked += batch.length;
+}
+// Индекс без совпадений с PR (чужое дерево) → null; пустое дерево → null.
+checkFilterFp('absent-path чужое дерево', [{ file: 'src/a.ts', line: 1, title: 't', body: '`src/helpers.ts` не существует' }],
+  ['a.ts', 'b.ts'], { repoIndex: buildRepoPathIndex(TREE, ['a.ts', 'b.ts']) });
+
+// ---------------------------------------------------------------------------
 // Итог
 // ---------------------------------------------------------------------------
 
 console.log(`fixtures: ${fixtureDirs.length} dirs`);
 console.log(`FP-фильтр: находок сверено ${fpFindingsChecked}`);
+console.log(`FP-семейство 7: находок сверено ${absentChecked}`);
 console.log(`parity cases compared: ${compared}`);
 if (failures.length) {
   console.log(`FAILURES: ${failures.length}`);
