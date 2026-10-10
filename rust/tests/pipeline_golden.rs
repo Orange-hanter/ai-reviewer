@@ -7,7 +7,7 @@
 //! Здесь есть две части:
 //!   1. `golden_fixtures_load` — загрузчик фикстур, гоняется всегда. Он же держит контракт
 //!      каталога: если формат уедет, тест упадёт раньше, чем появится `pipeline::run`.
-//!   2. `pipeline_run_matches_golden` — сама сверка, помечена `#[ignore]` до T26.
+//!   2. `pipeline_run_matches_golden` — сама сверка (T26), помечена `#[ignore]` до T25.
 //!      Снять `#[ignore]` и дописать сравнение — работа T25/T26.
 //!
 //! Формат фикстур описан в `rust/parity/README-golden.md`.
@@ -356,27 +356,149 @@ fn golden_fixtures_load() {
     }
 }
 
-/// Сверка Rust-пайплайна с эталоном. Снимается с `#[ignore]` в T25/T26,
-/// когда появится `ai_reviewer::pipeline::run`.
+/// Прогон одного кейса через `ai_reviewer::pipeline` на фейках из `inputs.json`.
+/// Возвращает список расхождений (пусто — кейс сошёлся).
+fn run_case(case: &GoldenCase, fixed_now_ms: u64) -> Vec<String> {
+    use ai_reviewer::engine::model_review_from_value;
+    use ai_reviewer::pipeline::{create_review_pipeline, load_review_config, CliArgs, PipelineOptions, RepoFilesFn};
+    use ai_reviewer::profile::{package_root, Profile};
+    use ai_reviewer::testutil::FakeDeps;
+    use ai_reviewer::traits::{BlastRadius, LoadedDiff, PrescanResult, PullRequestRef, StickyData};
+
+    let root = package_root();
+    let export_dir = std::env::temp_dir().join(format!(
+        "golden-{}-{}-{}",
+        case.id,
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    fs::create_dir_all(&export_dir).unwrap();
+    let env: std::collections::HashMap<String, String> = case
+        .env
+        .env
+        .iter()
+        .map(|(k, v)| (k.clone(), v.replace("${EXPORT_DIR}", &export_dir.to_string_lossy())))
+        .collect();
+    let profile = Profile::load_file_at(&root.join(&env["REVIEW_PROFILE"]), &root).unwrap();
+    let cli = CliArgs {
+        dry_run: case.env.cli.dry_run,
+        diff_file: case.env.cli.diff_file.clone(),
+        head_sha: String::new(),
+        repo: case.env.cli.repo.clone(),
+        pr_number: case.env.cli.pr_number,
+    };
+    let cfg = load_review_config(&env, &cli, &profile);
+
+    let mut fakes = FakeDeps::new();
+    let ld = &case.inputs.load_diff;
+    fakes.github.loaded_diff = Some(LoadedDiff {
+        draft: ld.draft,
+        pr: PullRequestRef { number: ld.pr.number, title: ld.pr.title.clone(), html_url: ld.pr.html_url.clone() },
+        head_sha: ld.head_sha.clone(),
+        diff: case.diff.clone(),
+    });
+    fakes.github.prior_sticky = StickyData {
+        findings: case.inputs.prior_sticky.findings.clone(),
+        runs: case.inputs.prior_sticky.runs.clone(),
+        sha: case.inputs.prior_sticky.sha.clone(),
+    };
+    let gr = &case.inputs.github_results;
+    fakes.github.post_review_id = u64::try_from(gr.post_review_id).ok();
+    fakes.github.deleted_inline = gr.delete_stale_inline.max(0) as usize;
+    fakes.github.upsert_result = gr.upsert_sticky.clone();
+    // JS-фейк кладёт `skipped: 0` (число) — контракт трейта по реализации, а не по фейку.
+    let mut prescan = case.inputs.prescan.clone();
+    if prescan.get("skipped").is_some_and(|v| !v.is_string()) {
+        prescan.as_object_mut().unwrap().remove("skipped");
+    }
+    fakes.prescan.result = serde_json::from_value::<PrescanResult>(prescan).unwrap_or_default();
+    fakes.graphify.radius = serde_json::from_value::<BlastRadius>(case.inputs.blast_radius.clone()).unwrap_or_default();
+    fakes.engine.reviews = case.inputs.reviews.iter().map(model_review_from_value).collect();
+    fakes.engine.verdicts = match case.inputs.verifier.mode.as_str() {
+        "static" => case.inputs.verifier.verdicts.clone().unwrap_or_default(),
+        "all-verified" => (0..64).map(|i| serde_json::json!({ "candidateIndex": i, "decision": "verified" })).collect(),
+        _ => Vec::new(),
+    };
+    let tree = case.inputs.repo_files.clone();
+    let repo_files = move || -> anyhow::Result<Option<Vec<String>>> { Ok(tree.clone()) };
+    let repo_files: &RepoFilesFn = &repo_files;
+    let clock = move || fixed_now_ms;
+    let deps = if case.inputs.telegram.enabled { fakes.deps() } else { fakes.deps_without_notifier() };
+    let opts = PipelineOptions {
+        repo_files: Some(repo_files),
+        clock: Some(&clock),
+        cwd: Some(root.clone()),
+        ..PipelineOptions::default()
+    };
+    let mut diffs = Vec::new();
+    match create_review_pipeline(&cfg, &profile, deps, opts).run_detailed() {
+        Err(e) => diffs.push(format!("прогон упал: {e:#}")),
+        Ok(out) => {
+            if out.exit_code != case.expected.exit_code {
+                diffs.push(format!("exit {} ≠ {}", out.exit_code, case.expected.exit_code));
+            }
+        }
+    }
+    let order: Vec<String> = fakes
+        .calls
+        .tags()
+        .into_iter()
+        .filter(|t| matches!(*t, "post" | "delete" | "sticky" | "telegram"))
+        .map(str::to_string)
+        .collect();
+    if order != case.expected.calls.order {
+        diffs.push(format!("order {order:?} ≠ {:?}", case.expected.calls.order));
+    }
+    let sticky = fakes.calls.sticky_bodies().last().cloned();
+    if sticky != case.expected.sticky {
+        if let Ok(dump) = std::env::var("GOLDEN_DUMP_DIR") {
+            let d = Path::new(&dump).join(&case.id);
+            let _ = fs::create_dir_all(&d);
+            let _ = fs::write(d.join("sticky.md"), sticky.clone().unwrap_or_default());
+        }
+        diffs.push("sticky.md расходится".to_string());
+    }
+    let tool = &profile.tool_name;
+    for (name, file, want) in [
+        ("export.json", format!("{tool}.json"), &case.expected.export_json),
+        ("sarif.json", format!("{tool}.sarif.json"), &case.expected.sarif_json),
+        ("swarm.json", format!("{tool}-swarm.json"), &case.expected.swarm_json),
+    ] {
+        let got: Option<Value> =
+            fs::read_to_string(export_dir.join(file)).ok().and_then(|t| serde_json::from_str(&t).ok());
+        if &got != want {
+            if let Ok(dump) = std::env::var("GOLDEN_DUMP_DIR") {
+                let d = Path::new(&dump).join(&case.id);
+                let _ = fs::create_dir_all(&d);
+                let _ = fs::write(d.join(name), serde_json::to_string_pretty(&got).unwrap_or_default());
+            }
+            diffs.push(format!("{name} расходится"));
+        }
+    }
+    let _ = fs::remove_dir_all(&export_dir);
+    diffs
+}
+
+/// Сверка Rust-пайплайна с эталоном. Снимается с `#[ignore]` в T25 — когда сойдутся все
+/// кейсы. До тех пор: `cargo test --test pipeline_golden -- --ignored --nocapture`
+/// печатает, какие кейсы и по каким выходам расходятся.
 #[test]
-#[ignore = "pipeline::run не реализован (T26)"]
+#[ignore = "T25: не все golden-кейсы сходятся с pipeline::run"]
 fn pipeline_run_matches_golden() {
+    let index = load_index();
+    let fixed_now_ms = 1_767_225_600_000u64; // 2026-01-01T00:00:00.000Z
+    assert_eq!(index.fixed_now, "2026-01-01T00:00:00.000Z", "часы генератора сменились — поправь fixed_now_ms");
     let cases = load_all_cases();
     assert!(!cases.is_empty(), "golden-фикстуры не найдены");
-
+    let mut failed = Vec::new();
     for case in &cases {
-        // TODO(T26): собрать конфиг из case.env.env + case.env.cli, подставить
-        // case.inputs как фейковые зависимости, выполнить pipeline::run и сверить:
-        //   * возвращённый код с case.expected.exit_code;
-        //   * тело sticky с case.expected.sticky (байт в байт, включая машинный футер);
-        //   * JSON экспорта с case.expected.export_json / sarif_json / swarm_json;
-        //   * порядок и аргументы вызовов github/telegram с case.expected.calls.
-        let _ = case;
+        let diffs = run_case(case, fixed_now_ms);
+        if diffs.is_empty() {
+            println!("ok   {}", case.id);
+        } else {
+            println!("FAIL {}: {}", case.id, diffs.join("; "));
+            failed.push(case.id.clone());
+        }
     }
-
-    panic!(
-        "pipeline::run не реализован (T26): загрузчик golden-фикстур готов, \
-         сверка {} кейс(ов) дописывается в T25",
-        cases.len()
-    );
+    assert!(failed.is_empty(), "golden расходится: {}/{} кейсов — {failed:?}", failed.len(), cases.len());
 }
