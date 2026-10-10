@@ -63,3 +63,8 @@ pub mod swarm;
 pub mod testutil;
 pub mod traits;
 pub mod util;
+
+// RFC 16 T36: чистые порты RFC 04 (маршрутизация чанков, слияние ролей, раскладка промпта).
+pub mod chunk_routing;
+pub mod prompt_layout;
+pub mod specialist_merge;
