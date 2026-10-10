@@ -197,8 +197,6 @@ pub struct PipelineOptions<'a> {
     pub read_lines: Option<&'a ReadLines<'a>>,
     /// `deps.headSha` — перебивает `cli.headSha` на file-diff прогоне.
     pub head_sha: Option<String>,
-    /// Общий с LLM-клиентом трекер: без него `efficiencyMetrics` и строка стоимости пусты.
-    pub cost_tracker: Option<&'a CostTracker>,
     /// Готовый логгер прогона — тот же, что слушает движок (`with_events`).
     pub observability: Option<&'a Observability>,
     pub clock: Option<&'a ClockFn>,
@@ -523,7 +521,6 @@ pub struct ReviewPipeline<'a> {
     profile: &'a Profile,
     deps: PipelineDeps<'a>,
     opts: PipelineOptions<'a>,
-    own_cost: CostTracker,
 }
 
 /// `createReviewPipeline(cfg, deps)`.
@@ -533,8 +530,7 @@ pub fn create_review_pipeline<'a>(
     deps: PipelineDeps<'a>,
     opts: PipelineOptions<'a>,
 ) -> ReviewPipeline<'a> {
-    let price_map = get(cfg, &["cost", "priceMap"]).filter(|v| !v.is_null()).cloned();
-    ReviewPipeline { cfg, profile, deps, opts, own_cost: CostTracker::new(price_map) }
+    ReviewPipeline { cfg, profile, deps, opts }
 }
 
 impl<'a> ReviewPipeline<'a> {
@@ -547,7 +543,7 @@ impl<'a> ReviewPipeline<'a> {
     }
 
     fn cost(&self) -> &CostTracker {
-        self.opts.cost_tracker.unwrap_or(&self.own_cost)
+        self.deps.cost
     }
 
     fn cwd(&self) -> PathBuf {
@@ -1172,7 +1168,10 @@ impl<'a> ReviewPipeline<'a> {
         .join(" ");
         // Дедлайн LLM-фазы: после него чанки пропускаются, отчёт частичный, но штатный.
         let budget = lim("timeBudgetMs");
-        let deadline = if budget > 0.0 { self.now() + budget as u64 } else { 0 };
+        // Насыщение: `as u64` уже насыщает огромный бюджет до u64::MAX, и голое `+` в debug
+        // паникует (exit 101), а в release заворачивает дедлайн в прошлое — прогон без LLM.
+        // В JS это конечное число далеко в будущем.
+        let deadline = if budget > 0.0 { self.now().saturating_add(budget as u64) } else { 0 };
         self.log(&format!(
             "blast-radius блоков: {} · symbols {}/{} · affected {} · graph {} · файлов с контекстом: {} · чанков: {}",
             blast_blocks.len(),

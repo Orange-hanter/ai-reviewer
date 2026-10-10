@@ -700,6 +700,8 @@ pub struct FakeDeps {
     /// Фейк уведомлений. В [`FakeDeps::deps`] он подключён всегда: «телеграм не
     /// настроен» проверяется отдельно, через [`FakeDeps::deps_without_notifier`].
     pub notifier: FakeNotifier,
+    /// Трекер стоимости для `PipelineDeps::cost` (фейки LLM не зовут — снимок нулевой).
+    pub cost: crate::cost::CostTracker,
     /// Строки, записанные в лог прогона.
     log_lines: Arc<Mutex<Vec<String>>>,
     /// Логгер, который отдаётся в `PipelineDeps::log`; пишет в `log_lines`.
@@ -725,6 +727,7 @@ impl FakeDeps {
             graphify: FakeGraphify::with_log(Arc::clone(&calls)),
             notifier: FakeNotifier::with_log(Arc::clone(&calls)),
             calls,
+            cost: crate::cost::CostTracker::new(None),
             log_lines,
             log_fn: Box::new(move |line: &str| push(&sink, line.to_string())),
         }
@@ -739,6 +742,7 @@ impl FakeDeps {
             graphify: &self.graphify,
             notifier: Some(&self.notifier),
             log: &*self.log_fn,
+            cost: &self.cost,
         }
     }
 

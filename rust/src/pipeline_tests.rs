@@ -121,6 +121,8 @@ struct Harness {
     cli_head_sha: String,
     repo_files: Option<Box<RepoFilesFn>>,
     engine: Option<Box<dyn EngineApi>>,
+    /// Трекер, общий с движком теста (`PipelineDeps::cost`).
+    cost: Option<std::sync::Arc<CostTracker>>,
 }
 
 impl Harness {
@@ -140,7 +142,7 @@ impl Harness {
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-        Self { fakes, env, dry_run: false, cli_head_sha: String::new(), repo_files: None, engine: None }
+        Self { fakes, env, dry_run: false, cli_head_sha: String::new(), repo_files: None, engine: None, cost: None }
     }
 
     fn env(mut self, k: &str, v: &str) -> Self {
@@ -175,6 +177,9 @@ impl Harness {
         let mut deps = self.fakes.deps();
         if let Some(e) = &self.engine {
             deps.engine = &**e;
+        }
+        if let Some(c) = &self.cost {
+            deps.cost = &**c;
         }
         let opts = PipelineOptions { repo_files: Some(repo_files), cwd: Some(package_root()), ..PipelineOptions::default() };
         let out = create_review_pipeline(&cfg, &profile, deps, opts).run_detailed();
@@ -869,5 +874,52 @@ fn actionability_event_has_histogram_and_reason_keys() {
     assert_eq!(keys, vec!["confidence", "logicFile", "suggestion"], "ключи сигналов, не формулировки");
     let end = read_jsonl(&dir).into_iter().find(|r| r["type"] == "run_end").unwrap();
     assert_eq!(end["exitCode"], json!(0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// Находки ревью T26 (FIX-T26)
+// ---------------------------------------------------------------------------
+
+/// Огромный `REVIEW_TIME_BUDGET_MIN` (numEnv его пропускает: конечное и > 0) не должен
+/// переполнять дедлайн: в JS это дедлайн далеко в будущем и полное ревью.
+#[test]
+fn huge_time_budget_does_not_overflow_deadline() {
+    let h = Harness::new(vec![critical_review()]).env("REVIEW_TIME_BUDGET_MIN", "999999999999999");
+    let out = h.run(CODE_DIFF).unwrap();
+    assert_eq!(h.fakes.calls.count("review"), 1, "бюджет не сработал — чанки ушли в движок");
+    assert_eq!(out.exit_code, 1, "critical дошла до гейта");
+}
+
+/// Движок, чей LLM-клиент пишет usage в трекер — как `RealLlmClient::with_usage_sink`.
+struct UsageEngine {
+    reviews: ReviewAllResult,
+    tracker: std::sync::Arc<CostTracker>,
+}
+
+impl EngineApi for UsageEngine {
+    fn review_all_models(&self, _: &[Chunk], _: &ReviewContext) -> Result<ReviewAllResult> {
+        let usage = json!({ "prompt_tokens": 1200, "completion_tokens": 300, "total_tokens": 1500 });
+        self.tracker.record(Some(&usage), "m1", "review");
+        Ok(self.reviews.clone())
+    }
+    fn verify_findings(&self, _: &[Value], _: &VerifyContext) -> Result<Vec<Value>> {
+        Ok(vec![])
+    }
+}
+
+/// Трекер, в который пишет движок, и трекер, из которого пайплайн читает efficiency и
+/// строку стоимости, — один и тот же (в JS `costTracker` общий с `createLlmClient`).
+#[test]
+fn engine_usage_reaches_run_end_and_sticky_cost_line() {
+    let dir = tmp_dir("cost");
+    let mut h = Harness::new(vec![]).obs(&dir);
+    let tracker = std::sync::Arc::new(CostTracker::new(None));
+    h.engine = Some(Box::new(UsageEngine { reviews: vec![critical_review()], tracker: tracker.clone() }));
+    h.cost = Some(tracker);
+    h.run(CODE_DIFF).unwrap();
+    let end = read_jsonl(&dir).into_iter().find(|r| r["type"] == "run_end").unwrap();
+    assert_eq!(end["tokens_total"], json!(1500), "efficiencyMetrics в run_end: {end}");
+    assert!(h.sticky().contains("💰 2k tokens"), "строка стоимости в sticky: {}", h.sticky());
     let _ = std::fs::remove_dir_all(&dir);
 }

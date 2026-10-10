@@ -637,6 +637,12 @@ pub struct PipelineDeps<'a> {
     /// Логгер прогона (`deps.log ?? createLogger()`, `pipeline.mjs:227`).
     /// `Send + Sync`, потому что в лог пишут и стадии, идущие в scoped-потоках.
     pub log: &'a (dyn Fn(&str) + Send + Sync),
+    /// Трекер стоимости, общий с LLM-клиентом движка (`deps.costTracker`,
+    /// `pipeline.mjs:318-319`): из него пайплайн берёт `efficiencyMetrics` для `run_end`
+    /// и строку стоимости sticky. Обязателен: движок приходит готовым, и своего трекера
+    /// пайплайн с ним связать не может — дефолт тихо давал бы нулевой снимок. Тот, кто
+    /// строит `RealEngine`, кладёт этот же трекер в `RealLlmClient::with_usage_sink`.
+    pub cost: &'a crate::cost::CostTracker,
 }
 
 impl<'a> PipelineDeps<'a> {
