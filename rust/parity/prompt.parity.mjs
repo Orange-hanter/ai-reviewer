@@ -38,7 +38,7 @@ if (!existsSync(resolve(REPO, 'rust/target/debug/prompt'))) {
 }
 
 const { createPromptBuilder, buildChangedFilesSection } = await import('../../index.mjs');
-const { buildVerifierMessages, buildSpecialistReferenceSection, buildMoAReferenceSection } = await import('../../lib/prompt.mjs');
+const { buildVerifierMessages, buildSpecialistReferenceSection, buildMoAReferenceSection, buildMergedSpecialistSystem } = await import('../../lib/prompt.mjs');
 const { setProfile, resetProfile, normalizeProfile, loadProfileFile } = await import('../../lib/profile.mjs');
 
 let compared = 0;
@@ -276,6 +276,14 @@ for (const [profileName, activate] of Object.entries(PROFILES)) {
   check(`${profileName}: changedFilesSection windowed empty array`, () => buildChangedFilesSection(
     ['a.ts'], { paths: ['a.ts'], partialPaths: [], windowedPaths: [] },
   ));
+  // RFC 04, решение 4: слитый промпт ролей на одной модели (RFC 16 T36).
+  check(`${profileName}: buildMergedSpecialistSystem three`, () => buildMergedSpecialistSystem(
+    ['security', 'correctness', 'architecture'],
+  ));
+  check(`${profileName}: buildMergedSpecialistSystem unknown+order`, () => buildMergedSpecialistSystem(
+    ['architecture', 'nope', 'constructor', 'security'],
+  ));
+  check(`${profileName}: buildMergedSpecialistSystem empty`, () => buildMergedSpecialistSystem([]));
   check(`${profileName}: changedFilesSection empty`, () => buildChangedFilesSection([]));
   check(`${profileName}: changedFilesSection unknownPaths`, () => buildChangedFilesSection(
     ['a.ts', 'b.ts'], { paths: [], partialPaths: [], unknownPaths: true },

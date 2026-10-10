@@ -23,7 +23,8 @@
  *   6. MoA + specialists: advisors prose → jury JSON с advisorClaims, label
  *      атрибуция, references смержены; все advisors недоступны → error;
  *   7. MoA fallback: aggregator недоступен → резервная модель, juryBypassed;
- *   8. aggregate-края: лишние поля ответа, summary из чанка с кодом, все чанки skipped.
+ *   8. aggregate-края: лишние поля ответа, summary из чанка с кодом, все чанки skipped;
+ *   9. RFC 04 в MoA: lean-чанк без жюри, слитые роли, сорванный формат, shared-prefix.
  */
 
 import { existsSync } from 'node:fs';
@@ -365,6 +366,64 @@ await checkReview('кодовых чанков нет → первое непу�
     { annotated: 'fixtures', fileContents: '', paths: ['fixtures/a.json'], partialPaths: [] },
   ],
   ctx: SUMMARY_ROUTING,
+});
+
+// ---------------------------------------------------------------------------
+// 9. RFC 04 в MoA: чанк без кода — один агрегатор без жюри (его summary не выбирается,
+//    пока есть кодовый), слитые специалисты на одной модели и их сорванный формат,
+//    раскладка shared-prefix. Бинарь видит те же done (с hasCode) — обе ветки обязаны
+//    дать один агрегат и один лог.
+// ---------------------------------------------------------------------------
+
+const RFC04_PROMPT = {
+  buildMessages: ({ annotated }) => [
+    { role: 'system', content: 'AGGREGATOR RULES' },
+    { role: 'user', content: `ctx ${annotated}` },
+  ],
+  buildSpecialistMessages: (role, base) => [
+    { role: 'system', content: `specialist rules: ${role}` },
+    { role: 'user', content: base.at(-1).content },
+  ],
+  buildSpecialistAggregatorMessages: (base, refs) => base.map((m, i) => (
+    i === base.length - 1
+      ? { role: 'user', content: `jury refs=${refs.map((r) => r.role).join(',')}\n${m.content}` }
+      : m
+  )),
+  buildReferenceMessages: (base) => base,
+  buildAggregatorMessages: (base) => base,
+};
+const RFC04_CHUNKS = [
+  { annotated: 'docs', fileContents: '', paths: ['docs/a.md'], partialPaths: [] },
+  { annotated: 'code', fileContents: '', paths: ['lib/a.mjs'], partialPaths: [] },
+];
+const RFC04_OLLAMA = (text) => ({
+  chatText: async () => text,
+  chatJson: async (msgs) => ({
+    summary: `обзор ${msgs[1].content.split('\n').at(-1)}`,
+    findings: [{ file: msgs[1].content.includes('code') ? 'lib/a.mjs' : 'docs/a.md', line: 1, severity: 'major', title: 't', confidence: 0.9 }],
+  }),
+});
+const ONE_MODEL = {
+  ...MOA_CFG,
+  specialists: {
+    enabled: true,
+    merge: 'auto',
+    assignments: ['security', 'correctness', 'architecture'].map((role) => ({ role, model: 'solo' })),
+  },
+};
+const sections = ['security', 'correctness', 'architecture'].map((r) => `### ROLE: ${r}\nпо ${r}`).join('\n\n');
+
+await checkReview('RFC 04: lean docs-чанк + кодовый, роли раздельно', MOA_CFG, {
+  ollama: RFC04_OLLAMA('prose'), prompt: RFC04_PROMPT, chunks: RFC04_CHUNKS, ctx: SUMMARY_ROUTING,
+});
+await checkReview('RFC 04: слитые роли на одной модели', ONE_MODEL, {
+  ollama: RFC04_OLLAMA(sections), prompt: RFC04_PROMPT, chunks: RFC04_CHUNKS, ctx: SUMMARY_ROUTING,
+});
+await checkReview('RFC 04: сорванный формат слитых ролей — один советник', ONE_MODEL, {
+  ollama: RFC04_OLLAMA('без секций'), prompt: RFC04_PROMPT, chunks: RFC04_CHUNKS, ctx: SUMMARY_ROUTING,
+});
+await checkReview('RFC 04: shared-prefix', { ...ONE_MODEL, promptLayout: 'shared-prefix' }, {
+  ollama: RFC04_OLLAMA(sections), prompt: RFC04_PROMPT, chunks: RFC04_CHUNKS, ctx: SUMMARY_ROUTING,
 });
 
 // ---------------------------------------------------------------------------

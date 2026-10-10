@@ -312,6 +312,64 @@ fn specialist_rules(role: &str, ctx: &PromptCtx) -> String {
     s
 }
 
+/// Заголовок секции роли в слитом ответе (`MERGED_ROLE_HEADING` в lib/prompt.mjs) — общий
+/// контракт промпта и разбора в [`crate::specialist_merge`].
+pub fn merged_role_heading(role: &str) -> String {
+    format!("### ROLE: {role}")
+}
+
+/// buildMergedSpecialistSystem (RFC 04, решение 4): системный промпт для случая, когда все
+/// роли назначены на ОДНУ модель. Правила проекта и specialistExtra вставляются один раз,
+/// фокусы ролей — по разделам. Роль без фокуса отбрасывается (`SPECIALIST_FOCUS[r]` в JS).
+pub fn build_merged_specialist_system<S: AsRef<str>>(roles: &[S], ctx: &PromptCtx) -> String {
+    let list: Vec<(&str, &str)> = roles
+        .iter()
+        .filter_map(|r| {
+            let r = r.as_ref();
+            SPECIALIST_FOCUS.iter().find(|(name, _)| *name == r).map(|(_, f)| (r, *f))
+        })
+        .collect();
+    let n = list.len();
+    let sections = list
+        .iter()
+        .map(|(role, focus)| format!("{}\n{}", merged_role_heading(role), focus))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let headings = list
+        .iter()
+        .map(|(role, _)| merged_role_heading(role))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut s = format!(
+        "You are a PANEL of {n} independent code review specialists (Mixture-of-Critics pipeline),\n\
+each with a strictly separate remit. Work through the remits one at a time and do NOT let one\n\
+remit answer for another: a finding belongs to exactly one section, the one whose remit covers it.\n"
+    );
+    s.push_str(&rules_block(ctx));
+    s.push_str(&prompt_extra(&ctx.specialist_extra));
+    s.push('\n');
+    s.push_str(&sections);
+    s.push_str(&format!(
+        "\n\nAnalyze the PR diff and the attached file context (windows around the changed lines). Write IN RUSSIAN as bullets:\n\
+- [severity] `file:line` — title: explanation (severity = critical|major|minor)\n  \
+quote: <one line copied verbatim from the diff or file context>\n\
+Report AT MOST {SPECIALIST_MAX_ITEMS} items PER SECTION, strongest first — a long tail costs the jury\n\
+more than it finds. Do NOT report nits. EVERY item, whatever its severity, MUST carry its own\n\
+`quote:` line: if you cannot quote the offending line verbatim AND name a concrete fix, leave the\n\
+item out. Better three proven defects than twenty observations.\n\
+Do NOT output JSON — the jury aggregator will refute/verify each claim.\n\
+\n\
+Output EXACTLY {n} sections, in this order, each opening with its heading verbatim on its own line:\n\
+{headings}\n\
+A section with nothing to report must still be present — write «в моей области серьёзных замечаний нет»."
+    ));
+    s
+}
+
+/// Потолок пунктов на секцию слитого промпта: та же величина, что зашита в SPECIALIST_TAIL /
+/// REFERENCE_TAIL (`SPECIALIST_MAX_ITEMS` в lib/prompt.mjs).
+const SPECIALIST_MAX_ITEMS: usize = 8;
+
 /// buildSpecialistReferenceSection — секция prose-анализов specialists для жюри.
 pub fn build_specialist_reference_section(references: &[Value]) -> String {
     let ok: Vec<String> = references
@@ -780,6 +838,25 @@ mod tests {
 
     fn ctx() -> PromptCtx {
         PromptCtx::default_ctx()
+    }
+
+    #[test]
+    fn merged_specialist_system_sections_and_rules_once() {
+        let ctx = PromptCtx {
+            repo_rules: "RULES".into(),
+            specialist_extra: "EXTRA".into(),
+            ..PromptCtx::default_ctx()
+        };
+        let s = build_merged_specialist_system(&["security", "nope", "architecture"], &ctx);
+        assert!(s.starts_with("You are a PANEL of 2 independent"));
+        assert_eq!(s.matches("RULES").count(), 1);
+        assert!(s.contains("covers it.\nRULES\n\nEXTRA\n\n### ROLE: security\nFocus ONLY on security"));
+        assert!(s.contains("Output EXACTLY 2 sections"));
+        assert!(s.ends_with("### ROLE: security\n### ROLE: architecture\nA section with nothing to report must still be present — write «в моей области серьёзных замечаний нет»."));
+        assert!(!s.contains("nope"));
+        let empty: [&str; 0] = [];
+        let s = build_merged_specialist_system(&empty, &PromptCtx::default_ctx());
+        assert!(s.contains("covers it.\n\n\n\nAnalyze"));
     }
 
     #[test]
