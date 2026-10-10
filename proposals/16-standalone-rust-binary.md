@@ -56,6 +56,17 @@ prebuilt-бинарь по пину вместо чекаута репозито
 | `findings`/`eval` | FP-семейство 7 (`repoIndex`), `repo-files.txt` фикстур | T34 |
 | `engine` | маршрутизация чанков, слияние ролей, раскладка shared-prefix, summary из кодового чанка (RFC 04) | T36, T37 |
 
+**T26 (pipeline.rs) — что осталось на T25.** `pipeline::run_detailed` сверяется с golden
+(`cargo test --test pipeline_golden -- --ignored --nocapture`): exit-код и порядок
+`post/delete/sticky/telegram` сходятся во всех 29 кейсах; sticky — во всех, кроме
+`prior-sticky-carryover`; export — в 3. Остаток — не поведение пайплайна, а форма фейков,
+которую генератор записал в `inputs.json`: (1) `blastRadius.metrics` без `confidence` (типизированный
+`BlastMetrics` его всегда пишет), (2) `prescan` с `skipped: 0`, `byTool: null`/без `astgrep`,
+`error: null` (реальный раннер отдаёт строку-тег, полный `byTool` и `undefined`),
+(3) ключи `priorSticky.runs` отсортированы по алфавиту, а JS видел их в исходном порядке —
+футер sticky расходится порядком ключей. Лечится в T25 перегенерацией фикстур с
+реалистичной формой фейков и без сортировки ключей входа.
+
 **Новые JS-модули `main`, которых RFC не покрывал**, — задачи T34–T42 в «Оценке».
 Оркестрационные (`incremental`, стадии `pipeline.mjs`) — волна 4 рядом с T26.
 RFC 13 (судья гейта) в `lib/` ещё не реализован (только план `gate-judge`) — задачи на
@@ -471,7 +482,7 @@ T08 замораживает сигнатуры трейтов до того, к
 |---|---|---|
 | ✅ T24 | `triage.rs`: `build_triage_context`, `run_auto_triage` (FP-совпадение по `fp_patterns` в Rust) | `cargo test triage::` |
 | ✅ T39 | `incremental.rs` ← `lib/incremental.mjs` (RFC 05): хэш входа модели по файлу, состояние в `paths.incrementalState`, `fullEvery`; перенос находок **после** refutation и verifier. Зависит от T04, T05 | `cargo test incremental::`; кейсы `test/incremental.test.mjs` |
-| T26 | `pipeline.rs` ← `pipeline.mjs` (`createReviewPipeline`/`runDetailed`/`runGateResolution`; после слияния `main` — 1066 строк: `repoIndex` для FP-семейства 7, окна контекста, карточки символов, инкрементальный перенос, `efficiencyMetrics` в `run_end`), `PipelineOutcome` вместо `die`/`exit`. Зависит от T24, T28, T29, T34–T39 | `cargo build`; `cargo test pipeline::` |
+| ✅ T26 | `pipeline.rs` ← `pipeline.mjs` (`createReviewPipeline`/`runDetailed`/`runGateResolution`; после слияния `main` — 1066 строк: `repoIndex` для FP-семейства 7, окна контекста, карточки символов, инкрементальный перенос, `efficiencyMetrics` в `run_end`), `PipelineOutcome` вместо `die`/`exit`. Зависит от T24, T28, T29, T34–T39 | `cargo build`; `cargo test pipeline::` (38 кейсов, порт `test/pr-review.pipeline.test.mjs`); golden-сверка дописана в `rust/tests/pipeline_golden.rs` и остаётся `#[ignore]` до T25: exit-код и порядок вызовов сходятся во всех 29 кейсах, sticky — в 28, расхождения export/sticky — форма фейков в `inputs.json` (см. «Состояние ветки») |
 | ✅ T28 | `eval.rs` + подкоманда `eval`, замена стаба `bin/eval.rs` | `pr-review eval` → 16/16 (фактически 17/17 — столько seed-кейсов в `fixtures/` сейчас; вывод и код возврата байт в байт с `npm run eval`, `node rust/parity/eval.parity.mjs`) |
 | ✅ T29 | подкоманда `metrics` ← `bin/pr-review-metrics.mjs` | отчёт совпадает по структуре с JS |
 
