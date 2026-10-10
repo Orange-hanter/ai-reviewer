@@ -1157,7 +1157,7 @@ pub fn build_summary(
     for f in all_findings {
         if let Some(sev) = f.get("severity").and_then(Value::as_str) {
             if let Some(slot) = counts.get_mut(sev) {
-                *slot = json!(slot.as_f64().unwrap_or(0.0) + 1.0);
+                *slot = json!(slot.as_i64().unwrap_or(0) + 1);
             }
         }
     }
@@ -1232,7 +1232,7 @@ pub fn build_summary(
         for f in arr_or_empty(r.get("findings"))? {
             if let Some(sev) = f.get("severity").and_then(Value::as_str) {
                 if let Some(slot) = c.get_mut(sev) {
-                    *slot = json!(slot.as_f64().unwrap_or(0.0) + 1.0);
+                    *slot = json!(slot.as_i64().unwrap_or(0) + 1);
                 }
             }
         }
@@ -1804,6 +1804,9 @@ mod tests {
         // Маркер-цитата в заголовке восстановлена в JSON без потерь.
         assert_eq!(parsed["findings"][0]["title"], "цитирует --> маркер");
         assert_eq!(out.total, 1);
+        // Счётчики — целые, как в JS: `1`, а не `1.0` в футере и в run_end.
+        assert_eq!(out.counts, json!({"critical": 0, "major": 1, "minor": 0, "nit": 0}));
+        assert!(body.contains(r#""major":1,"#), "футер: {body}");
         assert_eq!(out.verdict["sha"], "abcdef1");
         assert_eq!(out.verdict["blocked"], false);
     }
