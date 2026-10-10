@@ -54,6 +54,7 @@ pub mod eval;
 pub mod feedback;
 pub mod fp_patterns;
 pub mod graphify_client;
+pub mod incremental;
 pub mod observability;
 pub mod pipeline;
 pub mod prescan;
