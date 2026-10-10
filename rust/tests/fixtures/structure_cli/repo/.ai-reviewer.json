@@ -1,0 +1,6 @@
+{
+  "name": "structure-cli-fixture",
+  "markerNamespace": "fx-review",
+  "toolName": "fx-review",
+  "layout": { "appDir": "src", "layerDirs": ["auth"], "sensitive": "secret" }
+}

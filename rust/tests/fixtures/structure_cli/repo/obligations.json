@@ -1,0 +1,57 @@
+{
+  "schemaRef": "code-structure/obligations-export.v1",
+  "version": 1,
+  "kind": "obligations_export",
+  "project": "demo",
+  "revision": "docs-1",
+  "headSha": "abcdef1234567890",
+  "exportedAt": "2026-09-02T00:00:00.000Z",
+  "obligations": [
+    {
+      "id": "obl:auth#invalid-token",
+      "source": "cod-doc-section",
+      "docRef": "modules/auth/contracts",
+      "sectionAnchor": "invalid-token",
+      "contentHash": "e9fa5cb1cf5850e9f22021092d5679c0c5468ae2bbc5fe0ef43f1914b4513c20",
+      "priority": "must",
+      "kind": "error_path",
+      "statement": "MUST reject invalid token",
+      "status": "confirmed",
+      "contractRefs": [
+        "contract:6c253a239536680bcf542a85"
+      ],
+      "provenance": "manual"
+    },
+    {
+      "id": "obl:auth#token",
+      "source": "cod-doc-section",
+      "docRef": "modules/auth/contracts",
+      "sectionAnchor": "token",
+      "contentHash": "1b3063a28c79b304050976c3526747c95c326fa76dd8e8baf69a4c85b3117799",
+      "priority": "must",
+      "kind": "happy_path",
+      "statement": "MUST accept a valid token",
+      "status": "confirmed",
+      "contractRefs": [
+        "contract:6c253a239536680bcf542a85"
+      ],
+      "provenance": "manual"
+    },
+    {
+      "id": "obl:auth#limits",
+      "source": "cod-doc-section",
+      "contentHash": "8a46fd6fc3d79d419361a7043d0365b6dfeb6b92da9e376450898ff88d9cea00",
+      "priority": "should",
+      "kind": "edge_case",
+      "statement": "validate SHOULD reject tokens below minimum length",
+      "status": "confirmed",
+      "contractRefs": [],
+      "inputs": {
+        "token": {
+          "type": "string",
+          "minLength": 8
+        }
+      }
+    }
+  ]
+}
