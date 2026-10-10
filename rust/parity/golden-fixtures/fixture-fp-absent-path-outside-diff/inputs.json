@@ -1,44 +1,102 @@
 {
-  "blastRadius": {
-    "blocks": [],
-    "metrics": {
-      "affected_nonempty": 0,
-      "graph_fresh": true,
-      "graph_status": "fresh",
-      "skip_reason": "",
-      "skip_reasons": {},
-      "symbols_resolved": 0,
-      "symbols_total": 0
-    }
-  },
-  "githubResults": {
-    "deleteStaleInline": 0,
-    "postReviewId": 555,
-    "upsertSticky": "created"
-  },
   "loadDiff": {
-    "draft": false,
-    "headSha": "0123456789abcdef0123456789abcdef01234567",
     "pr": {
-      "html_url": "https://github.com/o/r/pull/1",
       "number": 1,
-      "title": "golden PR"
-    }
-  },
-  "prescan": {
-    "byTool": null,
-    "error": null,
-    "findings": [],
-    "lintableTotal": 0,
-    "promptSection": "",
-    "scanned": 0,
-    "skipped": 0,
-    "truncated": false
+      "title": "golden PR",
+      "html_url": "https://github.com/o/r/pull/1"
+    },
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "draft": false
   },
   "priorSticky": {
     "findings": [],
     "runs": [],
     "sha": ""
+  },
+  "prescan": {
+    "findings": [],
+    "scanned": 0,
+    "skipped": 0,
+    "truncated": false,
+    "lintableTotal": 0,
+    "byTool": null,
+    "error": null,
+    "promptSection": ""
+  },
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {}
+    }
+  },
+  "reviews": [
+    {
+      "model": "m1",
+      "summary": "ревью m1",
+      "verdict": "changes_requested",
+      "findings": [
+        {
+          "file": "app/server/routes/orders.ts",
+          "line": 4,
+          "severity": "critical",
+          "confidence": 0.93,
+          "title": "Импорт несуществующего модуля pricing",
+          "body": "Импорт `../services/pricing` указывает на несуществующий файл — сборка упадёт.",
+          "model": "m1"
+        },
+        {
+          "file": "app/server/routes/orders.ts",
+          "line": 5,
+          "severity": "critical",
+          "confidence": 0.92,
+          "title": "Импорт audit-log без файла",
+          "body": "Модуль `../services/audit-log` не существует в репозитории: импорт упадёт при старте.",
+          "model": "m1"
+        }
+      ]
+    },
+    {
+      "model": "m2",
+      "summary": "ревью m2",
+      "verdict": "changes_requested",
+      "findings": [
+        {
+          "file": "app/server/routes/orders.ts",
+          "line": 6,
+          "severity": "major",
+          "confidence": 0.9,
+          "title": "templates не найден",
+          "body": "Cannot find module './templates' — каталога нет в PR.",
+          "model": "m2"
+        },
+        {
+          "file": "app/server/routes/orders.ts",
+          "line": 24,
+          "severity": "minor",
+          "confidence": 0.7,
+          "title": "Нет обработки отсутствующего шаблона",
+          "body": "Если `./templates/index.ts` не существует в окружении, loadTemplate бросит ENOENT без обработки.",
+          "model": "m2"
+        }
+      ]
+    }
+  ],
+  "verifier": {
+    "mode": "none"
+  },
+  "githubResults": {
+    "postReviewId": 555,
+    "deleteStaleInline": 0,
+    "upsertSticky": "created"
+  },
+  "telegram": {
+    "enabled": false
   },
   "repoFiles": [
     "app/server/db.ts",
@@ -46,63 +104,5 @@
     "app/server/routes/templates/index.ts",
     "app/server/services/pricing.ts",
     "package.json"
-  ],
-  "reviews": [
-    {
-      "findings": [
-        {
-          "body": "Импорт `../services/pricing` указывает на несуществующий файл — сборка упадёт.",
-          "confidence": 0.93,
-          "file": "app/server/routes/orders.ts",
-          "line": 4,
-          "model": "m1",
-          "severity": "critical",
-          "title": "Импорт несуществующего модуля pricing"
-        },
-        {
-          "body": "Модуль `../services/audit-log` не существует в репозитории: импорт упадёт при старте.",
-          "confidence": 0.92,
-          "file": "app/server/routes/orders.ts",
-          "line": 5,
-          "model": "m1",
-          "severity": "critical",
-          "title": "Импорт audit-log без файла"
-        }
-      ],
-      "model": "m1",
-      "summary": "ревью m1",
-      "verdict": "changes_requested"
-    },
-    {
-      "findings": [
-        {
-          "body": "Cannot find module './templates' — каталога нет в PR.",
-          "confidence": 0.9,
-          "file": "app/server/routes/orders.ts",
-          "line": 6,
-          "model": "m2",
-          "severity": "major",
-          "title": "templates не найден"
-        },
-        {
-          "body": "Если `./templates/index.ts` не существует в окружении, loadTemplate бросит ENOENT без обработки.",
-          "confidence": 0.7,
-          "file": "app/server/routes/orders.ts",
-          "line": 24,
-          "model": "m2",
-          "severity": "minor",
-          "title": "Нет обработки отсутствующего шаблона"
-        }
-      ],
-      "model": "m2",
-      "summary": "ревью m2",
-      "verdict": "changes_requested"
-    }
-  ],
-  "telegram": {
-    "enabled": false
-  },
-  "verifier": {
-    "mode": "none"
-  }
+  ]
 }

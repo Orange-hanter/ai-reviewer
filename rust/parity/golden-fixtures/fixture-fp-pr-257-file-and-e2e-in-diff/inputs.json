@@ -1,102 +1,102 @@
 {
-  "blastRadius": {
-    "blocks": [],
-    "metrics": {
-      "affected_nonempty": 0,
-      "graph_fresh": true,
-      "graph_status": "fresh",
-      "skip_reason": "",
-      "skip_reasons": {},
-      "symbols_resolved": 0,
-      "symbols_total": 0
-    }
-  },
-  "githubResults": {
-    "deleteStaleInline": 0,
-    "postReviewId": 555,
-    "upsertSticky": "created"
-  },
   "loadDiff": {
-    "draft": false,
-    "headSha": "0123456789abcdef0123456789abcdef01234567",
     "pr": {
-      "html_url": "https://github.com/o/r/pull/1",
       "number": 1,
-      "title": "golden PR"
-    }
-  },
-  "prescan": {
-    "byTool": null,
-    "error": null,
-    "findings": [],
-    "lintableTotal": 0,
-    "promptSection": "",
-    "scanned": 0,
-    "skipped": 0,
-    "truncated": false
+      "title": "golden PR",
+      "html_url": "https://github.com/o/r/pull/1"
+    },
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "draft": false
   },
   "priorSticky": {
     "findings": [],
     "runs": [],
     "sha": ""
   },
-  "repoFiles": null,
+  "prescan": {
+    "findings": [],
+    "scanned": 0,
+    "skipped": 0,
+    "truncated": false,
+    "lintableTotal": 0,
+    "byTool": null,
+    "error": null,
+    "promptSection": ""
+  },
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {}
+    }
+  },
   "reviews": [
     {
-      "findings": [
-        {
-          "body": "файл push-sw.js отсутствует в диффе PR, но подключён через importScripts",
-          "confidence": 0.95,
-          "file": "app/client/public/push-sw.js",
-          "line": 1,
-          "model": "m1",
-          "severity": "major",
-          "title": "push-sw.js отсутствует в PR"
-        },
-        {
-          "body": "playwright e2e отсутствуют для dispatch и NotificationSettings",
-          "confidence": 0.9,
-          "file": "app/server/notifications.ts",
-          "line": 10,
-          "model": "m1",
-          "severity": "major",
-          "title": "нет e2e на web push"
-        }
-      ],
       "model": "m1",
       "summary": "ревью m1",
-      "verdict": "changes_requested"
-    },
-    {
+      "verdict": "changes_requested",
       "findings": [
         {
-          "body": "файл push-sw.js отсутствует в диффе PR",
-          "confidence": 0.93,
           "file": "app/client/public/push-sw.js",
-          "line": 2,
-          "model": "m2",
+          "line": 1,
           "severity": "major",
-          "title": "push-sw.js отсутствует в PR"
+          "confidence": 0.95,
+          "title": "push-sw.js отсутствует в PR",
+          "body": "файл push-sw.js отсутствует в диффе PR, но подключён через importScripts",
+          "model": "m1"
         },
         {
-          "body": "playwright e2e отсутствуют",
-          "confidence": 0.88,
           "file": "app/server/notifications.ts",
-          "line": 11,
-          "model": "m2",
+          "line": 10,
           "severity": "major",
-          "title": "нет e2e на web push"
+          "confidence": 0.9,
+          "title": "нет e2e на web push",
+          "body": "playwright e2e отсутствуют для dispatch и NotificationSettings",
+          "model": "m1"
         }
-      ],
+      ]
+    },
+    {
       "model": "m2",
       "summary": "ревью m2",
-      "verdict": "changes_requested"
+      "verdict": "changes_requested",
+      "findings": [
+        {
+          "file": "app/client/public/push-sw.js",
+          "line": 2,
+          "severity": "major",
+          "confidence": 0.93,
+          "title": "push-sw.js отсутствует в PR",
+          "body": "файл push-sw.js отсутствует в диффе PR",
+          "model": "m2"
+        },
+        {
+          "file": "app/server/notifications.ts",
+          "line": 11,
+          "severity": "major",
+          "confidence": 0.88,
+          "title": "нет e2e на web push",
+          "body": "playwright e2e отсутствуют",
+          "model": "m2"
+        }
+      ]
     }
   ],
+  "verifier": {
+    "mode": "none"
+  },
+  "githubResults": {
+    "postReviewId": 555,
+    "deleteStaleInline": 0,
+    "upsertSticky": "created"
+  },
   "telegram": {
     "enabled": false
   },
-  "verifier": {
-    "mode": "none"
-  }
+  "repoFiles": null
 }

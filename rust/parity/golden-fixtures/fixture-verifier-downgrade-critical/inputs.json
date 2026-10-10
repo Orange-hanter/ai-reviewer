@@ -1,76 +1,76 @@
 {
-  "blastRadius": {
-    "blocks": [],
-    "metrics": {
-      "affected_nonempty": 0,
-      "graph_fresh": true,
-      "graph_status": "fresh",
-      "skip_reason": "",
-      "skip_reasons": {},
-      "symbols_resolved": 0,
-      "symbols_total": 0
-    }
-  },
-  "githubResults": {
-    "deleteStaleInline": 0,
-    "postReviewId": 555,
-    "upsertSticky": "created"
-  },
   "loadDiff": {
-    "draft": false,
-    "headSha": "0123456789abcdef0123456789abcdef01234567",
     "pr": {
-      "html_url": "https://github.com/o/r/pull/1",
       "number": 1,
-      "title": "golden PR"
-    }
-  },
-  "prescan": {
-    "byTool": null,
-    "error": null,
-    "findings": [],
-    "lintableTotal": 0,
-    "promptSection": "",
-    "scanned": 0,
-    "skipped": 0,
-    "truncated": false
+      "title": "golden PR",
+      "html_url": "https://github.com/o/r/pull/1"
+    },
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "draft": false
   },
   "priorSticky": {
     "findings": [],
     "runs": [],
     "sha": ""
   },
-  "repoFiles": null,
+  "prescan": {
+    "findings": [],
+    "scanned": 0,
+    "skipped": 0,
+    "truncated": false,
+    "lintableTotal": 0,
+    "byTool": null,
+    "error": null,
+    "promptSection": ""
+  },
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {}
+    }
+  },
   "reviews": [
     {
-      "findings": [
-        {
-          "body": "нужна проверка прав",
-          "confidence": 0.9,
-          "file": "server/api.ts",
-          "line": 11,
-          "model": "m1",
-          "severity": "critical",
-          "title": "возможный IDOR"
-        }
-      ],
       "model": "m1",
       "summary": "ревью m1",
-      "verdict": "changes_requested"
+      "verdict": "changes_requested",
+      "findings": [
+        {
+          "file": "server/api.ts",
+          "line": 11,
+          "severity": "critical",
+          "confidence": 0.9,
+          "title": "возможный IDOR",
+          "body": "нужна проверка прав",
+          "model": "m1"
+        }
+      ]
     }
   ],
-  "telegram": {
-    "enabled": false
-  },
   "verifier": {
     "mode": "static",
     "verdicts": [
       {
         "candidateIndex": 0,
         "decision": "downgrade",
-        "reason": "риск есть, но auth на route-level — не merge-blocker",
-        "severity": "minor"
+        "severity": "minor",
+        "reason": "риск есть, но auth на route-level — не merge-blocker"
       }
     ]
-  }
+  },
+  "githubResults": {
+    "postReviewId": 555,
+    "deleteStaleInline": 0,
+    "upsertSticky": "created"
+  },
+  "telegram": {
+    "enabled": false
+  },
+  "repoFiles": null
 }

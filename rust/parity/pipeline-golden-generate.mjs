@@ -320,7 +320,10 @@ async function runCase(kase) {
   }), 'utf8');
   const inputsOnDisk = { ...inputs };
   delete inputsOnDisk.diff; // дифф лежит отдельным файлом — не дублируем
-  await writeFile(join(caseDir, 'inputs.json'), stableStringify(inputsOnDisk), 'utf8');
+  // Без сортировки ключей: JS-пайплайн получил эти объекты в исходном порядке и перенёс
+  // его в вывод (напр. прошлые runs в футер sticky). Отсортированный вход дал бы Rust
+  // другой порядок и ложное расхождение с эталоном.
+  await writeFile(join(caseDir, 'inputs.json'), `${JSON.stringify(inputsOnDisk, null, 2)}\n`, 'utf8');
 
   // --- выход
   await writeFile(join(expectedDir, 'exit-code.txt'), `${exitCode}\n`, 'utf8');

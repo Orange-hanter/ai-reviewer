@@ -1,68 +1,68 @@
 {
-  "blastRadius": {
-    "blocks": [],
-    "metrics": {
-      "affected_nonempty": 0,
-      "graph_fresh": true,
-      "graph_status": "fresh",
-      "skip_reason": "",
-      "skip_reasons": {},
-      "symbols_resolved": 0,
-      "symbols_total": 0
-    }
-  },
-  "githubResults": {
-    "deleteStaleInline": 0,
-    "postReviewId": 555,
-    "upsertSticky": "created"
-  },
   "loadDiff": {
-    "draft": false,
-    "headSha": "0123456789abcdef0123456789abcdef01234567",
     "pr": {
-      "html_url": "https://github.com/o/r/pull/1",
       "number": 1,
-      "title": "golden PR"
-    }
-  },
-  "prescan": {
-    "byTool": null,
-    "error": null,
-    "findings": [],
-    "lintableTotal": 0,
-    "promptSection": "",
-    "scanned": 0,
-    "skipped": 0,
-    "truncated": false
+      "title": "golden PR",
+      "html_url": "https://github.com/o/r/pull/1"
+    },
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "draft": false
   },
   "priorSticky": {
     "findings": [],
     "runs": [],
     "sha": ""
   },
-  "repoFiles": null,
+  "prescan": {
+    "findings": [],
+    "scanned": 0,
+    "skipped": 0,
+    "truncated": false,
+    "lintableTotal": 0,
+    "byTool": null,
+    "error": null,
+    "promptSection": ""
+  },
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {}
+    }
+  },
   "reviews": [
     {
-      "findings": [
-        {
-          "body": "нет проверки userId",
-          "confidence": 0.92,
-          "file": "server/api.ts",
-          "line": 11,
-          "model": "m1",
-          "severity": "critical",
-          "title": "IDOR на подписке"
-        }
-      ],
       "model": "m1",
       "summary": "ревью m1",
-      "verdict": "changes_requested"
+      "verdict": "changes_requested",
+      "findings": [
+        {
+          "file": "server/api.ts",
+          "line": 11,
+          "severity": "critical",
+          "confidence": 0.92,
+          "title": "IDOR на подписке",
+          "body": "нет проверки userId",
+          "model": "m1"
+        }
+      ]
     }
   ],
+  "verifier": {
+    "mode": "none"
+  },
+  "githubResults": {
+    "postReviewId": 555,
+    "deleteStaleInline": 0,
+    "upsertSticky": "created"
+  },
   "telegram": {
     "enabled": false
   },
-  "verifier": {
-    "mode": "none"
-  }
+  "repoFiles": null
 }
