@@ -1663,6 +1663,7 @@ mod tests {
             unknown_paths: unknown,
             paths: paths.iter().map(|s| s.to_string()).collect(),
             partial_paths: partial.iter().map(|s| s.to_string()).collect(),
+            ..Chunk::default()
         }
     }
 

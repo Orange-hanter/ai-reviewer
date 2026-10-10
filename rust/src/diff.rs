@@ -465,7 +465,7 @@ pub struct ChunkLimits {
     pub max_chunks: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Chunk {
     pub annotated: String,
@@ -476,6 +476,25 @@ pub struct Chunk {
     pub unknown_paths: bool,
     pub paths: Vec<String>,
     pub partial_paths: Vec<String>,
+    // Поля ниже `build_chunks` не заполняет: их дописывает пайплайн ПОСЛЕ нарезки
+    // (`pipeline.mjs`: «windowedPaths дописываем ПОСЛЕ нарезки»), поэтому паритет нарезки
+    // с JS они не трогают. `None`/пусто — ключа в JSON нет, как у неприсвоенного поля в JS.
+    /// Пути чанка с контекстом, урезанным окнами (RFC 07). `None` — окна не резали
+    /// ни одного файла PR, и поля нет вовсе (`chunk.windowedPaths === undefined`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub windowed_paths: Option<Vec<String>>,
+    /// Готовые строки карточек символов (RFC 14); читает `prompt::build_messages`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub symbol_cards: Vec<String>,
+    /// Имена символов карточек — для `symbol_cards_outcome`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub symbol_card_names: Vec<String>,
+    /// Размер карточек чанка (UTF-16) — метрика `plan.chunkPlan`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol_cards_chars: Option<usize>,
+    /// Сколько карточек отброшено лимитами — метрика `plan`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol_cards_dropped: Option<usize>,
 }
 
 fn is_not_true(b: &bool) -> bool {
@@ -636,6 +655,7 @@ pub fn build_chunks(
                     unknown_paths: cur_unknown,
                     paths,
                     partial_paths,
+                    ..Chunk::default()
                 });
                 cur_segs = Vec::new();
                 cur_content = Vec::new();
@@ -670,6 +690,7 @@ pub fn build_chunks(
             unknown_paths: false,
             paths: Vec::new(),
             partial_paths: Vec::new(),
+            ..Chunk::default()
         }];
     }
     chunks
