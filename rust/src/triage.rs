@@ -1,29 +1,34 @@
-//! Порт lib/triage.mjs (Фаза 3, шаг 7): auto-triage unresolved review threads
-//! (known FP + advisory-only + superseded findings). Потребители: pipeline.mjs
-//! (runAutoTriage над github-клиентом), тесты.
+//! Порт lib/triage.mjs: auto-triage unresolved review threads (known FP +
+//! advisory-only + superseded findings). Потребитель — стадия публикации
+//! пайплайна (`pipeline.mjs:1003-1021`): `build_triage_context` →
+//! `run_auto_triage` над [`GithubApi`].
 //!
-//! Паритет с JS (проверяется rust/parity/triage.parity.mjs):
+//! Паритет с JS:
 //!   - findingLocationKey: линия схлопывается в бакет по 3 строки
 //!     (`Math.floor((ln - 1) / 3)`), ln <= 0/NaN → 'out';
 //!   - parseInlineReviewTitle: регекс с (?i)(?m) — leftmost-first семантика
 //!     regex-crate совпадает с V8 (жадный [^\n]* и (.*) с бэктрекингом);
-//!   - matchesKnownFalsePositive НЕ портирован (JS lookahead в FP-паттернах,
-//!     см. lib/findings.mjs) — обёртка считает FP-совпадение на JS-стороне и
-//!     передаёт бинарю булевым аргументом knownFp; матрица решений сравнивается
-//!     при одинаковом knownFp;
-//!   - MARKERS.inline приходит аргументом (профиль живёт на JS-стороне),
+//!   - matchesKnownFalsePositive считается здесь же (`fp_patterns`, fancy-regex
+//!     с lookahead): `ctx.patternsFile` → `load_fp_patterns`, иначе вшитый набор
+//!     пакета — тот же файл, что `DEFAULT_FP_PATTERNS_PATH` в JS. Паттерны
+//!     грузятся один раз на прогон (в JS — кеш `getFpPatterns`);
+//!   - MARKERS.inline приходит аргументом (профиль — `profile::Markers`),
 //!     hasMarker — startsWith в начале body;
 //!   - trustedAuthors: exact allowlist (case-insensitive) + user.type Bot;
-//!   - buildTriageContext возвращает ключи МНОЖЕСТВ — через JSON они идут
-//!     массивами; JS-обёртка собирает Set обратно (публичный API прежний);
-//!   - runAutoTriage (оркестрация над github-клиентом с DI) не портирован —
-//!     остался чистым JS.
+//!   - advisory, поднятая в строку по доказуемости (`actionabilityPromoted`),
+//!     в `advisoryOnly` не попадает: бот не закрывает тред раньше человека;
+//!   - buildTriageContext возвращает ключи МНОЖЕСТВ массивами (JSON не несёт Set);
+//!   - runAutoTriage fail-open: сбой загрузки тредов → `{0, 0, 1}`, сбой
+//!     ответа/резолва одного треда → `errors++` и следующий тред.
 
 use std::collections::HashSet;
 
+use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::findings::{js_to_number, js_to_string, js_truthy};
+use crate::findings::{js_to_number, js_to_string, js_truthy, matches_known_false_positive};
+use crate::fp_patterns::{default_fp_patterns, load_fp_patterns, FpPattern};
+use crate::traits::{GithubApi, ThreadRef};
 
 pub const AUTO_TRIAGE_MARKER: &str = "🤖 auto-triage";
 pub const DEFAULT_TRUSTED_AUTHORS: &str = "github-actions[bot]";
@@ -79,7 +84,8 @@ pub fn is_trusted_review_author(login: Option<&Value>, trusted_authors: &[String
     if trusted_authors.is_empty() {
         return true;
     }
-    let Some(login) = login else { return false };
+    // `if (!login) return false`: null/'' — не автор.
+    let Some(login) = login.filter(|l| js_truthy(l)) else { return false };
     let l = js_to_string(login).to_lowercase();
     if !trusted_authors.iter().any(|a| l == a.to_lowercase()) {
         return false;
@@ -123,13 +129,13 @@ fn sha7(ctx: Option<&Value>) -> String {
     }
 }
 
-/// Decide whether to auto-resolve a review thread. `known_fp` считает
-/// JS-обёртка (matchesKnownFalsePositive остался в JS — lookahead в паттернах).
+/// Decide whether to auto-resolve a review thread (`decideAutoTriage`).
+/// `patterns` — FP-набор прогона (см. [`fp_patterns_for_ctx`]).
 pub fn decide_auto_triage(
     thread: Option<&Value>,
     ctx: Option<&Value>,
     inline_marker: &str,
-    known_fp: bool,
+    patterns: &[FpPattern],
 ) -> Value {
     let t = thread.and_then(Value::as_object);
     let first_comment = t
@@ -171,8 +177,10 @@ pub fn decide_auto_triage(
         return json!({ "action": "skip", "reason": "active_blocker" });
     }
 
-    let _ = text; // text нужен JS-обёртке для knownFp; здесь решение приходит аргументом.
-    if known_fp {
+    // matchesKnownFalsePositive(text, ctx.changedPaths || [], …): после
+    // blockerKeys — активный блокер не снимается даже совпавшим FP-паттерном.
+    let changed_paths = str_vec(ctx_obj.and_then(|c| c.get("changedPaths")));
+    if matches_known_false_positive(&text, &changed_paths, patterns) {
         return json!({
             "action": "resolve",
             "reason": "known_fp",
@@ -243,7 +251,7 @@ pub fn build_triage_context(input: Option<&Value>) -> Value {
         .collect();
     let promoted_keys: HashSet<String> = all_findings
         .iter()
-        .filter(|f| js_truthy(f.get("severity").unwrap_or(&Value::Null)) && js_truthy(f.get("actionabilityPromoted").unwrap_or(&Value::Null)))
+        .filter(|f| js_truthy(f.get("actionabilityPromoted").unwrap_or(&Value::Null)))
         .map(key_of)
         .collect();
     // Advisory, поднятая в строку по доказуемости (actionabilityPromoted), из
@@ -279,6 +287,103 @@ pub fn build_triage_context(input: Option<&Value>) -> Value {
     out.insert("patternsFile".into(), get("patternsFile").cloned().unwrap_or(Value::Null));
     out.insert("trustedAuthors".into(), trusted_authors);
     Value::Object(out)
+}
+
+/// FP-набор прогона: `ctx.patternsFile || DEFAULT_FP_PATTERNS_PATH`. Пустой или
+/// нечитаемый файл откатывается на вшитый набор (`load_fp_patterns`) — как в JS.
+/// Путь приходит из конфига (`cfg.feedback.patternsFile`), не от автора PR.
+/// Вшитый набор не копируется: `FpPattern` держит скомпилированные регексы.
+pub enum FpSet {
+    Embedded(&'static [FpPattern]),
+    Owned(Vec<FpPattern>),
+}
+
+impl std::ops::Deref for FpSet {
+    type Target = [FpPattern];
+    fn deref(&self) -> &[FpPattern] {
+        match self {
+            FpSet::Embedded(p) => p,
+            FpSet::Owned(v) => v,
+        }
+    }
+}
+
+pub fn fp_patterns_for_ctx(ctx: &Value) -> FpSet {
+    match ctx.get("patternsFile") {
+        Some(v) if js_truthy(v) => FpSet::Owned(load_fp_patterns(std::path::Path::new(&js_to_string(v)))),
+        _ => FpSet::Embedded(default_fp_patterns()),
+    }
+}
+
+/// Итог `runAutoTriage` — уходит в `obs.logEvent('auto_triage', …)`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct TriageStats {
+    pub resolved: usize,
+    pub skipped: usize,
+    pub errors: usize,
+}
+
+/// `${thread.line}` в логе: `null` у треда на удалённой строке.
+fn line_label(line: Option<u64>) -> String {
+    line.map_or_else(|| "null".to_string(), |l| l.to_string())
+}
+
+/// Resolve eligible threads; fail-open (`runAutoTriage`, `lib/triage.mjs:73-110`).
+///
+/// Треды, решение по которым `skip` (в т.ч. активный блокер и поднятая
+/// по доказуемости advisory — `still_active`), не трогаются вовсе. Ответ в тред
+/// пишется один раз: если в нём уже есть [`AUTO_TRIAGE_MARKER`], повторный
+/// прогон только резолвит.
+pub fn run_auto_triage(
+    github: &dyn GithubApi,
+    ctx: &Value,
+    inline_marker: &str,
+    log: &dyn Fn(&str),
+) -> TriageStats {
+    let threads: Vec<ThreadRef> = match github.list_unresolved_review_threads() {
+        Ok(t) => t,
+        Err(e) => {
+            log(&format!("auto-triage: не удалось загрузить threads (fail-open): {e}"));
+            return TriageStats { resolved: 0, skipped: 0, errors: 1 };
+        }
+    };
+    let patterns = fp_patterns_for_ctx(ctx);
+    let mut stats = TriageStats::default();
+
+    for thread in &threads {
+        let tv = serde_json::to_value(thread).unwrap_or(Value::Null);
+        let decision = decide_auto_triage(Some(&tv), Some(ctx), inline_marker, &patterns);
+        if decision.get("action").and_then(Value::as_str) != Some("resolve") {
+            stats.skipped += 1;
+            continue;
+        }
+        let already_triaged = thread.comments.iter().any(|c| c.body.contains(AUTO_TRIAGE_MARKER));
+        let reply = decision.get("reply").and_then(Value::as_str).filter(|r| !r.is_empty());
+        let res = (|| -> anyhow::Result<()> {
+            if let Some(reply) = reply {
+                if !already_triaged {
+                    github.reply_review_thread(&thread.id, reply)?;
+                }
+            }
+            github.resolve_review_thread(&thread.id)
+        })();
+        match res {
+            Ok(()) => {
+                stats.resolved += 1;
+                let reason = decision.get("reason").and_then(Value::as_str).unwrap_or("");
+                log(&format!(
+                    "auto-triage: resolved {}:{} ({reason})",
+                    thread.path,
+                    line_label(thread.line)
+                ));
+            }
+            Err(e) => {
+                stats.errors += 1;
+                log(&format!("auto-triage: thread {} fail-open: {e}", thread.id));
+            }
+        }
+    }
+    stats
 }
 
 // ---------------------------------------------------------------------------
@@ -378,27 +483,27 @@ mod tests {
         let author = "github-actions[bot]";
 
         // не наш комментарий
-        let d = decide_auto_triage(Some(&mk_thread("чужой комментарий", author, "a.ts", 1)), Some(&ctx), MARKER, false);
+        let d = decide_auto_triage(Some(&mk_thread("чужой комментарий", author, "a.ts", 1)), Some(&ctx), MARKER, &[]);
         assert_eq!(d, json!({ "action": "skip", "reason": "not_ai_inline" }));
 
         // недоверенный автор
         let d = decide_auto_triage(
             Some(&mk_thread(&format!("{MARKER}\n**critical: x**"), "human", "a.ts", 1)),
-            Some(&ctx), MARKER, false,
+            Some(&ctx), MARKER, &[],
         );
         assert_eq!(d, json!({ "action": "skip", "reason": "untrusted_author" }));
 
         // активный блокер
         let d = decide_auto_triage(
             Some(&mk_thread(&format!("{MARKER}\n🔴 **critical: blocker**"), author, "a.ts", 2)),
-            Some(&ctx), MARKER, false,
+            Some(&ctx), MARKER, &[],
         );
         assert_eq!(d, json!({ "action": "skip", "reason": "active_blocker" }));
 
         // advisory (minor, не поднятая)
         let d = decide_auto_triage(
             Some(&mk_thread(&format!("{MARKER}\n🟡 **minor: advisory**"), author, "b.ts", 2)),
-            Some(&ctx), MARKER, false,
+            Some(&ctx), MARKER, &[],
         );
         assert_eq!(d["action"], json!("resolve"));
         assert_eq!(d["reason"], json!("advisory_only"));
@@ -408,22 +513,25 @@ mod tests {
         // advisory поднятая в строку — не резолвится
         let d = decide_auto_triage(
             Some(&mk_thread(&format!("{MARKER}\n🔵 **nit: promoted**"), author, "d.ts", 4)),
-            Some(&ctx), MARKER, false,
+            Some(&ctx), MARKER, &[],
         );
         assert_eq!(d, json!({ "action": "skip", "reason": "still_active" }));
 
         // superseded — нет в текущем прогоне
         let d = decide_auto_triage(
             Some(&mk_thread(&format!("{MARKER}\n🟠 **major: gone**"), author, "zzz.ts", 9)),
-            Some(&ctx), MARKER, false,
+            Some(&ctx), MARKER, &[],
         );
         assert_eq!(d["action"], json!("resolve"));
         assert_eq!(d["reason"], json!("superseded"));
 
-        // known_fp
+        // known_fp: вшитый набор пакета (e2e-in-diff), requiresPath — по changedPaths ctx
+        let ctx_fp = build_triage_context(Some(&json!({
+            "allFindings": [], "changedPaths": ["e2e/login.spec.ts"], "headSha": "abcdef1234",
+        })));
         let d = decide_auto_triage(
-            Some(&mk_thread(&format!("{MARKER}\n🟡 **minor: fp**"), author, "zzz.ts", 9)),
-            Some(&ctx), MARKER, true,
+            Some(&mk_thread(&format!("{MARKER}\n🟡 **minor: no e2e tests**"), author, "zzz.ts", 9)),
+            Some(&ctx_fp), MARKER, default_fp_patterns(),
         );
         assert_eq!(d["action"], json!("resolve"));
         assert_eq!(d["reason"], json!("known_fp"));
@@ -441,7 +549,7 @@ mod tests {
         })));
         let d = decide_auto_triage(
             Some(&mk_thread(&format!("{MARKER}\n🟠 **major: active advisory**"), author, "e.ts", 7)),
-            Some(&ctx2), MARKER, false,
+            Some(&ctx2), MARKER, &[],
         );
         assert_eq!(d["action"], json!("resolve"));
         assert_eq!(d["reason"], json!("advisory_only"));
@@ -453,7 +561,7 @@ mod tests {
         })));
         let d = decide_auto_triage(
             Some(&mk_thread(&format!("{MARKER}\n🟡 **minor: m**"), author, "e.ts", 7)),
-            Some(&ctx3), MARKER, false,
+            Some(&ctx3), MARKER, &[],
         );
         assert_eq!(d["reason"], json!("superseded"));
         assert!(d["reply"].as_str().unwrap().contains("SHA `?`"));
@@ -483,5 +591,171 @@ mod tests {
         let ctx2 = build_triage_context(Some(&json!({ "allFindings": [{ "file": "x", "line": 1, "severity": "major" }] })));
         assert_eq!(ctx2["blockOn"], json!(["critical", "major"]));
         assert!(ctx2["advisoryOnly"].as_array().unwrap().is_empty());
+    }
+
+    // ---- run_auto_triage над GithubApi ----
+
+    use crate::testutil::{CallRecord, FakeGithub};
+    use crate::traits::ThreadComment;
+    use std::sync::Mutex;
+
+    fn tref(id: &str, path: &str, line: Option<u64>, bodies: &[(&str, Option<&str>)]) -> ThreadRef {
+        ThreadRef {
+            id: id.into(),
+            path: path.into(),
+            line,
+            comments: bodies
+                .iter()
+                .map(|(b, a)| ThreadComment { body: b.to_string(), author: a.map(str::to_string) })
+                .collect(),
+        }
+    }
+
+    fn collect_log() -> (std::sync::Arc<Mutex<Vec<String>>>, impl Fn(&str)) {
+        let buf = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let b2 = buf.clone();
+        (buf, move |m: &str| b2.lock().unwrap().push(m.to_string()))
+    }
+
+    #[test]
+    fn run_list_failure_is_fail_open() {
+        let gh = FakeGithub::new().failing(|r| match r {
+            CallRecord::ListUnresolvedReviewThreads => Some("graphql 502".into()),
+            _ => None,
+        });
+        let (buf, log) = collect_log();
+        let stats = run_auto_triage(&gh, &build_triage_context(None), MARKER, &log);
+        assert_eq!(stats, TriageStats { resolved: 0, skipped: 0, errors: 1 });
+        assert_eq!(
+            buf.lock().unwrap().as_slice(),
+            ["auto-triage: не удалось загрузить threads (fail-open): graphql 502"]
+        );
+        assert_eq!(serde_json::to_value(stats).unwrap(), json!({ "resolved": 0, "skipped": 0, "errors": 1 }));
+    }
+
+    #[test]
+    fn run_matrix_over_fake_github() {
+        let bot = Some("github-actions[bot]");
+        let ctx = build_triage_context(Some(&json!({
+            "allFindings": [
+                { "file": "a.ts", "line": 1, "severity": "critical" },
+                { "file": "b.ts", "line": 2, "severity": "minor" },
+                // поднятая в строку advisory — тред ждёт человека
+                { "file": "d.ts", "line": 4, "severity": "nit", "actionabilityPromoted": true, "actionabilityScore": 3 },
+            ],
+            "blockers": [{ "file": "a.ts", "line": 1, "severity": "critical" }],
+            "headSha": "abcdef1234",
+        })));
+        let m = |t: &str| format!("{MARKER}\n{t}");
+        let threads = vec![
+            tref("t-blocker", "a.ts", Some(1), &[(&m("🔴 **critical: x**"), bot)]),
+            tref("t-promoted", "d.ts", Some(4), &[(&m("🔵 **nit: read me**"), bot)]),
+            tref("t-advisory", "b.ts", Some(2), &[(&m("🟡 **minor: adv**"), bot)]),
+            // уже отвечали — только резолв, без второго ответа
+            tref(
+                "t-again",
+                "gone.ts",
+                None,
+                &[(&m("🟠 **major: old**"), bot), ("✅ …\n<sub>🤖 auto-triage</sub>", bot)],
+            ),
+            tref("t-human", "gone.ts", Some(9), &[(&m("🟠 **major: spoof**"), Some("mallory"))]),
+            tref("t-noauthor", "gone.ts", Some(9), &[(&m("🟠 **major: ghost**"), None)]),
+            tref("t-foreign", "gone.ts", Some(9), &[("обычный комментарий", bot)]),
+            // ответ упал — errors++, цикл идёт дальше
+            tref("t-broken", "gone.ts", Some(12), &[(&m("🟠 **major: y**"), bot)]),
+            tref("t-last", "gone.ts", Some(30), &[(&m("🟡 **minor: z**"), bot)]),
+        ];
+        let gh = FakeGithub::new().with_threads(threads).failing(|r| match r {
+            CallRecord::ReplyReviewThread { thread_id, .. } if thread_id == "t-broken" => {
+                Some("mutation failed".into())
+            }
+            _ => None,
+        });
+        let (buf, log) = collect_log();
+        let stats = run_auto_triage(&gh, &ctx, MARKER, &log);
+        assert_eq!(stats, TriageStats { resolved: 3, skipped: 5, errors: 1 });
+
+        let calls: Vec<String> = gh
+            .core
+            .calls
+            .records()
+            .into_iter()
+            .filter_map(|r| match r {
+                CallRecord::ReplyReviewThread { thread_id, body } => {
+                    assert!(body.starts_with(MARKER) && body.contains("SHA `abcdef1`"));
+                    Some(format!("reply:{thread_id}"))
+                }
+                CallRecord::ResolveReviewThread { thread_id } => Some(format!("resolve:{thread_id}")),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                "reply:t-advisory",
+                "resolve:t-advisory",
+                "resolve:t-again",
+                "reply:t-broken",
+                "reply:t-last",
+                "resolve:t-last",
+            ]
+        );
+        let logs = buf.lock().unwrap().clone();
+        assert_eq!(
+            logs,
+            [
+                "auto-triage: resolved b.ts:2 (advisory_only)",
+                "auto-triage: resolved gone.ts:null (superseded)",
+                "auto-triage: thread t-broken fail-open: mutation failed",
+                "auto-triage: resolved gone.ts:30 (superseded)",
+            ]
+        );
+    }
+
+    #[test]
+    fn run_known_fp_uses_patterns_file_and_falls_back() {
+        let dir = std::env::temp_dir().join(format!("triage-fp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("fp.jsonl");
+        std::fs::write(&file, r#"{"id":"custom","regex":"нужен\\s+мьютекс(?=\\s|$)"}"#).unwrap();
+        let bot = Some("github-actions[bot]");
+        // находка жива в текущем прогоне (иначе superseded), но совпала с FP — known_fp
+        let ctx = build_triage_context(Some(&json!({
+            "allFindings": [{ "file": "c.ts", "line": 5, "severity": "major" }],
+            "headSha": "1234567890",
+            "patternsFile": file.to_string_lossy(),
+        })));
+        let thread = tref("t1", "c.ts", Some(5), &[(&format!("{MARKER}\n🟠 **major: нужен мьютекс here**"), bot)]);
+        let gh = FakeGithub::new().with_threads(vec![thread.clone()]);
+        let (buf, log) = collect_log();
+        assert_eq!(run_auto_triage(&gh, &ctx, MARKER, &log).resolved, 1);
+        assert_eq!(buf.lock().unwrap().as_slice(), ["auto-triage: resolved c.ts:5 (known_fp)"]);
+
+        // нечитаемый файл → вшитый набор: кастомного паттерна там нет, тред остаётся
+        let ctx_missing = build_triage_context(Some(&json!({
+            "allFindings": [{ "file": "c.ts", "line": 5, "severity": "major" }],
+            "patternsFile": dir.join("absent.jsonl").to_string_lossy(),
+        })));
+        let gh = FakeGithub::new().with_threads(vec![thread]);
+        let stats = run_auto_triage(&gh, &ctx_missing, MARKER, &|_| {});
+        assert_eq!(stats, TriageStats { resolved: 0, skipped: 1, errors: 0 });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn promoted_without_severity_is_not_advisory() {
+        // JS: promotedKeys не смотрит на severity; находка без severity — не в tiers,
+        // но поднята — значит не advisory.
+        let ctx = build_triage_context(Some(&json!({
+            "allFindings": [{ "file": "x.ts", "line": 1, "actionabilityPromoted": true }],
+        })));
+        assert!(ctx["advisoryOnly"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn empty_login_is_untrusted() {
+        let authors = vec!["".to_string(), "bot".to_string()];
+        assert!(!is_trusted_review_author(Some(&json!("")), &authors, None));
+        assert!(!is_trusted_review_author(Some(&Value::Null), &authors, None));
     }
 }
