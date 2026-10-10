@@ -473,7 +473,7 @@ T08 замораживает сигнатуры трейтов до того, к
 | T39 | `incremental.rs` ← `lib/incremental.mjs` (RFC 05): хэш входа модели по файлу, состояние в `paths.incrementalState`, `fullEvery`; перенос находок **после** refutation и verifier. Зависит от T04, T05 | `cargo test incremental::`; кейсы `test/incremental.test.mjs` |
 | T26 | `pipeline.rs` ← `pipeline.mjs` (`createReviewPipeline`/`runDetailed`/`runGateResolution`; после слияния `main` — 1066 строк: `repoIndex` для FP-семейства 7, окна контекста, карточки символов, инкрементальный перенос, `efficiencyMetrics` в `run_end`), `PipelineOutcome` вместо `die`/`exit`. Зависит от T24, T28, T29, T34–T39 | `cargo build`; `cargo test pipeline::` |
 | T28 | `eval.rs` + подкоманда `eval`, замена стаба `bin/eval.rs` | `pr-review eval` → 16/16 |
-| T29 | подкоманда `metrics` ← `bin/pr-review-metrics.mjs` | отчёт совпадает по структуре с JS |
+| ✅ T29 | подкоманда `metrics` ← `bin/pr-review-metrics.mjs` | отчёт совпадает по структуре с JS |
 
 **Волна 5**
 
