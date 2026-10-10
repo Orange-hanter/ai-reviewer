@@ -96,3 +96,31 @@ test('filterFalsePositiveFindings: prescan-находку о неразрешё�
   };
   assert.equal(filterFalsePositiveFindings([prescan], ['src/a.ts'], () => {}, { repoIndex: idx }).length, 1);
 });
+
+test('filterFalsePositiveFindings: бинарь без подтверждения repoIndexApplied (собран до T34) не выключает семейство 7', async (t) => {
+  const { mkdtempSync, writeFileSync, chmodSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(join(tmpdir(), 'fp-old-bin-'));
+  const bin = join(dir, 'findings');
+  // Старый контракт: {kept, logs}, о repoIndexFiles не знает — оставляет всё.
+  writeFileSync(bin, `#!${process.execPath}
+let s = ''; process.stdin.on('data', (c) => { s += c; }).on('end', () => {
+  const a = JSON.parse(s);
+  process.stdout.write(JSON.stringify({ kept: a.findings.map((_, i) => i), logs: [] }));
+});
+`);
+  chmodSync(bin, 0o755);
+  const prev = process.env.AI_REVIEWER_FINDINGS_BIN;
+  process.env.AI_REVIEWER_FINDINGS_BIN = bin;
+  t.after(() => {
+    if (prev === undefined) delete process.env.AI_REVIEWER_FINDINGS_BIN; else process.env.AI_REVIEWER_FINDINGS_BIN = prev;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const findings = [
+    { file: 'src/a.ts', line: 1, severity: 'critical', title: 'Модуль не найден', body: "Cannot find module './helpers'", model: 'm1' },
+    { file: 'src/a.ts', line: 2, severity: 'major', title: 'IDOR', body: 'нет проверки userId', model: 'm1' },
+  ];
+  const kept = filterFalsePositiveFindings(findings, ['src/a.ts'], () => {}, { repoIndex: idx });
+  assert.deepEqual(kept.map((f) => f.title), ['IDOR']);
+});

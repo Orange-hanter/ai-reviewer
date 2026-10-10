@@ -23,7 +23,7 @@
 //!   attachFingerprints         {findings, files?}         → [{index, fp}]
 //!   filterStalePriorFindings   {priors, files}            → {kept, codeChanged, outOfDiff, staleLegacy, legacy}
 //!   matchesKnownFalsePositive  {text, changedPaths, patterns?|patternsFile?} → bool
-//!   filterFalsePositiveFindings {findings, changedPaths, patterns?|patternsFile?} → {kept, logs}
+//!   filterFalsePositiveFindings {findings, changedPaths, patterns?|patternsFile?, repoIndexFiles?} → {kept, logs, repoIndexApplied}
 //!
 //! Источник FP-паттернов задаётся одним из двух аргументов (как `opts` в JS):
 //!   `patterns`     — готовый список `{id, regex, requiresPath?, matchChangedBasename?}`,
@@ -324,7 +324,9 @@ fn run() -> Result<()> {
                 patterns.as_slice(),
                 repo_index.as_ref(),
             );
-            json!({ "kept": outcome.kept, "logs": outcome.logs })
+            // repoIndexApplied — подтверждение для обёртки: бинарь до T34 поле не знает,
+            // и без подтверждения JS применяет семейство 7 сам, а не теряет его молча.
+            json!({ "kept": outcome.kept, "logs": outcome.logs, "repoIndexApplied": repo_index.is_some() })
         }
         other => bail!("unknown op: '{other}'"),
     };
