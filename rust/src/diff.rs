@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
+use indexmap::IndexMap;
 use serde_json::Value;
 
 // ---------------------------------------------------------------------------
@@ -675,6 +676,130 @@ pub fn build_chunks(
 }
 
 // ---------------------------------------------------------------------------
+// readChangedFiles — чтение затронутых файлов для контекста модели (RFC 16 T35)
+// ---------------------------------------------------------------------------
+
+/// Пути, чьё содержимое модели не нужно: lock-файлы, бинарные и медиа-форматы.
+/// Тот же список, что в `readChangedFiles` (lib/diff.mjs); регекс линейный (crate regex).
+fn skip_context_re() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)(^|/)package-lock\.json$|\.(lock|png|jpe?g|gif|svg|ico|pdf|min\.js|map|heic|heif|webp|avif|xlsx?|docx?|pptx?|zip|gz|tgz|bz2|7z|rar|mp[34]|mov|avi|woff2?|ttf|otf|eot|wasm|jar|pyc|so|dylib|dll|exe)$",
+        )
+        .expect("skip_context_re")
+    })
+}
+
+/// `addedFileMarker`: запись контекста для добавленного файла — указатель на дифф вместо
+/// второго экземпляра содержимого (RFC 04). Без тела в кавычках, поэтому окна
+/// (`context_window`) её не режут.
+pub fn added_file_marker(path: &str) -> String {
+    format!("### {path}\n(новый файл — его полное содержимое целиком приведено в диффе ниже)")
+}
+
+/// Окно проверки на NUL — первые 64 КБ: детерминированная защита без чтения гигабайтов.
+const NUL_PROBE_BYTES: usize = 65_536;
+
+/// `readChangedFiles` относительно рабочего каталога процесса (как `process.cwd()` в JS).
+/// Не удалось узнать cwd — пустая карта: контекст файлов не критичен (fail-open).
+pub fn read_changed_files<I, S>(
+    paths: I,
+    max_file_lines: f64,
+    log: &mut dyn FnMut(&str),
+    added_paths: Option<&[String]>,
+) -> IndexMap<String, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    match std::env::current_dir() {
+        Ok(root) => read_changed_files_in(&root, paths, max_file_lines, log, added_paths),
+        Err(_) => IndexMap::new(),
+    }
+}
+
+/// `readChangedFiles` (lib/diff.mjs): затронутые файлы → записи контекста
+/// `### path` + тело в тройных кавычках, до `max_file_lines` строк с хвостом
+/// `… (показаны первые N из M строк)`. Порядок — порядок путей (ключи карты parseDiff).
+///
+/// Пропускаются молча: lock/бинарные расширения, нечитаемые файлы (нет, каталог, права).
+/// С записью в лог: путь вне `root` и файл с NUL в первых 64 КБ.
+/// `added_paths` — пути, добавленные PR (`collect_added_paths`): вместо содержимого
+/// кладётся `added_file_marker`, файл не читается вовсе.
+///
+/// Пути — из диффа автора PR, т.е. недоверенные. Containment проверяется дважды:
+/// лексически (`path.resolve`, как в JS) и по realpath — symlink внутри репо, указывающий
+/// наружу (`ln -s /etc/passwd x.ts`), иначе отдал бы модели чужой файл.
+pub fn read_changed_files_in<I, S>(
+    root: &std::path::Path,
+    paths: I,
+    max_file_lines: f64,
+    log: &mut dyn FnMut(&str),
+    added_paths: Option<&[String]>,
+) -> IndexMap<String, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut map = IndexMap::new();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+    let root = crate::util::js_resolve(&cwd, &root.to_string_lossy());
+    // realpath корня один раз; не раскрылся — сравниваем с лексическим (чтение всё равно упадёт).
+    let real_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+    // `abs !== root && !abs.startsWith(root + sep)`: сам root «внутри» (чтение каталога упадёт молча).
+    let inside = |p: &std::path::Path, base: &std::path::Path| p == base || p.starts_with(base);
+
+    for path in paths {
+        let path = path.as_ref();
+        if skip_context_re().is_match(path) {
+            continue;
+        }
+        if added_paths.is_some_and(|a| a.iter().any(|p| p == path)) {
+            map.insert(path.to_string(), added_file_marker(path));
+            continue;
+        }
+        let abs = crate::util::js_resolve(&root, path);
+        if !inside(&abs, &root) {
+            log(&format!("пропуск файла вне репо: {path}"));
+            continue;
+        }
+        let Ok(real) = std::fs::canonicalize(&abs) else { continue };
+        if !inside(&real, &real_root) {
+            log(&format!("пропуск файла вне репо: {path}"));
+            continue;
+        }
+        let Ok(buf) = std::fs::read(&real) else { continue };
+        if buf[..buf.len().min(NUL_PROBE_BYTES)].contains(&0) {
+            log(&format!("пропуск бинарного файла (NUL byte): {path}"));
+            continue;
+        }
+        // Buffer#toString('utf8'): битые последовательности → U+FFFD, BOM сохраняется.
+        let content = String::from_utf8_lossy(&buf);
+        let lines: Vec<&str> = content.split('\n').collect();
+        let end = js_slice_end(max_file_lines, lines.len());
+        let mut body = lines[..end].join("\n");
+        if (lines.len() as f64) > max_file_lines {
+            body.push_str(&format!(
+                "\n… (показаны первые {} из {} строк)",
+                crate::structure_evidence::js_number_to_string(max_file_lines),
+                lines.len()
+            ));
+        }
+        map.insert(path.to_string(), format!("### {path}\n```\n{body}\n```"));
+    }
+    map
+}
+
+/// Конец `slice(0, end)` в JS: ToIntegerOrInfinity (NaN → 0), отрицательный — от конца.
+fn js_slice_end(end: f64, len: usize) -> usize {
+    let t = if end.is_nan() { 0.0 } else { end.trunc() };
+    let len_f = len as f64;
+    let v = if t < 0.0 { (len_f + t).max(0.0) } else { t.min(len_f) };
+    v as usize
+}
+
+// ---------------------------------------------------------------------------
 // Тесты — ключевые случаи из test/pr-review.test.mjs
 // ---------------------------------------------------------------------------
 
@@ -912,5 +1037,107 @@ new file mode 100644
 "#;
         assert_eq!(collect_added_paths(diff), vec!["new.ts", "with space.md", "empty.txt"]);
         assert!(collect_added_paths("").is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // read_changed_files (RFC 16 T35)
+    // -----------------------------------------------------------------------
+
+    fn read_in(
+        root: &std::path::Path,
+        paths: &[&str],
+        max: f64,
+        added: Option<&[String]>,
+    ) -> (IndexMap<String, String>, Vec<String>) {
+        let mut logs = Vec::new();
+        let map = read_changed_files_in(root, paths.iter(), max, &mut |m: &str| logs.push(m.to_string()), added);
+        (map, logs)
+    }
+
+    #[test]
+    fn read_changed_files_обычный_и_усечение() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(tmp.path().join("src/a.ts"), "l1\nl2\nl3\nl4\n").unwrap();
+        let (map, logs) = read_in(tmp.path(), &["src/a.ts"], 100.0, None);
+        assert_eq!(map["src/a.ts"], "### src/a.ts\n```\nl1\nl2\nl3\nl4\n\n```");
+        assert!(logs.is_empty());
+        // 5 элементов split('\n') (хвостовой '\n' даёт пустой) > 2 → хвост-маркер.
+        let (map, _) = read_in(tmp.path(), &["src/a.ts"], 2.0, None);
+        assert_eq!(map["src/a.ts"], "### src/a.ts\n```\nl1\nl2\n… (показаны первые 2 из 5 строк)\n```");
+    }
+
+    #[test]
+    fn read_changed_files_добавленный_файл_маркером() {
+        let tmp = tempfile::tempdir().unwrap();
+        let body = format!("export const a = 1;\n{}", "// заполнение\n".repeat(200));
+        std::fs::write(tmp.path().join("n.ts"), &body).unwrap();
+        let (full, _) = read_in(tmp.path(), &["n.ts"], 100.0, None);
+        assert!(full["n.ts"].contains("export const a = 1;"));
+        let added = vec!["n.ts".to_string(), "missing.ts".to_string()];
+        let (skipped, _) = read_in(tmp.path(), &["n.ts", "missing.ts"], 100.0, Some(&added));
+        assert_eq!(skipped["n.ts"], added_file_marker("n.ts"));
+        assert!(skipped["n.ts"].contains("новый файл"));
+        assert!(skipped["n.ts"].len() < full["n.ts"].len());
+        assert!(skipped.contains_key("missing.ts"), "добавленный файл не читается — маркер и без файла на диске");
+        // Маркер не режется окнами.
+        let w = crate::context_window::window_file_entry(&skipped["n.ts"], &[1.0], 1.0);
+        assert_eq!(w, skipped["n.ts"]);
+    }
+
+    #[test]
+    fn read_changed_files_пропуски() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("bin.dat"), [0x89u8, 0x50, 0x4e, 0x47, 0x00, 0x0d]).unwrap();
+        std::fs::write(tmp.path().join("yarn.lock"), "x").unwrap();
+        std::fs::write(tmp.path().join("pic.PNG"), "x").unwrap();
+        std::fs::write(tmp.path().join("package-lock.json"), "{}").unwrap();
+        std::fs::create_dir(tmp.path().join("dir")).unwrap();
+        let (map, logs) = read_in(
+            tmp.path(),
+            &["bin.dat", "yarn.lock", "pic.PNG", "package-lock.json", "dir", "nope.ts", ""],
+            100.0,
+            None,
+        );
+        assert!(map.is_empty(), "{map:?}");
+        assert_eq!(logs, ["пропуск бинарного файла (NUL byte): bin.dat"]);
+    }
+
+    #[test]
+    fn read_changed_files_путь_вне_репо() {
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(outer.path().join("secret.txt"), "TOKEN").unwrap();
+        let (map, logs) = read_in(&root, &["../secret.txt", "/etc/hosts"], 100.0, None);
+        assert!(map.is_empty());
+        assert_eq!(logs, ["пропуск файла вне репо: ../secret.txt", "пропуск файла вне репо: /etc/hosts"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_changed_files_symlink_наружу_не_читается() {
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(outer.path().join("secret.txt"), "TOKEN").unwrap();
+        std::os::unix::fs::symlink(outer.path().join("secret.txt"), root.join("x.ts")).unwrap();
+        std::fs::write(root.join("in.ts"), "ok").unwrap();
+        std::os::unix::fs::symlink(root.join("in.ts"), root.join("link.ts")).unwrap();
+        let (map, logs) = read_in(&root, &["x.ts", "link.ts"], 100.0, None);
+        assert!(!map.contains_key("x.ts"));
+        assert_eq!(map["link.ts"], "### link.ts\n```\nok\n```", "symlink внутри репо читается");
+        assert_eq!(logs, ["пропуск файла вне репо: x.ts"]);
+    }
+
+    #[test]
+    fn read_changed_files_невалидный_utf8_и_nan_лимит() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), [b'a', 0xff, b'b']).unwrap();
+        let (map, _) = read_in(tmp.path(), &["a.txt"], 100.0, None);
+        assert_eq!(map["a.txt"], "### a.txt\n```\na\u{fffd}b\n```");
+        // slice(0, NaN) → пусто; 1 > NaN — false, хвоста нет.
+        let (map, _) = read_in(tmp.path(), &["a.txt"], f64::NAN, None);
+        assert_eq!(map["a.txt"], "### a.txt\n```\n\n```");
     }
 }

@@ -8,7 +8,9 @@ process.env.OLLAMA_MODELS = 'm1,m2';
 import './helpers/reference-profile.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, rm, readFile } from 'node:fs/promises';
+import { writeFile, rm, readFile, symlink } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { MARKERS, extractStickyFooterRaw } from '../lib/constants.mjs';
 
 const {
@@ -559,6 +561,23 @@ test('readChangedFiles: бинарный файл (NUL byte) пропускае�
     assert.equal(map.size, 0, 'бинарь не попадает в контекст модели');
   } finally {
     await rm(tmp, { force: true });
+  }
+});
+
+test('readChangedFiles: symlink наружу из репо не читается', async () => {
+  const link = `.tmp-pr-review-link-${process.pid}.ts`;
+  const outside = join(tmpdir(), `pr-review-secret-${process.pid}.txt`);
+  await writeFile(outside, 'TOKEN');
+  await symlink(outside, link);
+  try {
+    const logs = [];
+    const files = new Map([[link, { validLines: new Set([1]), changed: [] }]]);
+    const map = await readChangedFiles(files, { maxFileLines: 100 }, (m) => logs.push(m));
+    assert.equal(map.size, 0, 'содержимое за пределами репо не попадает в контекст');
+    assert.deepEqual(logs, [`пропуск файла вне репо: ${link}`]);
+  } finally {
+    await rm(link, { force: true });
+    await rm(outside, { force: true });
   }
 });
 
