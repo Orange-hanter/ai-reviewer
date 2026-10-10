@@ -21,9 +21,17 @@
 //! - aggregateModel: summary — первое truthy; все части с ошибкой →
 //!   error parts[0] || 'нет ответа', skipped только если ВСЕ части skipped;
 //!   дедуп — findings::dedupe_same_model_findings (копии, как {...f}).
-//!   Окончательный выбор summary (из чанка с кодом) делает JS-обёртка
-//!   pickAggregateSummary поверх обеих веток: ей нужна маршрутизация чанков,
-//!   которая живёт только в lib/chunk-routing.mjs.
+//!   Окончательный выбор summary (из чанка с кодом) делается поверх
+//!   aggregate_model: в JS — обёрткой pickAggregateSummary над обеими ветками
+//!   моста, здесь — [`pick_aggregate_summary`] внутри [`RealEngine`] (мосту
+//!   маршрутизация чанков не передаётся, его контракт не меняется).
+//!
+//! RFC 04 в [`RealEngine`] (T37): чанк без исполняемого файла идёт одним вызовом
+//! агрегатора без жюри ([`crate::chunk_routing`]) — его находки без advisorClaims и
+//! merge не блокируют; роли на одной модели опрашиваются одним вызовом
+//! ([`crate::specialist_merge`]), а сорванный формат секций отдаёт жюри ОДНОГО
+//! советника, а не три копии текста; раскладка `shared-prefix`
+//! ([`crate::prompt_layout`]) с `cache_prefix_chars` в событии `llm_call`.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -32,6 +40,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use serde_json::{json, Map, Value};
 
+use crate::chunk_routing::{chunk_needs_specialists, format_chunk_routing_log, ChunkRoutingCtx};
 use crate::concurrency::run_limited;
 use crate::diff::Chunk;
 use crate::findings::{
@@ -40,6 +49,8 @@ use crate::findings::{
 use crate::llm::{ChatJsonOpts, ChatTextOpts, LlmApi, UsageCallback};
 use crate::profile::Profile;
 use crate::prompt::{self, PromptCtx};
+use crate::prompt_layout::{shared_prefix_advisor, shared_prefix_aggregator, shared_prefix_chars};
+use crate::specialist_merge::{merged_text_to_references, should_merge_specialists};
 use crate::specialists::merge_specialist_references;
 use crate::traits::{EngineApi, ModelReview, ReviewAllResult, ReviewContext, VerifyContext};
 use crate::util::redact_secrets_for_log;
@@ -192,6 +203,53 @@ pub fn aggregate_model(model: &str, done: &[Value]) -> (Value, usize) {
     (Value::Object(out), dropped)
 }
 
+/// Порт pickAggregateSummary: summary агрегата — из чанка С КОДОМ.
+///
+/// С RFC 04 карту PR рисует каждый чанк, привилегии у нулевого нет — и Walkthrough
+/// открывался бы обзором plan-документа, окажись чанк доков первым. Признак «есть код»
+/// — `hasCode` элемента `done`, выставленный той же классификацией, что решает состав
+/// жюри (второе определение разъехалось бы молча). `hasCode !== false`: отсутствие поля
+/// — кодовый чанк. Кодовых чанков нет — прежнее поведение, первое непустое.
+pub fn pick_aggregate_summary(model: &str, done: &[Value]) -> String {
+    let ok_parts: Vec<&Value> = done
+        .iter()
+        .filter(|d| d.get("model").and_then(Value::as_str) == Some(model))
+        .filter(|d| {
+            !js_truthy(d.get("res").and_then(|r| r.get("error")).unwrap_or(&Value::Null))
+        })
+        .collect();
+    // String(d.res?.summary || '') → первое непустое.
+    let first_summary = |list: &mut dyn Iterator<Item = &&Value>| -> String {
+        list.map(|d| match d.get("res").and_then(|r| r.get("summary")) {
+            Some(v) if js_truthy(v) => js_to_string(v),
+            _ => String::new(),
+        })
+        .find(|s| !s.is_empty())
+        .unwrap_or_default()
+    };
+    let code = first_summary(
+        &mut ok_parts.iter().filter(|d| d.get("hasCode") != Some(&Value::Bool(false))),
+    );
+    if !code.is_empty() {
+        return code;
+    }
+    first_summary(&mut ok_parts.iter())
+}
+
+/// Контекст маршрутизации чанков от пайплайна (`ctx.chunkRouting` в JS): класс пути и
+/// чувствительные пути профиля знает пайплайн — там профиль и мемоизация классов.
+///
+/// Живёт в движке ([`RealEngine::with_chunk_routing`]), а не в [`ReviewContext`]: контекст
+/// прогона сериализуемый, замыкания в нём не живут, а профиль на прогон один. Не задан —
+/// все чанки кодовые, как DI-прогон JS без `chunkRouting`.
+#[derive(Clone, Copy, Default)]
+pub struct ChunkRouting<'a> {
+    /// `fileClass` (`classifyFilePath`); `None` — всё `other`.
+    pub file_class: Option<&'a (dyn Fn(&str) -> String + Send + Sync)>,
+    /// `layout.sensitive` профиля; `None` — не задан.
+    pub sensitive: Option<&'a (dyn Fn(&str) -> bool + Send + Sync)>,
+}
+
 // ---------------------------------------------------------------------------
 // Боевой движок (T12): порт createReviewEngine (lib/engine.mjs:160-412)
 // ---------------------------------------------------------------------------
@@ -270,6 +328,12 @@ pub struct EngineConfig {
     pub verifier_model: String,
     /// `cfg.verifier.temperature`.
     pub verifier_temperature: Option<f64>,
+    /// `cfg.promptLayout || 'legacy'` — раскладка сообщений (RFC 04, решение 5).
+    pub prompt_layout: String,
+    /// `cfg.specialists.merge ?? 'auto'` — слияние ролей на одной модели (решение 4).
+    pub specialists_merge: String,
+    /// `cfg.limits.chunkRouting !== false` — маршрутизация чанков по содержимому (решение 2).
+    pub chunk_routing: bool,
 }
 
 impl Default for EngineConfig {
@@ -291,6 +355,9 @@ impl Default for EngineConfig {
             require_quote: false,
             verifier_model: String::new(),
             verifier_temperature: None,
+            prompt_layout: "legacy".to_string(),
+            specialists_merge: "auto".to_string(),
+            chunk_routing: true,
         }
     }
 }
@@ -359,6 +426,18 @@ impl EngineConfig {
                 .map(js_to_string)
                 .unwrap_or(def.verifier_model),
             verifier_temperature: get("verifier", "temperature").and_then(Value::as_f64),
+            prompt_layout: cfg
+                .get("promptLayout")
+                .filter(|v| js_truthy(v))
+                .map(js_to_string)
+                .unwrap_or(def.prompt_layout),
+            // `?? 'auto'`: только null/отсутствие дают дефолт.
+            specialists_merge: get("specialists", "merge")
+                .filter(|v| !v.is_null())
+                .map(js_to_string)
+                .unwrap_or(def.specialists_merge),
+            // `limits.chunkRouting === false ? null : …` — выключает только явный false.
+            chunk_routing: get("limits", "chunkRouting") != Some(&Value::Bool(false)),
         }
     }
 }
@@ -407,6 +486,9 @@ pub struct RealEngine<'a> {
     log: &'a (dyn Fn(&str) + Send + Sync),
     on_event: Option<EventSink<'a>>,
     now: Clock,
+    /// Решение о слиянии ролей — одно на прогон (`mergeSpecialists` в JS).
+    merge_specialists: bool,
+    chunk_routing: Option<ChunkRouting<'a>>,
 }
 
 impl<'a> RealEngine<'a> {
@@ -417,7 +499,29 @@ impl<'a> RealEngine<'a> {
         prompt_ctx: PromptCtx,
         log: &'a (dyn Fn(&str) + Send + Sync),
     ) -> Self {
-        RealEngine { cfg, llm, prompt_ctx, log, on_event: None, now: system_clock() }
+        // Назначения ролей за прогон не меняются; решение уходит в лог, чтобы «почему один
+        // specialist вместо трёх» читалось (lib/engine.mjs, createReviewEngine).
+        let merge_specialists = cfg.specialists_enabled
+            && should_merge_specialists(&cfg.assignments, &cfg.specialists_merge);
+        if merge_specialists {
+            let roles: Vec<&str> = cfg.assignments.iter().map(|a| a.role.as_str()).collect();
+            log(&format!(
+                "specialist merge: роли {} на одной модели {} — один вызов вместо {} на чанк",
+                roles.join("+"),
+                cfg.assignments[0].model,
+                cfg.assignments.len()
+            ));
+        }
+        RealEngine {
+            cfg,
+            llm,
+            prompt_ctx,
+            log,
+            on_event: None,
+            now: system_clock(),
+            merge_specialists,
+            chunk_routing: None,
+        }
     }
 
     /// Движок из замороженного конфига и профиля — путь пайплайна.
@@ -438,6 +542,12 @@ impl<'a> RealEngine<'a> {
     /// Подключить observability (`deps.observability?.enabled ? … : null`).
     pub fn with_events(mut self, on_event: EventSink<'a>) -> Self {
         self.on_event = Some(on_event);
+        self
+    }
+
+    /// Контекст маршрутизации чанков (`ctx.chunkRouting`, RFC 04 решение 2).
+    pub fn with_chunk_routing(mut self, routing: ChunkRouting<'a>) -> Self {
+        self.chunk_routing = Some(routing);
         self
     }
 
@@ -573,12 +683,14 @@ impl<'a> RealEngine<'a> {
         chunk_index: usize,
         call_type: &str,
     ) -> Value {
-        let meta = [
-            ("model", json!(model)),
-            ("chunkIndex", json!(chunk_index)),
-            ("reviewMode", json!(self.cfg.review_mode)),
-            prompt_meta(messages),
-        ];
+        let meta = self.with_prompt_meta(
+            vec![
+                ("model", json!(model)),
+                ("chunkIndex", json!(chunk_index)),
+                ("reviewMode", json!(self.cfg.review_mode)),
+            ],
+            messages,
+        );
         self.track_llm(call_type, &meta, || {
             let opts = ChatJsonOpts { temperature, call_type: None };
             match self.llm.chat_json(&Value::Array(messages.to_vec()), model, &opts) {
@@ -676,6 +788,7 @@ impl<'a> RealEngine<'a> {
         ctx: &ReviewContext,
     ) -> Vec<Value> {
         let scoped = self.scoped_priors(chunks, ctx);
+        let has_code = self.plan_code_chunks(chunks);
         let mut tasks: Vec<(usize, usize)> = Vec::with_capacity(model_list.len() * chunks.len());
         for mi in 0..model_list.len() {
             for ci in 0..chunks.len() {
@@ -699,22 +812,72 @@ impl<'a> RealEngine<'a> {
                     Err(e) => self.prompt_failure(model, ci, &e),
                 }
             };
-            json!({"model": model, "res": demote_out_of_chunk(&res, &chunks[ci], ci)})
+            json!({
+                "model": model,
+                "res": demote_out_of_chunk(&res, &chunks[ci], ci),
+                "hasCode": has_code[ci],
+            })
         })
+    }
+
+    /// `planCodeChunks`: есть ли в чанке исполняемый код — одна классификация на две
+    /// задачи: состав жюри (RFC 04, решение 2) и выбор summary ([`pick_aggregate_summary`]).
+    /// Маршрутизация выключена или контекст не задан — все чанки кодовые: прогон не должен
+    /// молча терять роли.
+    fn plan_code_chunks(&self, chunks: &[Value]) -> Vec<bool> {
+        let routing = if self.cfg.chunk_routing { self.chunk_routing } else { None };
+        match routing {
+            None => vec![true; chunks.len()],
+            Some(r) => {
+                let file_class: Option<&dyn Fn(&str) -> String> =
+                    r.file_class.map(|f| f as &dyn Fn(&str) -> String);
+                let sensitive: Option<&dyn Fn(&str) -> bool> =
+                    r.sensitive.map(|f| f as &dyn Fn(&str) -> bool);
+                let rctx = ChunkRoutingCtx { file_class, sensitive };
+                chunks.iter().map(|c| chunk_needs_specialists(c, &rctx)).collect()
+            }
+        }
+    }
+
+    /// Мета вызова + `promptMeta(messages, layout)`: `prompt_chars`, а при раскладке
+    /// `shared-prefix` ещё `cache_prefix_chars` — сколько провайдер МОГ БЫ отдать из кэша.
+    fn with_prompt_meta(
+        &self,
+        mut meta: Vec<(&'static str, Value)>,
+        messages: &[Value],
+    ) -> Vec<(&'static str, Value)> {
+        meta.push(("prompt_chars", json!(messages_chars(messages))));
+        if self.cfg.prompt_layout == "shared-prefix" {
+            meta.push(("cache_prefix_chars", json!(shared_prefix_chars(messages))));
+        }
+        meta
+    }
+
+    /// `applyLayout`: раскладка под префиксный кэш (RFC 04, решение 5). Форма сообщений не
+    /// разобралась — остаёмся на прежней: собранный наугад промпт дороже несэкономленных
+    /// токенов.
+    fn apply_layout(&self, messages: Vec<Value>, rebuild: impl FnOnce(&[Value]) -> Option<Vec<Value>>) -> Vec<Value> {
+        if self.cfg.prompt_layout != "shared-prefix" {
+            return messages;
+        }
+        rebuild(&messages).unwrap_or(messages)
     }
 
     // -- MoA ---------------------------------------------------------------
 
     /// `reviewSpecialist` (`lib/engine.mjs:283-292`).
     fn review_specialist(&self, role: &str, model: &str, base: &[Value], chunk_index: usize) -> Value {
-        let msgs = prompt::build_specialist_messages(role, base, &self.prompt_ctx);
-        let meta = [
-            ("model", json!(model)),
-            ("role", json!(role)),
-            ("chunkIndex", json!(chunk_index)),
-            ("reviewMode", json!(self.cfg.review_mode)),
-            prompt_meta(&msgs),
-        ];
+        let built = prompt::build_specialist_messages(role, base, &self.prompt_ctx);
+        let msgs = self.apply_layout(built, shared_prefix_advisor);
+        let meta = self.with_prompt_meta(
+            vec![
+                ("model", json!(model)),
+                ("role", json!(role)),
+                ("chunkIndex", json!(chunk_index)),
+                ("reviewMode", json!(self.cfg.review_mode)),
+            ],
+            &msgs,
+        );
         let out = self.track_text("specialist", &meta, |on_usage| {
             let opts = ChatTextOpts { on_usage: Some(on_usage), ..ChatTextOpts::default() };
             self.llm.chat_text(&Value::Array(msgs), model, &opts)
@@ -728,16 +891,75 @@ impl<'a> RealEngine<'a> {
         }
     }
 
+    /// `reviewSpecialistsMerged` (RFC 04, решение 4): все роли на одной модели → один
+    /// вызов вместо трёх. Ответ режется по секциям обратно в те же references: жюри,
+    /// `merge_specialist_references` и refutation получают прежнюю форму. Сорванный формат
+    /// секций НЕ раздаётся трём ролям — жюри получит одного советника (`mergedFallback`):
+    /// три claims из одного абзаца refutation приняла бы за консенсус.
+    fn review_specialists_merged(&self, base: &[Value], chunk_index: usize) -> Vec<Value> {
+        let assignments = &self.cfg.assignments;
+        let roles: Vec<&str> = assignments.iter().map(|a| a.role.as_str()).collect();
+        let model = assignments[0].model.as_str();
+        // baseMessages.find(m => m.role === 'user')?.content || ''
+        let user = base
+            .iter()
+            .find(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+            .and_then(|m| m.get("content"))
+            .filter(|c| js_truthy(c))
+            .map(js_to_string)
+            .unwrap_or_default();
+        let built = vec![
+            json!({"role": "system", "content": prompt::build_merged_specialist_system(&roles, &self.prompt_ctx)}),
+            json!({"role": "user", "content": user}),
+        ];
+        let msgs = self.apply_layout(built, shared_prefix_advisor);
+        let meta = self.with_prompt_meta(
+            vec![
+                ("model", json!(model)),
+                ("role", json!(roles.join("+"))),
+                ("merged", json!(true)),
+                ("chunkIndex", json!(chunk_index)),
+                ("reviewMode", json!(self.cfg.review_mode)),
+            ],
+            &msgs,
+        );
+        let out = self.track_text("specialist", &meta, |on_usage| {
+            let opts = ChatTextOpts { on_usage: Some(on_usage), ..ChatTextOpts::default() };
+            self.llm.chat_text(&Value::Array(msgs), model, &opts)
+        });
+        match out {
+            Ok(text) => {
+                let mut on_fallback = || {
+                    self.log(&format!(
+                        "specialist merge: модель {model} не выдержала формат секций на чанке {chunk_index} — жюри получит один советник вместо {}",
+                        roles.len()
+                    ))
+                };
+                merged_text_to_references(&text, assignments, Some(&mut on_fallback))
+            }
+            Err(e) => {
+                self.log(&format!("specialists {}/{model} недоступны: {}", roles.join("+"), e.message));
+                assignments
+                    .iter()
+                    .map(|a| json!({"role": a.role, "model": model, "error": e.message}))
+                    .collect()
+            }
+        }
+    }
+
     /// `reviewReferenceModel` (`lib/engine.mjs:294-303`). `role: 'advisor'`
     /// дописывается вызывающим — как `.then((r) => ({...r, role: 'advisor'}))`.
     fn review_reference_model(&self, model: &str, base: &[Value], chunk_index: usize) -> Value {
-        let msgs = prompt::build_reference_messages(base, &self.prompt_ctx);
-        let meta = [
-            ("model", json!(model)),
-            ("chunkIndex", json!(chunk_index)),
-            ("reviewMode", json!(self.cfg.review_mode)),
-            prompt_meta(&msgs),
-        ];
+        let built = prompt::build_reference_messages(base, &self.prompt_ctx);
+        let msgs = self.apply_layout(built, shared_prefix_advisor);
+        let meta = self.with_prompt_meta(
+            vec![
+                ("model", json!(model)),
+                ("chunkIndex", json!(chunk_index)),
+                ("reviewMode", json!(self.cfg.review_mode)),
+            ],
+            &msgs,
+        );
         let out = self.track_text("advisor", &meta, |on_usage| {
             let opts = ChatTextOpts { on_usage: Some(on_usage), ..ChatTextOpts::default() };
             self.llm.chat_text(&Value::Array(msgs), model, &opts)
@@ -753,8 +975,22 @@ impl<'a> RealEngine<'a> {
 
     /// `reviewChunkMoA` (`lib/engine.mjs:305-337`): advisors/специалисты →
     /// жюри-агрегатор. Ни одного успешного advisor'а — жюри не зовём вовсе.
-    fn review_chunk_moa(&self, base: &[Value], chunk_index: usize, ctx: &ReviewContext) -> Value {
-        let references: Vec<Value> = if self.cfg.specialists_enabled {
+    ///
+    /// `with_specialists == false` — чанк без исполняемого кода (RFC 04, решение 2): один
+    /// вызов агрегатора на базовом промпте, без секции мнений и схемы advisorClaims. Его
+    /// находки останутся без advisorClaims и потому merge не заблокируют — осознанный обмен.
+    fn review_chunk_moa(
+        &self,
+        base: &[Value],
+        chunk_index: usize,
+        ctx: &ReviewContext,
+        with_specialists: bool,
+    ) -> Value {
+        let references: Vec<Value> = if !with_specialists {
+            Vec::new()
+        } else if self.cfg.specialists_enabled && self.merge_specialists {
+            self.review_specialists_merged(base, chunk_index)
+        } else if self.cfg.specialists_enabled {
             let idx: Vec<usize> = (0..self.cfg.assignments.len()).collect();
             let limit = idx.len().max(1); // Promise.all — без лимита
             run_limited(idx, limit, |i| {
@@ -777,7 +1013,7 @@ impl<'a> RealEngine<'a> {
             js_truthy(r.get("text").unwrap_or(&Value::Null))
                 && !js_truthy(r.get("error").unwrap_or(&Value::Null))
         });
-        if !any_ok {
+        if with_specialists && !any_ok {
             let msg = references
                 .iter()
                 .map(|r| {
@@ -805,11 +1041,16 @@ impl<'a> RealEngine<'a> {
             });
         }
 
-        let agg_messages = if self.cfg.specialists_enabled {
+        let agg_built = if !with_specialists {
+            base.to_vec()
+        } else if self.cfg.specialists_enabled {
             prompt::build_specialist_aggregator_messages(base, &references)
         } else {
             prompt::build_aggregator_messages(base, &references)
         };
+        // Агрегатор — четвёртый вызов по тому же чанку: его контекст обязан совпасть с тем,
+        // что уже прочитали роли, иначе кэшируется префикс, которым никто не пользуется.
+        let agg_messages = self.apply_layout(agg_built, |built| shared_prefix_aggregator(base, built));
         let agg = self.review_with_model(
             &self.cfg.moa_aggregator,
             &agg_messages,
@@ -843,6 +1084,24 @@ impl<'a> RealEngine<'a> {
     /// `runMoAOverChunks` (`lib/engine.mjs:339-354`).
     fn run_moa_over_chunks(&self, chunks: &[Value], ctx: &ReviewContext) -> Vec<Value> {
         let scoped = self.scoped_priors(chunks, ctx);
+        // Состав ролей решается один раз на прогон и логируется: иначе «почему у этой
+        // находки нет advisorClaims» необъяснимо при чтении отчёта.
+        let needs = self.plan_code_chunks(chunks);
+        let roles_per_chunk = if self.cfg.specialists_enabled {
+            self.cfg.assignments.len()
+        } else {
+            self.cfg.moa_references.len()
+        };
+        let routing_log = format_chunk_routing_log(&needs, roles_per_chunk as i64);
+        if !routing_log.is_empty() {
+            self.log(&routing_log);
+            let lean_chunks: Vec<usize> =
+                needs.iter().enumerate().filter(|(_, v)| !**v).map(|(i, _)| i).collect();
+            self.emit(
+                "chunk_routing",
+                &json!({"chunks": chunks.len(), "lean": lean_chunks.len(), "leanChunks": lean_chunks}),
+            );
+        }
         let idx: Vec<usize> = (0..chunks.len()).collect();
         let agg_model = self.cfg.moa_aggregator.clone();
         run_limited(idx, self.cfg.concurrency, |ci| {
@@ -851,11 +1110,15 @@ impl<'a> RealEngine<'a> {
                 json!({"model": agg_model, "error": TIME_SKIP, "skipped": true})
             } else {
                 match self.build_chunk_messages(&chunks[ci], ci == 0, &scoped[ci], ctx) {
-                    Ok(messages) => self.review_chunk_moa(&messages, ci, ctx),
+                    Ok(messages) => self.review_chunk_moa(&messages, ci, ctx, needs[ci]),
                     Err(e) => self.prompt_failure(&agg_model, ci, &e),
                 }
             };
-            json!({"model": agg_model, "res": demote_out_of_chunk(&res, &chunks[ci], ci)})
+            json!({
+                "model": agg_model,
+                "res": demote_out_of_chunk(&res, &chunks[ci], ci),
+                "hasCode": needs[ci],
+            })
         })
     }
 
@@ -884,11 +1147,17 @@ impl<'a> RealEngine<'a> {
     /// `aggregateAll` для одной модели: агрегат + лог дедупа той же строкой,
     /// что печатает `dedupeSameModelFindings` (`lib/engine.mjs:127`).
     fn aggregate_one(&self, model: &str, done: &[Value]) -> Value {
-        let (agg, dropped) = aggregate_model(model, done);
+        let (mut agg, dropped) = aggregate_model(model, done);
         if dropped > 0 {
             self.log(&format!(
                 "дедуп повторов внутри модели: {dropped} (одна тема из нескольких чанков)"
             ));
+        }
+        // `res.error ? res : {...res, summary: pickAggregateSummary(model, done)}`.
+        if !js_truthy(agg.get("error").unwrap_or(&Value::Null)) {
+            if let Some(o) = agg.as_object_mut() {
+                o.insert("summary".into(), json!(pick_aggregate_summary(model, done)));
+            }
         }
         agg
     }
@@ -1046,12 +1315,6 @@ pub(crate) fn messages_chars(messages: &[Value]) -> usize {
             Some(v) => utf16_len(&js_to_string(v)),
         })
         .sum()
-}
-
-/// `promptMeta(messages, layout)` для раскладки `legacy`: только `prompt_chars`.
-/// Раскладка `shared-prefix` (`cache_prefix_chars`, `lib/prompt-layout.mjs`) — задача T37.
-fn prompt_meta(messages: &[Value]) -> (&'static str, Value) {
-    ("prompt_chars", json!(messages_chars(messages)))
 }
 
 /// Внутренний JSON-агрегат → [`ModelReview`].
@@ -1242,6 +1505,8 @@ mod tests {
         /// (модель, content последнего сообщения) — аналог `msgs.at(-1)?.content`.
         json_calls: Mutex<Vec<(String, String)>>,
         text_calls: Mutex<Vec<(String, String)>>,
+        /// Полные сообщения всех вызовов (json и text) в порядке прихода.
+        seen: Mutex<Vec<Value>>,
         /// usage, которое фейк отдаёт через `on_usage` prose-вызова (`None` — не зовёт,
         /// как DI-мок, ничего не знающий про usage).
         text_usage: Option<Value>,
@@ -1273,6 +1538,7 @@ mod tests {
                 on_text: Box::new(|_, m| Err(format!("chatText не ожидался: {m}"))),
                 json_calls: Mutex::new(Vec::new()),
                 text_calls: Mutex::new(Vec::new()),
+                seen: Mutex::new(Vec::new()),
                 text_usage: None,
             }
         }
@@ -1311,6 +1577,7 @@ mod tests {
             _opts: &ChatJsonOpts,
         ) -> std::result::Result<ChatJsonResult, ChatError> {
             self.json_calls.lock().unwrap().push((model.to_string(), last_content(messages)));
+            self.seen.lock().unwrap().push(messages.clone());
             (self.on_json)(messages, model)
                 .map(|value| ChatJsonResult { value, repaired: None, usage: None })
                 .map_err(chat_err)
@@ -1323,6 +1590,7 @@ mod tests {
             opts: &ChatTextOpts,
         ) -> std::result::Result<String, ChatError> {
             self.text_calls.lock().unwrap().push((model.to_string(), last_content(messages)));
+            self.seen.lock().unwrap().push(messages.clone());
             let out = (self.on_text)(messages, model).map_err(chat_err)?;
             if let (Some(u), Some(cb)) = (&self.text_usage, &opts.on_usage) {
                 (cb.0)(u);
@@ -1351,6 +1619,7 @@ mod tests {
             require_quote: false,
             verifier_model: String::new(),
             verifier_temperature: None,
+            ..EngineConfig::default()
         }
     }
 
@@ -1375,6 +1644,7 @@ mod tests {
             require_quote: false,
             verifier_model: "ver-m".to_string(),
             verifier_temperature: Some(0.2),
+            ..EngineConfig::default()
         }
     }
 
@@ -1798,5 +2068,418 @@ mod tests {
             json!({"role": "user", "content": null}),
         ];
         assert_eq!(messages_chars(&msgs), 4);
+    }
+
+    // -- RFC 04 (T37): маршрутизация чанков, слияние ролей, раскладка shared-prefix ------
+
+    /// `routingCtx.chunkRouting.fileClass` из JS-теста: ts/mjs/js — logic.
+    fn logic_by_ext(p: &str) -> String {
+        if [".ts", ".mjs", ".js"].iter().any(|e| p.ends_with(e)) { "logic" } else { "other" }
+            .to_string()
+    }
+
+    fn routing() -> ChunkRouting<'static> {
+        ChunkRouting { file_class: Some(&logic_by_ext), sensitive: None }
+    }
+
+    fn routing_llm() -> FakeLlm {
+        FakeLlm::json(|_, _| Ok(json!({"summary": "s", "verdict": "comment", "findings": []})))
+            .with_text(|_, model| Ok(format!("prose from {model}")))
+    }
+
+    fn one_model_cfg() -> EngineConfig {
+        let mut cfg = moa_cfg();
+        cfg.assignments = ["security", "correctness", "architecture"]
+            .iter()
+            .map(|r| SpecialistAssignment { role: (*r).into(), model: "solo".into() })
+            .collect();
+        cfg
+    }
+
+    fn sectioned(bodies: [&str; 3]) -> String {
+        format!(
+            "### ROLE: security\n{}\n\n### ROLE: correctness\n{}\n\n### ROLE: architecture\n{}",
+            bodies[0], bodies[1], bodies[2]
+        )
+    }
+
+    #[test]
+    fn chunk_routing_docs_chunk_served_by_single_aggregator() {
+        let llm = routing_llm();
+        let logs: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let log = |m: &str| logs.lock().unwrap().push(m.to_string());
+        let events: Mutex<Vec<(String, Value)>> = Mutex::new(Vec::new());
+        let sink = |name: &str, payload: &Value| {
+            events.lock().unwrap().push((name.to_string(), payload.clone()));
+        };
+        let engine = mk_engine(&llm, moa_cfg(), &log)
+            .with_chunk_routing(routing())
+            .with_events(&sink);
+        let chunk = chunk_of("d", &["docs/architecture.md", "fixtures/a.json"], &[], false);
+        let ctx = ReviewContext::default();
+        let res = engine.review_all_models(std::slice::from_ref(&chunk), &ctx).unwrap();
+
+        assert!(llm.text_models_sorted().is_empty(), "специалисты не вызываются: кода в чанке нет");
+        assert_eq!(llm.json_models(), vec!["agg-model"], "ровно один вызов агрегатора");
+        // Без референсов агрегатор получает базовый промпт как есть — без секции жюри.
+        let base = engine
+            .build_chunk_messages(&serde_json::to_value(&chunk).unwrap(), true, &[], &ctx)
+            .unwrap();
+        assert_eq!(llm.seen.lock().unwrap()[0], Value::Array(base));
+        assert!(res[0].references.is_empty(), "без советников — без references");
+        assert!(logs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l == "chunk-routing: 1 из 1 чанк(ов) без кода — только агрегатор, −3 вызов(ов) специалистов"));
+        let evs = events.lock().unwrap();
+        let routing_ev = evs.iter().find(|(n, _)| n == "chunk_routing").expect("событие chunk_routing");
+        assert_eq!(routing_ev.1, json!({"chunks": 1, "lean": 1, "leanChunks": [0]}));
+    }
+
+    #[test]
+    fn chunk_routing_lean_chunk_findings_carry_no_advisor_claims() {
+        // Находка чанка без кода: жюри не было — advisorClaims нет, refutation её не
+        // поднимет до блокера (гейт требует подтверждения жюри).
+        let llm = FakeLlm::json(|_, _| {
+            Ok(json!({"summary": "s", "findings": [
+                {"file": "docs/a.md", "line": 1, "severity": "critical", "title": "t", "confidence": 0.9},
+            ]}))
+        })
+        .with_text(|_, _| panic!("специалисты не должны вызываться"));
+        let log = |_: &str| {};
+        let engine = mk_engine(&llm, moa_cfg(), &log).with_chunk_routing(routing());
+        let res = engine
+            .review_all_models(&[chunk_of("d", &["docs/a.md"], &[], false)], &ReviewContext::default())
+            .unwrap();
+        assert_eq!(res[0].findings.len(), 1);
+        let claims = res[0].findings[0].get("advisorClaims");
+        assert!(
+            claims.is_none() || claims.and_then(Value::as_array).is_some_and(Vec::is_empty),
+            "advisorClaims у находки lean-чанка: {claims:?}"
+        );
+    }
+
+    #[test]
+    fn chunk_routing_code_ci_shell_sensitive_and_unknown_keep_jury() {
+        let billing = |p: &str| p.to_lowercase().contains("billing");
+        let other = |_: &str| "other".to_string();
+        let cases: Vec<(&str, Vec<&str>, ChunkRouting)> = vec![
+            ("код", vec!["lib/engine.mjs"], routing()),
+            ("CI-workflow", vec![".github/workflows/ci.yml"], routing()),
+            ("shell", vec!["scripts/deploy.sh"], routing()),
+            (
+                "чувствительный путь профиля",
+                vec!["config/billing.json"],
+                ChunkRouting { file_class: Some(&other), sensitive: Some(&billing) },
+            ),
+            ("состав чанка неизвестен", vec![], routing()),
+        ];
+        for (name, paths, r) in cases {
+            let llm = routing_llm();
+            let log = |_: &str| {};
+            let engine = mk_engine(&llm, moa_cfg(), &log).with_chunk_routing(r);
+            engine
+                .review_all_models(&[chunk_of("d", &paths, &[], false)], &ReviewContext::default())
+                .unwrap();
+            assert_eq!(llm.text_models_sorted().len(), 3, "{name}: все три специалиста опрошены");
+        }
+    }
+
+    #[test]
+    fn chunk_routing_disabled_flag_or_missing_ctx_keeps_full_moa() {
+        for name in ["REVIEW_CHUNK_ROUTING=0", "контекст не передан"] {
+            let llm = routing_llm();
+            let log = |_: &str| {};
+            let engine = if name == "REVIEW_CHUNK_ROUTING=0" {
+                let mut cfg = moa_cfg();
+                cfg.chunk_routing = false;
+                mk_engine(&llm, cfg, &log).with_chunk_routing(routing())
+            } else {
+                mk_engine(&llm, moa_cfg(), &log)
+            };
+            engine
+                .review_all_models(&[chunk_of("d", &["docs/a.md"], &[], false)], &ReviewContext::default())
+                .unwrap();
+            assert_eq!(llm.text_models_sorted().len(), 3, "{name}: состав ролей не урезается");
+        }
+    }
+
+    #[test]
+    fn engine_config_reads_rfc04_fields() {
+        let def = EngineConfig::from_cfg(&json!({}));
+        assert_eq!(def.prompt_layout, "legacy");
+        assert_eq!(def.specialists_merge, "auto");
+        assert!(def.chunk_routing);
+        let cfg = EngineConfig::from_cfg(&json!({
+            "promptLayout": "shared-prefix",
+            "specialists": {"merge": "never"},
+            "limits": {"chunkRouting": false},
+        }));
+        assert_eq!(cfg.prompt_layout, "shared-prefix");
+        assert_eq!(cfg.specialists_merge, "never");
+        assert!(!cfg.chunk_routing);
+        // Выключает только явный false (`=== false`).
+        assert!(EngineConfig::from_cfg(&json!({"limits": {"chunkRouting": 0}})).chunk_routing);
+    }
+
+    /// Фейк, отвечающий summary'ем своего чанка: чанк опознаётся по токену в аннотированном
+    /// диффе, который доезжает до user-сообщения при любом составе жюри.
+    fn summary_llm(code_summary_empty: bool) -> FakeLlm {
+        FakeLlm::json(move |msgs, _| {
+            let text = msgs.to_string();
+            let which = ["ANNO_CODE", "ANNO_DOCS", "ANNO_FIXTURES"]
+                .into_iter()
+                .find(|t| text.contains(t))
+                .unwrap_or("?");
+            let summary = if code_summary_empty && which == "ANNO_CODE" {
+                String::new()
+            } else {
+                format!("обзор: {which}")
+            };
+            Ok(json!({"summary": summary, "findings": []}))
+        })
+        .with_text(|_, model| Ok(format!("prose from {model}")))
+    }
+
+    fn summary_of(llm: &FakeLlm, cfg: EngineConfig, chunks: &[Chunk]) -> Option<String> {
+        let log = |_: &str| {};
+        let engine = mk_engine(llm, cfg, &log).with_chunk_routing(routing());
+        engine.review_all_models(chunks, &ReviewContext::default()).unwrap()[0].summary.clone()
+    }
+
+    #[test]
+    fn aggregate_summary_taken_from_code_chunk_even_if_docs_first() {
+        let chunks = [
+            chunk_of("ANNO_DOCS", &["proposals/04-token-economy.md"], &[], false),
+            chunk_of("ANNO_CODE", &["lib/engine.mjs"], &[], false),
+        ];
+        assert_eq!(
+            summary_of(&summary_llm(false), moa_cfg(), &chunks).as_deref(),
+            Some("обзор: ANNO_CODE"),
+            "Walkthrough не открывается обзором plan-документа, когда в PR есть код"
+        );
+    }
+
+    #[test]
+    fn aggregate_summary_without_code_chunks_is_first_non_empty() {
+        let chunks = [
+            chunk_of("ANNO_DOCS", &["docs/a.md"], &[], false),
+            chunk_of("ANNO_FIXTURES", &["fixtures/a.json"], &[], false),
+        ];
+        assert_eq!(
+            summary_of(&summary_llm(false), moa_cfg(), &chunks).as_deref(),
+            Some("обзор: ANNO_DOCS")
+        );
+    }
+
+    #[test]
+    fn aggregate_summary_routing_disabled_keeps_first_non_empty() {
+        let mut cfg = moa_cfg();
+        cfg.chunk_routing = false;
+        let chunks = [
+            chunk_of("ANNO_DOCS", &["docs/a.md"], &[], false),
+            chunk_of("ANNO_CODE", &["lib/engine.mjs"], &[], false),
+        ];
+        assert_eq!(summary_of(&summary_llm(false), cfg, &chunks).as_deref(), Some("обзор: ANNO_DOCS"));
+    }
+
+    #[test]
+    fn aggregate_summary_empty_code_summary_does_not_eat_docs() {
+        let chunks = [
+            chunk_of("ANNO_DOCS", &["docs/a.md"], &[], false),
+            chunk_of("ANNO_CODE", &["lib/engine.mjs"], &[], false),
+        ];
+        assert_eq!(
+            summary_of(&summary_llm(true), moa_cfg(), &chunks).as_deref(),
+            Some("обзор: ANNO_DOCS")
+        );
+    }
+
+    #[test]
+    fn aggregate_summary_applies_in_consensus_mode() {
+        let mut cfg = engine_cfg();
+        cfg.models = vec!["m1".into()];
+        let chunks = [
+            chunk_of("ANNO_DOCS", &["docs/a.md"], &[], false),
+            chunk_of("ANNO_CODE", &["lib/engine.mjs"], &[], false),
+        ];
+        assert_eq!(
+            summary_of(&summary_llm(false), cfg, &chunks).as_deref(),
+            Some("обзор: ANNO_CODE")
+        );
+    }
+
+    #[test]
+    fn pick_aggregate_summary_matches_js() {
+        let done = vec![
+            json!({"model": "m", "res": {"summary": "docs"}, "hasCode": false}),
+            json!({"model": "m", "res": {"error": "x", "summary": "сломан"}, "hasCode": true}),
+            json!({"model": "other", "res": {"summary": "чужой"}, "hasCode": true}),
+            json!({"model": "m", "res": {"summary": "код"}}),
+        ];
+        // hasCode отсутствует — кодовый чанк (`!== false`); ошибочные и чужие не в счёт.
+        assert_eq!(pick_aggregate_summary("m", &done), "код");
+        assert_eq!(pick_aggregate_summary("m", &done[..2]), "docs");
+        assert_eq!(pick_aggregate_summary("nobody", &done), "");
+    }
+
+    #[test]
+    fn specialist_merge_one_model_single_call_split_by_role() {
+        let llm = FakeLlm::json(|_, _| Ok(json!({"summary": "s", "findings": []}))).with_text(|_, _| {
+            Ok(sectioned(["- [major] `a.ts:1` — sec", "- [minor] `a.ts:2` — corr", "в моей области серьёзных замечаний нет"]))
+        });
+        let logs: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let log = |m: &str| logs.lock().unwrap().push(m.to_string());
+        let engine = mk_engine(&llm, one_model_cfg(), &log);
+        let res = engine
+            .review_all_models(&[chunk_of("d1", &["a.ts"], &[], false)], &ReviewContext::default())
+            .unwrap();
+
+        assert_eq!(llm.text_models_sorted(), vec!["solo"], "один prose-вызов вместо трёх");
+        let system = js_to_string(&llm.seen.lock().unwrap()[0][0]["content"]);
+        assert!(system.contains("PANEL of 3"), "модель предупреждена, что ролей три");
+        let by_role = |role: &str| {
+            res[0]
+                .references
+                .iter()
+                .find(|r| r["role"] == role)
+                .map(|r| js_to_string(&r["text"]))
+                .unwrap_or_default()
+        };
+        assert!(by_role("security").contains("sec"));
+        assert!(by_role("correctness").contains("corr"));
+        assert!(by_role("architecture").contains("серьёзных замечаний нет"));
+        assert!(!by_role("security").contains("corr"), "секции не перетекают друг в друга");
+        assert!(logs.lock().unwrap()[0].starts_with(
+            "specialist merge: роли security+correctness+architecture на одной модели solo — один вызов вместо 3 на чанк"
+        ));
+    }
+
+    #[test]
+    fn specialist_merge_broken_format_does_not_fake_consensus() {
+        let llm = FakeLlm::json(|_, _| Ok(json!({"summary": "s", "findings": []})))
+            .with_text(|_, _| Ok("сплошной текст без заголовков секций".to_string()));
+        let logs: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let log = |m: &str| logs.lock().unwrap().push(m.to_string());
+        let engine = mk_engine(&llm, one_model_cfg(), &log);
+        let res = engine
+            .review_all_models(&[chunk_of("d1", &["a.ts"], &[], false)], &ReviewContext::default())
+            .unwrap();
+        assert_eq!(res[0].references.len(), 1, "один советник, а не три копии одного текста");
+        assert_eq!(res[0].references[0]["mergedFallback"], true);
+        assert!(logs.lock().unwrap().iter().any(|l| l
+            == "specialist merge: модель solo не выдержала формат секций на чанке 0 — жюри получит один советник вместо 3"));
+        // Жюри видит в промпте одного советника.
+        let agg = js_to_string(&llm.seen.lock().unwrap().last().unwrap()[1]["content"]);
+        assert_eq!(agg.matches("### Specialist: ").count(), 1, "в секции жюри нет выдуманных ролей");
+        assert!(agg.contains("### Specialist: security (solo)"));
+    }
+
+    #[test]
+    fn specialist_merge_down_reports_every_role_and_skips_jury() {
+        let llm = FakeLlm::json(|_, _| Ok(json!({"findings": []}))).with_text(|_, _| Err("down".into()));
+        let log = |_: &str| {};
+        let engine = mk_engine(&llm, one_model_cfg(), &log);
+        let res = engine
+            .review_all_models(&[chunk_of("d1", &["a.ts"], &[], false)], &ReviewContext::default())
+            .unwrap();
+        assert!(llm.json_models().is_empty());
+        assert_eq!(
+            res[0].error.as_deref(),
+            Some("security/solo: down; correctness/solo: down; architecture/solo: down")
+        );
+    }
+
+    #[test]
+    fn specialist_merge_different_models_or_never_poll_separately() {
+        let llm = routing_llm();
+        let log = |_: &str| {};
+        mk_engine(&llm, moa_cfg(), &log)
+            .review_all_models(&[chunk_of("d1", &["a.ts"], &[], false)], &ReviewContext::default())
+            .unwrap();
+        assert_eq!(llm.text_models_sorted(), vec!["arch-m", "corr-m", "sec-m"]);
+
+        let llm = routing_llm();
+        let mut cfg = one_model_cfg();
+        cfg.specialists_merge = "never".into();
+        mk_engine(&llm, cfg, &log)
+            .review_all_models(&[chunk_of("d1", &["a.ts"], &[], false)], &ReviewContext::default())
+            .unwrap();
+        assert_eq!(llm.text_models_sorted().len(), 3);
+    }
+
+    #[test]
+    fn prompt_layout_shared_prefix_common_prefix_for_all_roles() {
+        let llm = routing_llm();
+        let log = |_: &str| {};
+        let events: Mutex<Vec<(String, Value)>> = Mutex::new(Vec::new());
+        let sink = |name: &str, payload: &Value| {
+            events.lock().unwrap().push((name.to_string(), payload.clone()));
+        };
+        let mut cfg = moa_cfg();
+        cfg.prompt_layout = "shared-prefix".into();
+        let engine = mk_engine(&llm, cfg, &log).with_events(&sink);
+        engine
+            .review_all_models(&[chunk_of("КОНТЕКСТ_ЧАНКА", &["a.ts"], &[], false)], &ReviewContext::default())
+            .unwrap();
+
+        let seen = llm.seen.lock().unwrap();
+        assert_eq!(seen.len(), 4, "три роли и агрегатор");
+        for m in seen.iter() {
+            let m = m.as_array().unwrap();
+            assert_eq!(m.len(), 3, "system + контекст + роль");
+            assert_eq!(m[0]["role"], "system");
+            assert_eq!(m[0]["content"], crate::prompt_layout::SHARED_SYSTEM);
+            assert_eq!(m[2]["role"], "user");
+        }
+        let prefixes: std::collections::HashSet<String> =
+            seen.iter().map(|m| format!("{}\u{0}{}", m[0]["content"], m[1]["content"])).collect();
+        assert_eq!(prefixes.len(), 1, "префикс совпадает у всех четырёх вызовов");
+        let tails: std::collections::HashSet<String> =
+            seen.iter().map(|m| js_to_string(&m[2]["content"])).collect();
+        assert_eq!(tails.len(), 4, "инструкции ролей различны");
+        assert!(js_to_string(&seen[0][1]["content"]).contains("КОНТЕКСТ_ЧАНКА"), "в префиксе — контекст");
+        let agg_tail = js_to_string(&seen[3][2]["content"]);
+        assert!(agg_tail.contains("prose from"), "мнения советников уехали в хвост агрегатора");
+
+        let evs = events.lock().unwrap();
+        let calls: Vec<&Value> = evs.iter().filter(|(n, _)| n == "llm_call").map(|(_, e)| e).collect();
+        assert_eq!(calls.len(), 4);
+        for ev in calls {
+            let cache = ev["cache_prefix_chars"].as_u64().expect("cache_prefix_chars в событии");
+            assert!(cache > 0 && cache < ev["prompt_chars"].as_u64().unwrap());
+        }
+    }
+
+    #[test]
+    fn prompt_layout_legacy_by_default_keeps_messages() {
+        let llm = routing_llm();
+        let log = |_: &str| {};
+        let events: Mutex<Vec<(String, Value)>> = Mutex::new(Vec::new());
+        let sink = |name: &str, payload: &Value| {
+            events.lock().unwrap().push((name.to_string(), payload.clone()));
+        };
+        let engine = mk_engine(&llm, moa_cfg(), &log).with_events(&sink);
+        engine
+            .review_all_models(&[chunk_of("d1", &["a.ts"], &[], false)], &ReviewContext::default())
+            .unwrap();
+        assert!(llm.seen.lock().unwrap().iter().all(|m| m.as_array().unwrap().len() <= 2));
+        assert!(events.lock().unwrap().iter().all(|(_, e)| e.get("cache_prefix_chars").is_none()));
+    }
+
+    #[test]
+    fn prompt_layout_unparseable_shape_falls_back_to_built() {
+        let llm = routing_llm();
+        let log = |_: &str| {};
+        let mut cfg = moa_cfg();
+        cfg.prompt_layout = "shared-prefix".into();
+        let engine = mk_engine(&llm, cfg, &log);
+        let built = vec![json!({"role": "user", "content": "хвостом"})];
+        assert_eq!(engine.apply_layout(built.clone(), |_| None), built, "форма не разобралась — как построено");
+        // Агрегатор, дописавший мнения НЕ спереди, — реальный разбор отдаёт None.
+        let base = vec![json!({"role": "system", "content": "R"}), json!({"role": "user", "content": "ctx"})];
+        let odd = vec![base[0].clone(), base[1].clone(), json!({"role": "user", "content": "хвостом"})];
+        assert_eq!(engine.apply_layout(odd.clone(), |b| shared_prefix_aggregator(&base, b)), odd);
     }
 }
