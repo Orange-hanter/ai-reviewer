@@ -410,12 +410,16 @@ pub fn generate_property_drafts(obligations: &[Value]) -> Vec<Value> {
             draft.insert("obligationRef".into(), obligation.get("id").cloned().unwrap_or(Value::Null));
             draft.insert("status".into(), json!("draft"));
             draft.insert("kind".into(), json!(kind));
+            // порядок ключей как в JS-литерале: invariant — после generators
+            // (виден в JSON facts/assessment и в sha квитанций потребителя)
             if let Some(statement) = obligation.get("statement") {
                 draft.insert("statement".into(), statement.clone());
-                draft.insert("invariant".into(), statement.clone());
             }
             draft.insert("preconditions".into(), Value::Array(vec![]));
             draft.insert("generators".into(), json!(generators));
+            if let Some(statement) = obligation.get("statement") {
+                draft.insert("invariant".into(), statement.clone());
+            }
             draft.insert(
                 "expectedFailures".into(),
                 if kind == "error_path" {
