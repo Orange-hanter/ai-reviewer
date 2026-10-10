@@ -277,7 +277,7 @@ impl VerifierRunner<'_> {
         if candidates.is_empty() {
             return Ok(Vec::new());
         }
-        let args = json!({
+        let mut args = json!({
             "candidates": candidates,
             "annotated": ctx.annotated,
             "fileContents": ctx.file_contents,
@@ -285,6 +285,10 @@ impl VerifierRunner<'_> {
             "pr": ctx.pr,
             "changedFilesSection": ctx.changed_files_section,
         });
+        // `...(ctx.symbolCards?.length ? { symbolCards } : {})` (lib/verifier.mjs:176)
+        if !ctx.symbol_cards.is_empty() {
+            args["symbolCards"] = json!(ctx.symbol_cards);
+        }
         let messages = prompt::build_verifier_messages(&args, self.prompt_ctx)?;
         // Размер входа verifier'а — единственного вызова прогона, который engine не
         // оборачивает (он ходит в LLM напрямую). Без него gold-замер не покажет, что

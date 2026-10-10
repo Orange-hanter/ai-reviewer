@@ -1697,6 +1697,23 @@ mod tests {
     }
 
     #[test]
+    fn verifier_symbol_cards_reach_prompt_only_when_present() {
+        // RFC 14, решение 4 (lib/verifier.mjs:176): карточки — в промпт verifier'а,
+        // пустой список — блока нет вовсе.
+        let llm = FakeLlm::json(|_, _| Ok(json!({"verdicts": []})));
+        let log = |_: &str| {};
+        let engine = mk_engine(&llm, moa_cfg(), &log);
+        let card = "// lib/config.mjs:L2–L4\nexport function parseLimits(raw)".to_string();
+        let with = VerifyContext { symbol_cards: vec![card], ..verify_ctx() };
+        engine.verify_findings(&candidates()[..1], &with).unwrap();
+        engine.verify_findings(&candidates()[..1], &verify_ctx()).unwrap();
+        let prompts = llm.json_prompts();
+        assert!(prompts[0].contains("## Declarations of symbols called by the changed lines"));
+        assert!(prompts[0].contains("export function parseLimits(raw)"));
+        assert!(!prompts[1].contains("## Declarations of symbols"), "без карточек — без блока");
+    }
+
+    #[test]
     fn verifier_without_verdicts_field_returns_empty() {
         let llm = FakeLlm::json(|_, _| Ok(json!({"summary": "oops no verdicts"})));
         let log = |_: &str| {};

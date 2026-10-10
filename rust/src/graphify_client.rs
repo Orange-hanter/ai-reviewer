@@ -133,7 +133,7 @@ fn is_truthy(v: &Value) -> bool {
 
 /// JS `String(v)` для JSON-значения: массив — `join(',')` с `null` → `''`,
 /// объект — `[object Object]`, число — по ECMA `Number::toString`.
-fn js_string(v: &Value) -> String {
+pub(crate) fn js_string(v: &Value) -> String {
     match v {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
@@ -152,7 +152,7 @@ fn js_string(v: &Value) -> String {
 }
 
 /// JS `String(v || '')`: falsy (в т.ч. отсутствующее поле) → пустая строка.
-fn js_string_truthy(v: Option<&Value>) -> String {
+pub(crate) fn js_string_truthy(v: Option<&Value>) -> String {
     match v {
         Some(x) if is_truthy(x) => js_string(x),
         _ => String::new(),
@@ -364,6 +364,22 @@ impl GraphIndex {
     /// Помечена ли метка god-node в `.graphify_analysis.json`.
     pub fn is_god(&self, label: &str) -> bool {
         self.gods.contains(&label.to_lowercase())
+    }
+
+    /// `index.byId.values()`: узлы в порядке первого появления id, по последнему
+    /// узлу с этим id (семантика `Map.set`). Читатель — `symbol_cards` (RFC 14).
+    pub fn nodes_by_id(&self) -> impl Iterator<Item = &Value> + '_ {
+        self.by_id.values().map(move |&i| &self.nodes[i])
+    }
+
+    /// `index.byExactLabel.get(key)` — узлы с точной меткой (casefold, вместе с `()`).
+    pub fn nodes_with_exact_label(&self, key: &str) -> impl Iterator<Item = &Value> + '_ {
+        self.exact(key).iter().map(move |&i| &self.nodes[i])
+    }
+
+    /// `index.byBareLabel.get(key)` — узлы с меткой без `()` (casefold).
+    pub fn nodes_with_bare_label(&self, key: &str) -> impl Iterator<Item = &Value> + '_ {
+        self.bare(key).iter().map(move |&i| &self.nodes[i])
     }
 
     fn exact(&self, key: &str) -> &[usize] {
