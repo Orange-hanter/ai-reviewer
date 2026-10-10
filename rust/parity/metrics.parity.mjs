@@ -20,11 +20,16 @@
  *      прогоне), time_budget; порядок byModel — первое появление;
  *   5. formatMetricsReport — ПОБАЙТОВО по отчёту: source/без source, тренд
  *      стабильности, Graph state, skip reasons по убыванию, модели по
- *      убыванию calls, avg toFixed(1), '—' на пустых долях.
+ *      убыванию calls, avg toFixed(1), '—' на пустых долях;
+ *   6. подкоманда `pr-review metrics` ↔ bin/pr-review-metrics.mjs (RFC 16, T29) —
+ *      stdout побайтово и код возврата: явный путь, путь по умолчанию из env
+ *      и из профиля, пустой аргумент, отсутствующий файл (exit 1 + префикс stderr).
  */
 
-import { existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
@@ -237,6 +242,62 @@ function compareBytes(label, jsText, rustText) {
       runJs(M.formatMetricsReport, jsAgg, 's').value,
       M.formatMetricsReport(jsAgg, 's'));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Корпус 6: подкоманда pr-review metrics ↔ bin/pr-review-metrics.mjs
+// ---------------------------------------------------------------------------
+
+{
+  const CLI = resolve(REPO, 'rust/target/debug/pr-review');
+  if (!existsSync(CLI)) {
+    console.error(`нет бинаря ${CLI} — сначала cargo build`);
+    process.exit(1);
+  }
+  const JS_BIN = resolve(REPO, 'bin/pr-review-metrics.mjs');
+  const work = mkdtempSync(join(tmpdir(), 'metrics-cli-parity-'));
+  const log = [
+    '{"type":"run_end","wouldBlock":true}',
+    'не-json',
+    '{"type":"router","route":"full"}',
+    '{"type":"llm_call","callType":"json","model":"m1","ok":true,"total_tokens":10,"duration_ms":1500}',
+    '{"type":"stability","kept":10,"added":2,"gone":3,"stability":0.8}',
+    '{"type":"verdict","blocked":true,"sha":"a"}',
+    '{"type":"verdict","blocked":false,"sha":"a"}',
+    '',
+  ].join('\n');
+  writeFileSync(join(work, 'runs.jsonl'), log);
+  mkdirSync(join(work, 'obs'));
+  writeFileSync(join(work, 'obs', 'custom.jsonl'), log);
+  mkdirSync(join(work, '.ai-review', 'observability'), { recursive: true });
+  writeFileSync(join(work, '.ai-review', 'observability', 'pr-review-runs.jsonl'), '{"type":"router","route":"skip"}\n');
+
+  // чистое окружение: REVIEW_* родителя не должны менять путь по умолчанию
+  const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('REVIEW_')));
+  const cases = [
+    { label: 'явный относительный путь', args: ['runs.jsonl'] },
+    { label: 'явный абсолютный путь', args: [join(work, 'runs.jsonl')] },
+    { label: 'путь по умолчанию из профиля', args: [] },
+    { label: 'пустой аргумент → путь по умолчанию', args: [''] },
+    { label: 'путь по умолчанию из env', args: [], env: { REVIEW_OBSERVABILITY_DIR: 'obs', REVIEW_OBSERVABILITY_FILE: 'custom.jsonl' } },
+    { label: 'лишние аргументы игнорируются', args: ['runs.jsonl', 'extra'] },
+    { label: 'отсутствующий файл', args: ['nope/runs.jsonl'] },
+  ];
+  for (const c of cases) {
+    const env = { ...baseEnv, ...c.env };
+    const js = spawnSync(process.execPath, [JS_BIN, ...c.args], {
+      cwd: work, encoding: 'utf8', env: { ...env, AI_REVIEWER_METRICS_FORCE_JS: '1', AI_REVIEWER_CONFIG_FORCE_JS: '1' },
+    });
+    const rust = spawnSync(CLI, ['metrics', ...c.args], { cwd: work, encoding: 'utf8', env });
+    compare(`cli ${c.label}: код возврата`, js.status, rust.status);
+    compareBytes(`cli ${c.label}: stdout`, js.stdout, rust.stdout);
+    if (js.status !== 0) {
+      // текст системной ошибки у Node и Rust разный — сверяем префикс до ': '
+      const prefix = (t) => t.split('\n').find((l) => l.startsWith('[pr-review.metrics]'))?.replace(/: .*$/, '') ?? t;
+      compare(`cli ${c.label}: stderr`, prefix(js.stderr), prefix(rust.stderr));
+    }
+  }
+  rmSync(work, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------------------
