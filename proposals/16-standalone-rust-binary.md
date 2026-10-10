@@ -451,7 +451,7 @@ T08 замораживает сигнатуры трейтов до того, к
 | ✅ T35 | `context_window.rs` ← `lib/context-window.mjs` (окна ±`contextMargin` RFC 07: `windowChunkFileContents`, `buildVerifierFileContents`) + `read_changed_files` с маркером добавленного файла (`collect_added_paths` уже в `diff.rs`). Зависит от T04 | `cargo test context_window:: diff::`; `REVIEW_CONTEXT_MARGIN=0` — откат на целые файлы |
 | T36 | `chunk_routing.rs`, `specialist_merge.rs`, `prompt_layout.rs` и `build_merged_specialist_system` в `prompt.rs` — чистые порты RFC 04 (решения 2, 4, 5). Зависит от T12 | `cargo test chunk_routing:: specialist_merge:: prompt_layout::`; сорванный формат секций не раздаёт один текст трём ролям |
 | T37 | `engine.rs`: интеграция RFC 04 — чанк без кода идёт одним агрегатором без жюри, слитые специалисты на одной модели, раскладка `shared-prefix` (`cache_prefix_chars`), summary агрегата из кодового чанка (`pickAggregateSummary`), событие `chunk_routing`. Зависит от T36 | `cargo test engine::`; кейсы RFC 04 из `test/pr-review.engine.test.mjs`; `rust/parity/engine.parity.mjs` |
-| T38 | `symbol_cards.rs` ← `lib/symbol-cards.mjs` (RFC 14): карточки advisors/жюри и verifier'у по флагу, граф — `BlastRadius::graph_index`, строки рабочего дерева — инъекцией `readLines`, линейный разбор без ReDoS. Зависит от T13 | `cargo test symbol_cards::`; кейсы `test/symbol-cards.test.mjs` |
+| ✅ T38 | `symbol_cards.rs` ← `lib/symbol-cards.mjs` (RFC 14): карточки advisors/жюри и verifier'у по флагу, граф — `BlastRadius::graph_index`, строки рабочего дерева — инъекцией `readLines`, линейный разбор без ReDoS. Зависит от T13 | `cargo test symbol_cards::`; кейсы `test/symbol-cards.test.mjs` |
 
 **Волна 3**
 

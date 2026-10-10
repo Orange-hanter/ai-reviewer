@@ -64,6 +64,7 @@ pub mod structure_drift;
 pub mod structure_export;
 pub mod structure_identity;
 pub mod swarm;
+pub mod symbol_cards;
 pub mod testutil;
 pub mod traits;
 pub mod util;

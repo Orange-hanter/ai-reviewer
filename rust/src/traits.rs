@@ -329,6 +329,11 @@ pub struct VerifyContext {
     /// Карта изменённых файлов ВСЕГО PR: у verifier-стадии контекст шире чанка
     /// (`pipeline.mjs:410-412`).
     pub changed_files_section: String,
+    /// Карточки символов файлов кандидатов (RFC 14, решение 4) — готовые строки
+    /// `symbol_cards::select_chunk_cards`; только при `verifier.symbolCards`
+    /// (`pipeline.mjs:211-219`). Пусто — поля во входе промпта нет.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub symbol_cards: Vec<String>,
 }
 
 /// Агрегат по одной модели — элемент массива, который отдаёт `reviewAllModels`
