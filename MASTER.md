@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:a294fa623346`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:8f022694c329`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
