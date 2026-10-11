@@ -97,10 +97,15 @@ const BASE_CLI = { dryRun: false, diffFile: undefined, repo: 'o/r', prNumber: 1 
 
 const GITHUB_RESULTS = { postReviewId: 555, deleteStaleInline: 0, upsertSticky: 'created' };
 
+// Форма — как у runCombinedPrescan (lib/prescan-runner.mjs): byTool есть всегда,
+// skipped/error — только когда есть (undefined в JSON не попадает).
 const EMPTY_PRESCAN = {
-  findings: [], scanned: 0, skipped: 0, truncated: false,
-  lintableTotal: 0, byTool: null, error: null, promptSection: '',
+  findings: [], scanned: 0, truncated: false,
+  lintableTotal: 0, byTool: { eslint: 0, astgrep: 0 }, promptSection: '',
 };
+
+// Метрики blast-radius — как у lib/graphify.mjs: confidence считается всегда.
+const EMPTY_CONFIDENCE = { EXTRACTED: 0, INFERRED: 0, AMBIGUOUS: 0, unknown: 0 };
 
 const EMPTY_BLAST = {
   blocks: [],
@@ -112,6 +117,7 @@ const EMPTY_BLAST = {
     graph_status: 'fresh',
     skip_reason: '',
     skip_reasons: {},
+    confidence: { ...EMPTY_CONFIDENCE },
   },
 };
 
@@ -403,7 +409,14 @@ async function fixtureCases() {
       env,
       reviews,
       verifier,
-      prescan: prescanFindings.length ? { ...EMPTY_PRESCAN, findings: prescanFindings } : undefined,
+      prescan: prescanFindings.length ? {
+        ...EMPTY_PRESCAN,
+        findings: prescanFindings,
+        byTool: {
+          eslint: prescanFindings.filter((f) => !String(f.model).startsWith('astgrep')).length,
+          astgrep: prescanFindings.filter((f) => String(f.model).startsWith('astgrep')).length,
+        },
+      } : undefined,
       repoFiles,
     });
   }
@@ -428,7 +441,7 @@ const PRESCAN_BLOCKER = {
   }],
   scanned: 1,
   lintableTotal: 1,
-  byTool: { eslint: 1 },
+  byTool: { eslint: 1, astgrep: 0 },
   promptSection: '',
 };
 
@@ -553,6 +566,7 @@ const SPECIAL_CASES = [
         graph_status: 'fresh',
         skip_reason: '',
         skip_reasons: {},
+        confidence: { ...EMPTY_CONFIDENCE, EXTRACTED: 1 },
         affected_files: ['app/client/src/page.tsx'],
       },
     },

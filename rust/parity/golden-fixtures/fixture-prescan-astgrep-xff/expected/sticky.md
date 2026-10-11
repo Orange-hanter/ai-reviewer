@@ -12,7 +12,7 @@
 
 **Итого:** 1 замечаний — 🔴1 🟠0 🟡0 🔵0. Файлов в диффе: 1.
 
-> 🔧 Prescan (R6 eslint + ast-grep): 1 детерминированных finding(s) на 0 файлах (LLM dedup).
+> 🔧 Prescan (R6 eslint + ast-grep): eslint 0 + ast-grep 1 детерминированных finding(s) на 0 файлах (LLM dedup).
 
 <details><summary>📡 Blast-radius (Graphify) · 0 блоков · symbols 0/0 · graph fresh</summary>
 

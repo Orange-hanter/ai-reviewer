@@ -7,8 +7,7 @@
 //! Здесь есть две части:
 //!   1. `golden_fixtures_load` — загрузчик фикстур, гоняется всегда. Он же держит контракт
 //!      каталога: если формат уедет, тест упадёт раньше, чем появится `pipeline::run`.
-//!   2. `pipeline_run_matches_golden` — сама сверка (T26), помечена `#[ignore]` до T25.
-//!      Снять `#[ignore]` и дописать сравнение — работа T25/T26.
+//!   2. `pipeline_run_matches_golden` — сама сверка (T26); с T25 идёт в обычном `cargo test`.
 //!
 //! Формат фикстур описан в `rust/parity/README-golden.md`.
 
@@ -479,11 +478,10 @@ fn run_case(case: &GoldenCase, fixed_now_ms: u64) -> Vec<String> {
     diffs
 }
 
-/// Сверка Rust-пайплайна с эталоном. Снимается с `#[ignore]` в T25 — когда сойдутся все
-/// кейсы. До тех пор: `cargo test --test pipeline_golden -- --ignored --nocapture`
+/// Сверка Rust-пайплайна с эталоном: все кейсы обязаны сходиться (T25).
+/// Подробный вывод: `cargo test --test pipeline_golden -- --nocapture`
 /// печатает, какие кейсы и по каким выходам расходятся.
 #[test]
-#[ignore = "T25: не все golden-кейсы сходятся с pipeline::run"]
 fn pipeline_run_matches_golden() {
     let index = load_index();
     let fixed_now_ms = 1_767_225_600_000u64; // 2026-01-01T00:00:00.000Z

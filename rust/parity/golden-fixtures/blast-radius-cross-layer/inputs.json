@@ -16,11 +16,12 @@
   "prescan": {
     "findings": [],
     "scanned": 0,
-    "skipped": 0,
     "truncated": false,
     "lintableTotal": 0,
-    "byTool": null,
-    "error": null,
+    "byTool": {
+      "eslint": 0,
+      "astgrep": 0
+    },
     "promptSection": ""
   },
   "blastRadius": {
@@ -35,6 +36,12 @@
       "graph_status": "fresh",
       "skip_reason": "",
       "skip_reasons": {},
+      "confidence": {
+        "EXTRACTED": 1,
+        "INFERRED": 0,
+        "AMBIGUOUS": 0,
+        "unknown": 0
+      },
       "affected_files": [
         "app/client/src/page.tsx"
       ]

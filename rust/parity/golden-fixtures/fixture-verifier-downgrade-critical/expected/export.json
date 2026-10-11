@@ -63,6 +63,12 @@
     "affected_nonempty": 0,
     "graph_status": "fresh",
     "affected_files": [],
+    "confidence": {
+      "EXTRACTED": 0,
+      "INFERRED": 0,
+      "AMBIGUOUS": 0,
+      "unknown": 0
+    },
     "cross_community": 0
   },
   "swarm": {
@@ -101,8 +107,9 @@
   "prescan": {
     "findings": 0,
     "scanned": 0,
-    "skipped": 0,
-    "byTool": null,
-    "error": null
+    "byTool": {
+      "eslint": 0,
+      "astgrep": 0
+    }
   }
 }

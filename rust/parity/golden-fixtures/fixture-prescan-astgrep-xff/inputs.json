@@ -29,11 +29,12 @@
       }
     ],
     "scanned": 0,
-    "skipped": 0,
     "truncated": false,
     "lintableTotal": 0,
-    "byTool": null,
-    "error": null,
+    "byTool": {
+      "eslint": 0,
+      "astgrep": 1
+    },
     "promptSection": ""
   },
   "blastRadius": {
@@ -45,7 +46,13 @@
       "graph_fresh": true,
       "graph_status": "fresh",
       "skip_reason": "",
-      "skip_reasons": {}
+      "skip_reasons": {},
+      "confidence": {
+        "EXTRACTED": 0,
+        "INFERRED": 0,
+        "AMBIGUOUS": 0,
+        "unknown": 0
+      }
     }
   },
   "reviews": [
