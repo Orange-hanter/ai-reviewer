@@ -30,6 +30,13 @@
 //! - EOF stdin → выход; недочитанный кадр и незавершённое поглощение oversized
 //!   молча теряются (как в JS — известный кейс `mcp-oversized-eof-tail`).
 //!
+//! Фоновые notifications ([`SharedOut`]): в JS `notify` пишет в `process.stdout`
+//! в любой момент, в том числе из промиса, который живёт после ответа на запрос
+//! (`review_run` с `wait: false`). Здесь цикл держит выход у себя, поэтому для
+//! таких писателей выход и текущий формат кадра разделяются через `SharedOut`:
+//! каждое сообщение пишется одним `write_all` под мьютексом и не перемешивается
+//! с ответом цикла.
+//!
 //! Отклонения:
 //! - JSON.parse без лимита вложенности, serde_json — с лимитом 128: более глубокий
 //!   запрос получает -32700 вместо разбора (защитное поведение, валидные MCP-
@@ -39,7 +46,8 @@
 //!   необработанное событие `error` потока.
 
 use std::io::{ErrorKind, Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -276,12 +284,96 @@ fn is_request_object(v: &Value) -> bool {
 /// Обработчик домена: запрос + notify → ответ (None — notification).
 pub type Notify<'a> = dyn Fn(&str, Value) + 'a;
 
+/// Выход сервера, разделяемый с фоновыми потоками: писатель под мьютексом и
+/// формат последнего принятого кадра. Клонируется дёшево (`Arc`).
+#[derive(Clone)]
+pub struct SharedOut {
+    w: Arc<Mutex<Box<dyn Write + Send>>>,
+    framing: Arc<AtomicU8>,
+}
+
+impl SharedOut {
+    pub fn new(w: Box<dyn Write + Send>) -> Self {
+        Self { w: Arc::new(Mutex::new(w)), framing: Arc::new(AtomicU8::new(framing_code(Framing::Lsp))) }
+    }
+
+    /// Выход в stdout процесса.
+    pub fn stdout() -> Self {
+        Self::new(Box::new(std::io::stdout()))
+    }
+
+    pub fn framing(&self) -> Framing {
+        if self.framing.load(Ordering::SeqCst) == framing_code(Framing::Json) {
+            Framing::Json
+        } else {
+            Framing::Lsp
+        }
+    }
+
+    fn set_framing(&self, framing: Framing) {
+        self.framing.store(framing_code(framing), Ordering::SeqCst);
+    }
+
+    /// notification без id в текущем формате; ошибка записи глотается
+    /// (закрытый stdout заметит и завершит цикл сам сервер).
+    pub fn notify(&self, method: &str, params: Value) {
+        let bytes = encode_message(&json!({ "jsonrpc": "2.0", "method": method, "params": params }), self.framing());
+        let mut w = self.lock();
+        let _ = w.write_all(&bytes).and_then(|()| w.flush());
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Box<dyn Write + Send>> {
+        // Паника писателя посреди записи не делает выход непригодным: продолжаем.
+        self.w.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+impl std::fmt::Debug for SharedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedOut").field("framing", &self.framing()).finish_non_exhaustive()
+    }
+}
+
+impl Write for &SharedOut {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.lock().write(buf)
+    }
+    /// Одно сообщение — один захват мьютекса: кадры разных потоков не перемешиваются.
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.lock().write_all(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.lock().flush()
+    }
+}
+
+impl Write for SharedOut {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        (&*self).write(buf)
+    }
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        (&*self).write_all(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        (&*self).flush()
+    }
+}
+
+fn framing_code(framing: Framing) -> u8 {
+    match framing {
+        Framing::Lsp => 0,
+        Framing::Json => 1,
+    }
+}
+
 /// Сервер поверх произвольных Read/Write (stdio в бою, буферы в тестах).
 pub struct McpServer<W: Write, H> {
     out: std::cell::RefCell<W>,
     framing: std::cell::Cell<Framing>,
     /// Ошибка записи (EPIPE): цикл завершается.
     broken: std::cell::Cell<bool>,
+    /// Копия формата для фоновых писателей ([`SharedOut`]).
+    mirror: Option<SharedOut>,
     handler: H,
 }
 
@@ -295,8 +387,16 @@ where
             out: std::cell::RefCell::new(out),
             framing: std::cell::Cell::new(Framing::Lsp),
             broken: std::cell::Cell::new(false),
+            mirror: None,
             handler,
         }
+    }
+
+    /// Формат каждого принятого кадра дублируется в `mirror`: notifications
+    /// фоновых потоков идут в том же формате, что ответы цикла.
+    pub fn with_framing_mirror(mut self, mirror: SharedOut) -> Self {
+        self.mirror = Some(mirror);
+        self
     }
 
     pub fn into_writer(self) -> W {
@@ -376,6 +476,9 @@ where
         for frame in reader.take_messages() {
             if let Some(framing) = frame.framing {
                 self.framing.set(framing);
+                if let Some(mirror) = &self.mirror {
+                    mirror.set_framing(framing);
+                }
             }
             match frame.text {
                 None => self.write_message(&error_response(
@@ -459,6 +562,25 @@ where
     let mut server = McpServer::new(stdout.lock(), handler);
     let stdin = std::io::stdin();
     // Без BufReader: каждый read — один системный вызов, EINTR доходит до цикла.
+    let mut input = stdin.lock();
+    server.serve(&mut input, &STOP)
+}
+
+/// Пришёл ли SIGINT/SIGTERM (после выхода из цикла: EOF или сигнал).
+pub fn stop_requested() -> bool {
+    STOP.load(Ordering::SeqCst)
+}
+
+/// runMcpStdio поверх разделяемого выхода: ответы цикла и фоновые notifications
+/// идут через один `SharedOut`.
+pub fn run_mcp_stdio_shared<H>(out: SharedOut, handler: H) -> Result<()>
+where
+    H: FnMut(&Value, &Notify<'_>) -> Result<Option<Value>>,
+{
+    #[cfg(unix)]
+    signals::install();
+    let mut server = McpServer::new(out.clone(), handler).with_framing_mirror(out);
+    let stdin = std::io::stdin();
     let mut input = stdin.lock();
     server.serve(&mut input, &STOP)
 }

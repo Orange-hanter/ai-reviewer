@@ -4,6 +4,7 @@
 //! `pub fn run(args: Args) -> anyhow::Result<i32>`; `src/main.rs` только
 //! диспетчеризует и переводит `Result` в код возврата. Список модулей
 //! заморожен на T03: последующие задачи наполняют файлы, но не правят его.
+//! Исключение — `review_mcp` (T41): десятая подкоманда, добавленная RFC 16 позже.
 
 pub mod eval;
 pub mod feedback;
@@ -12,5 +13,7 @@ pub mod feedback_migrate;
 pub mod feedback_promote;
 pub mod metrics;
 pub mod review;
+pub mod review_mcp;
 pub mod structure;
 pub mod structure_mcp;
+pub mod wiring;

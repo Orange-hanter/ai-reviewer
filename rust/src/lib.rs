@@ -27,6 +27,7 @@ pub mod llm;
 pub mod metrics;
 pub mod prompt;
 pub mod report;
+pub mod review_mcp;
 pub mod router;
 pub mod specialists;
 pub mod structure_assessments;

@@ -491,9 +491,9 @@ T08 замораживает сигнатуры трейтов до того, к
 | # | Суть | DoD |
 |---|---|---|
 | ✅ T25 | golden-финал (сделано: 29/29 кейсов, `#[ignore]` снят): 16 фикстур + router skip/light + telegram, снять `#[ignore]` | `cargo test --test pipeline_golden` |
-| T27 | подкоманда `review` ← `bin/pr-review.mjs` + `runReview`: fail-open exit 0, блокеры exit 1, strict-режимы | dry-run на фикстуре с фейковым LLM-сервером |
+| ✅ T27 | подкоманда `review` ← `bin/pr-review.mjs` + `runReview`: fail-open exit 0, блокеры exit 1, strict-режимы (сделано: сборка боевых зависимостей — `rust/src/cli/wiring.rs`, `ReviewWiring`, её же переиспользует T41; `TelegramNotifier`; флаги `--dry-run/--diff/--head-sha/--repo/--pr` как `parseCli`) | dry-run на фикстуре с фейковым LLM-сервером (`cargo test --test cli_review`; коды возврата сверены с `node bin/pr-review.mjs` на тех же сценариях) |
 | T30 | подкоманды `feedback`, `feedback-batch`, `feedback-migrate`, `feedback-promote` | `cargo test --test feedback_cli` |
-| T41 | подкоманда `review-mcp` ← `bin/pr-review-mcp.mjs` + `lib/review-mcp{,-handshake,-tools}.mjs` (RFC 08–12: дешёвые стадии, `review_run` как pinned dry-run MoA поверх `runDetailed`, `wait: false` + поллинг по `jobId`, атомарный слот). Десятая подкоманда; `cursor-plugin/bin/review-mcp.sh` переводится в T31. Зависит от T26, T40 | `cargo test --test review_mcp_stdio`; кейсы `test/pr-review.mcp.test.mjs` |
+| ✅ T41 | подкоманда `review-mcp` ← `bin/pr-review-mcp.mjs` + `lib/review-mcp{,-handshake,-tools}.mjs` (RFC 08–12: дешёвые стадии, `review_run` как pinned dry-run MoA поверх `runDetailed`, `wait: false` + поллинг по `jobId`, атомарный слот). Десятая подкоманда; `cursor-plugin/bin/review-mcp.sh` переводится в T31. Зависит от T26, T40 (сделано: домен — `rust/src/review_mcp.rs`, подкоманда — `rust/src/cli/review_mcp.rs`; `review_run` идёт через `ReviewWiring::run_detailed_silent` — немой GitHub, без телеграма; фоновые notifications — `mcp_stdio::SharedOut`; кейсы JS — `src/review_mcp_tests.rs`; отклонения от JS — в шапке модуля) | `cargo test --test review_mcp_stdio`; кейсы `test/pr-review.mcp.test.mjs` |
 
 **Волна 6**
 
