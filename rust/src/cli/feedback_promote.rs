@@ -108,6 +108,11 @@ pub fn match_pr_file_patch<'a>(files: &'a [Value], file: &str, app_dir: &str) ->
 // Дифф файла PR
 // ---------------------------------------------------------------------------
 
+/// Номер PR, который можно подставить в argv `gh` и в путь REST API.
+fn is_pr_number(pr: &str) -> bool {
+    !pr.is_empty() && pr.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// Откуда брать дифф файла: `gh` CLI, затем REST API.
 pub struct DiffSource {
     /// Бинарь `gh` (`gh` из PATH; в тестах — фейк).
@@ -122,7 +127,12 @@ pub struct DiffSource {
 impl DiffSource {
     /// `fetchPrFileDiff({ pr, repo, file, token })`.
     pub fn fetch(&self, pr: &str, repo: &str, file: &str) -> Result<String> {
-        if !pr.is_empty() && !file.is_empty() {
+        // pr приходит и из файла кандидата (fromFeedback.pr) — произвольный JSON. В argv gh
+        // он стоит до `--`, в URL API — внутри пути: только номер из цифр.
+        if !is_pr_number(pr) {
+            return Ok(String::new());
+        }
+        if !file.is_empty() {
             // `--` до пути: путь из находки не может стать опцией gh.
             let out = Command::new(&self.gh_bin)
                 .args(["pr", "diff", pr, "--", file])
@@ -568,6 +578,30 @@ mod tests {
         let root = Path::new("/tmp/fx");
         assert_eq!(resolve_fixture_dir(root, "ok"), Some(PathBuf::from("/tmp/fx/ok")));
         assert_eq!(resolve_fixture_dir(root, "../x"), None);
+    }
+
+    #[test]
+    fn нечисловой_pr_не_становится_опцией_gh_и_не_идёт_в_api() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("gh-called");
+        let gh = dir.path().join("gh");
+        std::fs::write(&gh, format!("#!/bin/sh\necho \"$@\" > '{}'\necho 'diff --git a/x b/x'\n", marker.display())).unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let source = DiffSource {
+            gh_bin: gh.display().to_string(),
+            // Закрытый порт: если запрос всё же уйдёт в API, ответа не будет — но и вызова быть не должно.
+            api: "http://127.0.0.1:9".into(),
+            token: "tok".into(),
+            tool_name: "t".into(),
+            app_dir: String::new(),
+        };
+        for bad in ["--repo=evil/x", "-R", "1/../../user", "7 --repo=evil/x", ""] {
+            assert_eq!(source.fetch(bad, "o/r", "a.ts").unwrap(), "", "{bad}");
+            assert!(!marker.exists(), "gh вызван с pr={bad:?}");
+        }
+        assert_eq!(source.fetch("42", "o/r", "a.ts").unwrap(), "diff --git a/x b/x\n");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap().trim(), "pr diff 42 -- a.ts");
     }
 
     #[test]

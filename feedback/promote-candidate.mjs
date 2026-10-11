@@ -54,7 +54,11 @@ export async function fetchPrFileDiff({ pr, repo, file, token }) {
   const { promisify } = await import('node:util');
   const run = promisify(execFile);
 
-  if (pr && file) {
+  // pr приходит и из файла кандидата (fromFeedback.pr) — произвольный JSON. В argv gh
+  // он стоит до `--`, в URL API — внутри пути: только номер из цифр.
+  if (!/^\d+$/.test(String(pr ?? ''))) return '';
+
+  if (file) {
     try {
       const { stdout } = await run('gh', ['pr', 'diff', String(pr), '--', file], {
         encoding: 'utf8',
