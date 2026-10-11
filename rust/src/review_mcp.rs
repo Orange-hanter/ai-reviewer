@@ -1268,7 +1268,9 @@ impl Inner {
         if let Some(p) = entry.preview.as_ref().filter(|v| js_truthy(v)) {
             body.insert("preview".into(), p.clone());
         }
-        body.insert("artifact".into(), entry.artifact.clone());
+        // `entry.artifact || {}`: у мягкого отказа артефакта нет, а читатель sidecar ждёт объект.
+        let artifact = if js_truthy(&entry.artifact) { entry.artifact.clone() } else { json!({}) };
+        body.insert("artifact".into(), artifact);
         let mut text = json_text(&Value::Object(body));
         text.push('\n');
         std::fs::write(dir.join(format!("{id}.json")), text)?;

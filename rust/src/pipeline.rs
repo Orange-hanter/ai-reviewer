@@ -161,6 +161,11 @@ pub struct PipelineOutcome {
     pub soft_fail: bool,
 }
 
+/// Строка лога мягкого отказа CLI — `log('SOFT-FAIL:', msg)` дефолтного `die`.
+pub fn soft_fail_line(reason: &str) -> String {
+    format!("SOFT-FAIL: {reason}")
+}
+
 /// Мягкий отказ пайплайна — порт `PipelineSoftFail`. Живёт как тип ошибки, чтобы
 /// `?` из глубины стадии выходил на верхний уровень, где его отличают от аварии.
 #[derive(Debug)]
@@ -554,8 +559,13 @@ impl<'a> ReviewPipeline<'a> {
     }
 
     /// Код возврата CLI (`run`). `Err` — авария самого пайплайна; CLI её глушит в `0`.
+    /// Мягкий отказ логируется `SOFT-FAIL: …` — как дефолтный `die` в JS (`pipeline.mjs:316`).
     pub fn run(&self) -> Result<i32> {
-        Ok(self.run_detailed()?.exit_code)
+        let o = self.run_detailed()?;
+        if o.soft_fail {
+            self.log(&soft_fail_line(o.reason.as_deref().unwrap_or("")));
+        }
+        Ok(o.exit_code)
     }
 
     /// `runDetailed`: тот же прогон, но с артефактом в памяти.
@@ -576,8 +586,10 @@ impl<'a> ReviewPipeline<'a> {
         let out = match res {
             Ok(o) => Ok(o),
             Err(e) => match e.downcast_ref::<PipelineSoftFail>() {
+                // Без лога: `SOFT-FAIL: …` печатает только CLI-путь ([`Self::run`],
+                // `pr-review review`) — в JS это дефолтный `die`. MCP подменяет `die` на
+                // `throw PipelineSoftFail` без лога, и лишней notification клиент не видит.
                 Some(soft) => {
-                    self.log(&format!("SOFT-FAIL: {}", soft.0));
                     st.final_obs = json!({
                         "exitCode": 0,
                         "degraded": true,

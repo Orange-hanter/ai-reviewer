@@ -196,6 +196,11 @@ fn env_with(gate: Gate) -> Env {
 }
 
 fn spawn(env: &Env, wire: Wire, root_override: Option<&str>) -> Server {
+    spawn_with(env, wire, root_override, |_| {})
+}
+
+/// `spawn` с правкой команды поверх общего окружения (например, без ключа LLM).
+fn spawn_with(env: &Env, wire: Wire, root_override: Option<&str>, tweak: impl FnOnce(&mut Command)) -> Server {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_pr-review"));
     let root = env.root();
     cmd.arg("review-mcp")
@@ -221,6 +226,7 @@ fn spawn(env: &Env, wire: Wire, root_override: Option<&str>) -> Server {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    tweak(&mut cmd);
     let mut child = cmd.spawn().expect("запуск pr-review review-mcp");
     let stdout = child.stdout.take().unwrap();
     let (tx, rx) = mpsc::channel();
@@ -507,4 +513,73 @@ fn путь_вне_корня_и_несуществующий_корень() {
     assert_eq!(s.exit_code(), 1);
     std::thread::sleep(Duration::from_millis(50));
     assert!(s.stderr().contains("REVIEW_MCP_ROOT не существует"), "{}", s.stderr());
+}
+
+#[test]
+fn sigterm_во_время_wait_true_завершает_сервер_сразу() {
+    // Ворота закрыты: MoA «идёт», главный поток занят синхронным review_run.
+    let gate = Gate::default();
+    let env = env_with(gate.clone());
+    let mut s = spawn(&env, Wire::Json, None);
+    s.send(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": "review_run", "arguments": { "diffPath": "changes.patch", "headSha": HEAD } } }));
+    // Ждём, пока прогон дойдёт до LLM: фейк принял соединение.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while env.llm.hits.load(Ordering::SeqCst) == 0 {
+        assert!(Instant::now() < deadline, "прогон не дошёл до LLM; stderr:\n{}", s.stderr());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let sent = Instant::now();
+    // SAFETY: kill(2) на pid своего дочернего процесса.
+    let rc = unsafe { libc::kill(s.child.id() as libc::pid_t, libc::SIGTERM) };
+    assert_eq!(rc, 0);
+    let status = loop {
+        if let Some(st) = s.child.try_wait().unwrap() {
+            break st;
+        }
+        if sent.elapsed() > Duration::from_secs(5) {
+            s.child.kill().ok();
+            gate.open();
+            panic!("review-mcp жив через 5 с после SIGTERM при wait:true");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    gate.open();
+    assert_eq!(status.code(), Some(0), "JS: process.exit(0) в обработчике сигнала");
+}
+
+#[test]
+fn корень_файл_а_не_каталог_exit_1() {
+    let gate = Gate::default();
+    gate.open();
+    let env = env_with(gate);
+    let file = env.root().join("changes.patch");
+    let mut s = spawn(&env, Wire::Json, Some(file.to_str().unwrap()));
+    s.close_stdin();
+    assert_eq!(s.exit_code(), 1, "JS: process.chdir бросает ENOTDIR → exit 1");
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(s.stderr().contains("REVIEW_MCP_ROOT"), "{}", s.stderr());
+}
+
+#[test]
+fn мягкий_отказ_без_ключа_sidecar_artifact_объект_и_без_soft_fail_notification() {
+    let gate = Gate::default();
+    gate.open();
+    let env = env_with(gate);
+    let mut s = spawn_with(&env, Wire::Json, None, |c| {
+        c.env_remove("OLLAMA_API_KEY");
+    });
+    let res = content(&s.tool(1, "review_run", json!({ "diffPath": "changes.patch", "headSha": HEAD }))).clone();
+    assert_eq!(res["status"], "degraded", "{res}");
+    let job = res["jobId"].as_str().unwrap().to_string();
+    let soft: Vec<_> = s
+        .notes
+        .iter()
+        .filter(|n| n["params"]["data"].as_str().is_some_and(|d| d.contains("SOFT-FAIL")))
+        .collect();
+    assert!(soft.is_empty(), "JS не шлёт notification SOFT-FAIL: {soft:?}");
+    let side = sidecar(&env.root(), &job);
+    assert_eq!(side["artifact"], json!({}), "JS: artifact: entry.artifact || {{}}");
+    s.close_stdin();
+    assert_eq!(s.exit_code(), 0);
 }

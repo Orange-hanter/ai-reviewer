@@ -253,3 +253,18 @@ fn без_ключа_мягкий_отказ_exit_0() {
     assert_eq!(r.code, 0, "{}", r.stdout);
     assert!(r.stdout.contains("SOFT-FAIL: нет LLM API key"), "{}", r.stdout);
 }
+
+#[test]
+fn лишние_и_повторные_флаги_не_exit_2_как_parse_cli() {
+    // JS parseCli игнорирует неизвестные и повторные флаги: прогон идёт как обычно.
+    // Строгий clap давал exit 2 до fail-open блока — в CI это блок merge без ревью.
+    let llm = fake_llm(Mode::Blocker);
+    let r = review(Some(&llm), &[], &["--dry-run", "--diff", "{diff}", "--verbose"]);
+    assert_eq!(r.code, 1, "лишний флаг не мешает гейту:\nstdout:\n{}\nstderr:\n{}", r.stdout, r.stderr);
+    let r = review(Some(&llm), &[], &["--dry-run", "--dry-run", "--diff", "{diff}"]);
+    assert_eq!(r.code, 1, "повтор флага:\nstderr:\n{}", r.stderr);
+    // `--diff` последним: в JS diffFile = '' → дифф из PR, без кредов — мягкий отказ, exit 0.
+    let r = review(Some(&llm), &[], &["--dry-run", "--diff"]);
+    assert_eq!(r.code, 0, "stderr:\n{}", r.stderr);
+    assert!(r.stdout.contains("SOFT-FAIL"), "{}", r.stdout);
+}

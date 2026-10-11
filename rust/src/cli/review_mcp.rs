@@ -75,7 +75,12 @@ pub fn run(_args: Args) -> Result<i32> {
             eprintln!("ai-reviewer MCP: REVIEW_MCP_ROOT не существует: {}", abs.display());
             return Ok(1);
         }
-        std::env::set_current_dir(&abs)?;
+        // JS: `process.chdir` бросает (ENOTDIR, EACCES) мимо fail-open → exit 1. Через `?`
+        // ошибка ушла бы в диспетчер и превратилась в exit 0: клиент не увидел бы сбой конфигурации.
+        if let Err(e) = std::env::set_current_dir(&abs) {
+            eprintln!("ai-reviewer MCP: не удалось перейти в REVIEW_MCP_ROOT {}: {e}", abs.display());
+            return Ok(1);
+        }
     }
     let root = std::env::current_dir()?;
     let env = process_env();

@@ -524,6 +524,8 @@ static STOP: AtomicBool = AtomicBool::new(false);
 mod signals {
     use super::STOP;
     use std::sync::atomic::Ordering;
+    use std::sync::Once;
+    use std::time::Duration;
 
     const SIGINT: i32 = 2;
     const SIGTERM: i32 = 15;
@@ -538,15 +540,38 @@ mod signals {
         STOP.store(true, Ordering::SeqCst);
     }
 
+    /// Сколько ждать штатного выхода (EINTR → `serve` возвращается → `main`), прежде чем
+    /// завершить процесс принудительно.
+    const GRACE: Duration = Duration::from_millis(150);
+    const POLL: Duration = Duration::from_millis(20);
+
     pub fn install() {
-        for sig in [SIGINT, SIGTERM] {
-            // SAFETY: обработчик только пишет в AtomicBool; siginterrupt(…, 1)
-            // снимает SA_RESTART, чтобы блокирующий read вернул EINTR.
-            unsafe {
-                signal(sig, on_signal);
-                siginterrupt(sig, 1);
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            for sig in [SIGINT, SIGTERM] {
+                // SAFETY: обработчик только пишет в AtomicBool; siginterrupt(…, 1)
+                // снимает SA_RESTART, чтобы блокирующий read вернул EINTR.
+                unsafe {
+                    signal(sig, on_signal);
+                    siginterrupt(sig, 1);
+                }
             }
-        }
+            // Сторож: флаг STOP цикл `serve` видит только между чтениями stdin. Пока главный
+            // поток занят синхронным обработчиком (review_run с wait:true — минуты MoA), он
+            // его не проверит, и процесс жил бы до конца прогона. В JS обработчик сигнала —
+            // `process.exit(0)` сразу: цикл событий во время await свободен. Сторож даёт ту
+            // же семантику: штатный выход получает GRACE, затем exit(0). Сигнал может прийти
+            // и в этот поток, а не в главный, — тогда EINTR в read не случится, и выход
+            // тоже обеспечивает сторож.
+            let _ = std::thread::Builder::new().name("mcp-signal-watch".into()).spawn(|| {
+                while !STOP.load(Ordering::SeqCst) {
+                    std::thread::sleep(POLL);
+                }
+                std::thread::sleep(GRACE);
+                // process::exit сбрасывает буфер stdout (rt::cleanup), как drain в JS.
+                std::process::exit(0);
+            });
+        });
     }
 }
 

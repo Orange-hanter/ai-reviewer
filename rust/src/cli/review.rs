@@ -13,32 +13,23 @@
 
 use std::path::PathBuf;
 
+use super::feedback::flag;
 use super::wiring::{process_env, stdout_log, ReviewWiring};
-use crate::pipeline::CliArgs;
+use crate::pipeline::{soft_fail_line, CliArgs};
 
-/// Аргументы `pr-review review` — `parseCli` (`lib/config.mjs:62-74`).
-/// Остальная конфигурация приходит из env и профиля, как в JS.
+/// Аргументы `pr-review review` — сырые argv, разбираются как `parseCli` (`lib/config.mjs:62-74`):
+/// флаг ищется по первому вхождению, значение — следующий элемент (флаг последний — `''`),
+/// неизвестные и повторённые флаги молча игнорируются. Строгий разбор clap здесь нельзя:
+/// он завершал бы процесс с exit 2 до fail-open блока, и лишний флаг в вызове CI
+/// блокировал бы merge без прогона ревью. Остальная конфигурация — из env и профиля.
+///
+/// Флаги: `--dry-run`, `--diff PATH`, `--head-sha SHA`, `--repo OWNER/REPO`, `--pr N`.
+/// Отклонение от JS: `--help`/`-h` в первой позиции печатает справку clap.
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// Прогон без постинга в GitHub: результат только в лог/артефакт.
-    #[arg(long)]
-    pub dry_run: bool,
-
-    /// Путь к готовому diff-файлу вместо загрузки диффа из PR.
-    #[arg(long, value_name = "PATH")]
-    pub diff: Option<PathBuf>,
-
-    /// SHA головы для file-diff прогона.
-    #[arg(long, value_name = "SHA")]
-    pub head_sha: Option<String>,
-
-    /// Репозиторий `owner/repo` (по умолчанию — `GITHUB_REPOSITORY`).
-    #[arg(long, value_name = "OWNER/REPO")]
-    pub repo: Option<String>,
-
-    /// Номер PR (по умолчанию — `PR_NUMBER`).
-    #[arg(long, value_name = "N")]
-    pub pr: Option<String>,
+    /// `[--dry-run] [--diff PATH] [--head-sha SHA] [--repo OWNER/REPO] [--pr N]`.
+    #[arg(value_name = "ARGS", num_args = 0.., allow_hyphen_values = true, trailing_var_arg = true)]
+    pub argv: Vec<String>,
 }
 
 /// `Number(x || 0)` для номера PR: нечисловое (NaN в JS) и пустое — `0`, то есть «нет PR».
@@ -54,14 +45,15 @@ impl Args {
     /// `parseCli(argv)` с env-фолбэками `GITHUB_REPOSITORY`/`PR_NUMBER`.
     /// Пустое значение флага в JS — falsy и уступает env (`flag('--repo') || env`).
     pub fn to_cli_args(&self, env: &std::collections::HashMap<String, String>) -> CliArgs {
+        let argv = &self.argv;
         let env_of = |k: &str| env.get(k).cloned().unwrap_or_default();
-        let non_empty = |v: &Option<String>| v.clone().filter(|s| !s.is_empty());
+        let non_empty = |name: &str| flag(argv, name).filter(|s| !s.is_empty()).map(str::to_string);
         CliArgs {
-            dry_run: self.dry_run,
-            diff_file: self.diff.as_ref().map(|p| p.to_string_lossy().into_owned()),
-            head_sha: self.head_sha.clone().unwrap_or_default(),
-            repo: non_empty(&self.repo).unwrap_or_else(|| env_of("GITHUB_REPOSITORY")),
-            pr_number: pr_number(&non_empty(&self.pr).unwrap_or_else(|| env_of("PR_NUMBER"))),
+            dry_run: argv.iter().any(|a| a == "--dry-run"),
+            diff_file: flag(argv, "--diff").map(str::to_string),
+            head_sha: non_empty("--head-sha").unwrap_or_default(),
+            repo: non_empty("--repo").unwrap_or_else(|| env_of("GITHUB_REPOSITORY")),
+            pr_number: pr_number(&non_empty("--pr").unwrap_or_else(|| env_of("PR_NUMBER"))),
         }
     }
 }
@@ -70,9 +62,16 @@ pub fn run(args: Args) -> anyhow::Result<i32> {
     let env = process_env();
     let cli = args.to_cli_args(&env);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let outcome = ReviewWiring::from_env(&env, &cli, cwd, stdout_log()).and_then(|w| w.run_detailed());
+    let log = stdout_log();
+    let outcome = ReviewWiring::from_env(&env, &cli, cwd, log.clone()).and_then(|w| w.run_detailed());
     match outcome {
-        Ok(o) => Ok(o.exit_code),
+        Ok(o) => {
+            // Дефолтный `die` CLI (`pipeline.mjs:316`): пайплайн сам мягкий отказ не логирует.
+            if o.soft_fail {
+                log(&soft_fail_line(o.reason.as_deref().unwrap_or("")));
+            }
+            Ok(o.exit_code)
+        }
         Err(e) => {
             // Авария движка — exit 0. Текст ошибки не несёт секретов: ключи ходят
             // в заголовках, а не в URL, и в сообщения ошибок клиентов не попадают.
@@ -88,7 +87,40 @@ mod tests {
     use std::collections::HashMap;
 
     fn args(repo: Option<&str>, pr: Option<&str>) -> Args {
-        Args { dry_run: false, diff: None, head_sha: None, repo: repo.map(Into::into), pr: pr.map(Into::into) }
+        let mut argv = Vec::new();
+        if let Some(r) = repo {
+            argv.extend(["--repo".to_string(), r.to_string()]);
+        }
+        if let Some(p) = pr {
+            argv.extend(["--pr".to_string(), p.to_string()]);
+        }
+        Args { argv }
+    }
+
+    /// Разбор argv так же, как его делает `pr-review review` в main.
+    fn parse(argv: &[&str]) -> Result<Args, clap::Error> {
+        use clap::Parser;
+        #[derive(clap::Parser)]
+        struct T {
+            #[command(flatten)]
+            a: Args,
+        }
+        T::try_parse_from(std::iter::once("review").chain(argv.iter().copied())).map(|t| t.a)
+    }
+
+    #[test]
+    fn argv_терпит_лишние_повторные_и_пустые_флаги_как_parse_cli() {
+        // JS parseCli игнорирует неизвестное и повторы; clap не должен падать с exit 2.
+        let c = parse(&["--dry-run", "--diff", "c.patch", "--verbose"]).expect("лишний флаг").to_cli_args(&HashMap::new());
+        assert!(c.dry_run);
+        assert_eq!(c.diff_file.as_deref(), Some("c.patch"));
+        let c = parse(&["--dry-run", "--dry-run", "--diff", "a", "--diff", "b"]).expect("повторы").to_cli_args(&HashMap::new());
+        assert_eq!(c.diff_file.as_deref(), Some("a"), "первое вхождение, как argv.indexOf");
+        let c = parse(&["--dry-run", "--diff"]).expect("--diff без значения").to_cli_args(&HashMap::new());
+        assert_eq!(c.diff_file.as_deref(), Some(""), "флаг последний — ''");
+        let c = parse(&["--head-sha", "abc1234", "--pr", "9", "--repo", "o/r"]).unwrap().to_cli_args(&HashMap::new());
+        assert_eq!((c.head_sha.as_str(), c.repo.as_str(), c.pr_number), ("abc1234", "o/r", 9));
+        assert!(!parse(&[]).unwrap().to_cli_args(&HashMap::new()).dry_run);
     }
 
     #[test]
