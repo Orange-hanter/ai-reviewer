@@ -372,6 +372,8 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_GOLD_CACHE` | `.ai-review/gold-public` | Кэш диффов публичных кейсов, скачанных по пину `source.sha`; для кейсов `source.local` — ещё и деревья проекта (`trees/`) |
 | `REVIEW_GOLD_REPOS` | — | Локальные клоны для кейсов `gold-private/`: `orakul=/path/Orakul,restate=/path/Restate`; имя — `source.local` кейса |
 | `REVIEW_GOLD_CHECKOUT` | `1` | `0` — кейс `source.local` гоняется без дерева проекта на `source.sha` (без окон контекста и карточек) |
+| `REVIEW_GOLD_TREES` | `$TMPDIR/ai-reviewer-gold-trees` | Куда разворачивать деревья кейсов `source.local`; вне git-репозитория, иначе graphify наследует его `.gitignore` |
+| `REVIEW_GOLD_GRAPHIFY` | — | Бинарь graphify: построить граф в дереве кейса, если его там нет (нужен карточкам символов) |
 
 ## Auto-triage
 

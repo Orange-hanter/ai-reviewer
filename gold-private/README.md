@@ -37,10 +37,14 @@ export REVIEW_GOLD_REPOS="orakul=/path/Orakul,restate=/path/Restate,gateway=/pat
 REVIEW_GOLD_DIR=gold-private OLLAMA_API_KEY=… node bin/pr-review-gold.mjs [--case <id>]
 ```
 
-Раннер разворачивает дерево проекта на `source.sha` (`git archive`, клон не меняется) и гоняет
-ревью из него — модель видит настоящие окна контекста. Граф для карточек символов берётся из
-`.graphify/graphify-out/graph.json` внутри дерева, если его там построить; без графа карточек
-нет. `REVIEW_GOLD_CHECKOUT=0` — прогон без дерева.
+Раннер разворачивает дерево проекта на `source.sha` (`git archive`, клон не меняется) в
+`REVIEW_GOLD_TREES` (по умолчанию `$TMPDIR/ai-reviewer-gold-trees` — вне репозитория, иначе
+graphify наследует его `.gitignore`) и гоняет ревью из него — модель видит настоящие окна
+контекста. Профиль — тот, что был в проекте на этом коммите (`.ai-reviewer.json` или
+`ops/ai-review/profile.json`), иначе дефолтный. Граф для карточек символов —
+`.graphify/graphify-out/graph.json` в дереве; `REVIEW_GOLD_GRAPHIFY=<бинарь graphify>` строит его
+сам (AST, без LLM, ~30 с). Без графа карточек нет. `REVIEW_GOLD_CHECKOUT=0` — прогон без дерева.
+`--tag contract` — только кейсы с тегом.
 
 Пересобрать набор (перезапишет `meta.json` кандидатов):
 
