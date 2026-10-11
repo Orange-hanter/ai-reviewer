@@ -4,7 +4,7 @@
 // Запуск: OLLAMA_API_KEY=… npx pr-review-gold [--case <id>] [--jsonl out.jsonl]
 // Каталог набора — REVIEW_GOLD_DIR; диффы публичных кейсов тянутся по пину в REVIEW_GOLD_CACHE.
 // Blast-radius в gold-прогонах заглушен (детерминизм; на находки влияет слабо).
-import { readdir, readFile, writeFile, mkdir, access } from 'node:fs/promises';
+import { readdir, readFile, writeFile, mkdir, access, lstat } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadReviewConfig } from '../lib/config.mjs';
@@ -69,6 +69,14 @@ async function caseTree(meta) {
   // Вне репозитория ai-reviewer: внутри gitignored `.ai-review/` graphify наследует чужой
   // .gitignore и пропускает почти весь код (граф в 44 узла вместо 8 724).
   const root = resolve(process.env.REVIEW_GOLD_TREES || join(tmpdir(), 'ai-reviewer-gold-trees'));
+  // Каталог по умолчанию — с предсказуемым именем в TMPDIR (на Linux это общий /tmp): чужой,
+  // заранее созданный корень с маркером подсунул бы прогону свой профиль и граф. Корень — 0700,
+  // не симлинк и наш.
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const st = await lstat(root);
+  if (!st.isDirectory() || (process.getuid && st.uid !== process.getuid()) || (st.mode & 0o077)) {
+    throw new Error(`каталог деревьев ${root} не принадлежит пользователю или доступен другим — задайте REVIEW_GOLD_TREES`);
+  }
   const tree = join(root, `${meta.id}.${String(meta.source.sha).slice(0, 12)}`);
   const done = join(tree, '.gold-tree-ok');
   try { await access(done); return tree; } catch { /* развернуть */ }
