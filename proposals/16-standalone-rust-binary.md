@@ -492,7 +492,7 @@ T08 замораживает сигнатуры трейтов до того, к
 |---|---|---|
 | ✅ T25 | golden-финал (сделано: 29/29 кейсов, `#[ignore]` снят): 16 фикстур + router skip/light + telegram, снять `#[ignore]` | `cargo test --test pipeline_golden` |
 | T27 | подкоманда `review` ← `bin/pr-review.mjs` + `runReview`: fail-open exit 0, блокеры exit 1, strict-режимы | dry-run на фикстуре с фейковым LLM-сервером |
-| T30 | подкоманды `feedback`, `feedback-batch`, `feedback-migrate`, `feedback-promote` | `cargo test --test feedback_cli` |
+| ✅ T30 | подкоманды `feedback`, `feedback-batch`, `feedback-migrate`, `feedback-promote` — тонкие CLI поверх `feedback.rs`, argv (`parseCli`-разбор) и коды возврата как у `bin/pr-review-feedback*.mjs` и `feedback/{migrate,promote}-feedback.mjs`; fixtures `--aggregate` и `feedback-migrate` побайтно совпадают с JS на одном входе; отклонения — в шапке `cli/feedback_promote.rs` | `cargo test --test feedback_cli` |
 | T41 | подкоманда `review-mcp` ← `bin/pr-review-mcp.mjs` + `lib/review-mcp{,-handshake,-tools}.mjs` (RFC 08–12: дешёвые стадии, `review_run` как pinned dry-run MoA поверх `runDetailed`, `wait: false` + поллинг по `jobId`, атомарный слот). Десятая подкоманда; `cursor-plugin/bin/review-mcp.sh` переводится в T31. Зависит от T26, T40 | `cargo test --test review_mcp_stdio`; кейсы `test/pr-review.mcp.test.mjs` |
 
 **Волна 6**
