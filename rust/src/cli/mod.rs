@@ -14,3 +14,4 @@ pub mod metrics;
 pub mod review;
 pub mod structure;
 pub mod structure_mcp;
+pub mod wiring;
