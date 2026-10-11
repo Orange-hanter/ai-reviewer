@@ -38,7 +38,7 @@ use crate::util::{js_resolve, resolve_contained_path};
 pub struct Args {}
 
 /// usableRoot: обрезанное непустое значение без неподставленного `${…}`.
-fn usable_root(value: Option<String>) -> Option<String> {
+pub(crate) fn usable_root(value: Option<String>) -> Option<String> {
     let value = value?;
     let trimmed = value.trim();
     if trimmed.is_empty() || has_placeholder(trimmed) {

@@ -24,7 +24,7 @@ struct Cli {
     cmd: Commands,
 }
 
-/// Девять подкоманд бинаря. Имена в CLI — kebab-case от имени варианта
+/// Десять подкоманд бинаря. Имена в CLI — kebab-case от имени варианта
 /// (`StructureMcp` → `structure-mcp`), это поведение clap по умолчанию.
 #[derive(Debug, Subcommand)]
 enum Commands {
@@ -34,6 +34,8 @@ enum Commands {
     Structure(cli::structure::Args),
     /// MCP-сервер structure-контура поверх stdio.
     StructureMcp(cli::structure_mcp::Args),
+    /// MCP-сервер ревью поверх stdio: дешёвые стадии и pinned dry-run MoA, не гейт.
+    ReviewMcp(cli::review_mcp::Args),
     /// Прогон golden-фикстур без LLM — гейт post-processing.
     Eval(cli::eval::Args),
     /// Отчёт по JSONL-логу observability.
@@ -54,6 +56,7 @@ fn dispatch(cmd: Commands) -> anyhow::Result<i32> {
         Commands::Review(args) => cli::review::run(args),
         Commands::Structure(args) => cli::structure::run(args),
         Commands::StructureMcp(args) => cli::structure_mcp::run(args),
+        Commands::ReviewMcp(args) => cli::review_mcp::run(args),
         Commands::Eval(args) => cli::eval::run(args),
         Commands::Metrics(args) => cli::metrics::run(args),
         Commands::Feedback(args) => cli::feedback::run(args),

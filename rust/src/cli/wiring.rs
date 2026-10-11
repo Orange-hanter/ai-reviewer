@@ -37,7 +37,7 @@ use crate::pipeline::{
 };
 use crate::prescan::RealPrescan;
 use crate::profile::Profile;
-use crate::traits::{Notifier, PipelineDeps};
+use crate::traits::{GithubApi, Notifier, PipelineDeps};
 
 /// Логгер прогона: общий для пайплайна, движка, клиентов и observability.
 /// `Arc`, потому что часть потребителей (`with_log` клиентов) хочет `'static`-замыкание.
@@ -162,6 +162,22 @@ impl ReviewWiring {
     /// `runDetailed()` с перебитыми полями прогона. `Err` — авария пайплайна
     /// (не мягкий отказ: тот приходит `Ok` с `soft_fail = true`).
     pub fn run_detailed_with(&self, extras: RunExtras) -> Result<PipelineOutcome> {
+        self.run_inner(extras, &self.github, self.notifier.as_ref().map(|n| n as &dyn Notifier))
+    }
+
+    /// `runDetailed()` превью-прогона ревью-MCP (`lib/review-mcp.mjs` `executeReviewRun`):
+    /// GitHub подменён `github` (в MCP — немой клиент с prior из экспорта), телеграм
+    /// выключен (`notifyTelegram: async () => {}`). Остальное — те же боевые зависимости.
+    pub fn run_detailed_silent(&self, extras: RunExtras, github: &dyn GithubApi) -> Result<PipelineOutcome> {
+        self.run_inner(extras, github, None)
+    }
+
+    fn run_inner(
+        &self,
+        extras: RunExtras,
+        github: &dyn GithubApi,
+        notifier: Option<&dyn Notifier>,
+    ) -> Result<PipelineOutcome> {
         let log: &(dyn Fn(&str) + Send + Sync) = &*self.log;
 
         // Observability — одна на прогон: её же слушает движок, иначе llm_call/engine-события
@@ -183,11 +199,11 @@ impl ReviewWiring {
         let prescan = RealPrescan::from_cfg(&self.cfg, &self.profile, self.cwd.clone(), move |m: &str| prescan_log(m));
 
         let deps = PipelineDeps {
-            github: &self.github,
+            github,
             engine: &engine,
             prescan: &prescan,
             graphify: &self.graphify,
-            notifier: self.notifier.as_ref().map(|n| n as &dyn Notifier),
+            notifier,
             log,
             cost: &self.cost,
         };
