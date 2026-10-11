@@ -15,8 +15,10 @@ import { MARKERS } from '../lib/constants.mjs';
 import { scoreGoldCase } from '../lib/benchmark.mjs';
 import { ensureCaseDiff, localRepoPath } from '../lib/gold-fetch.mjs';
 import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { buildGraphIndex, createGraphifyClient } from '../lib/graphify.mjs';
 import { envFlag } from '../lib/util.mjs';
+import { PROFILE_FILENAMES, resetProfile } from '../lib/profile.mjs';
 
 const GOLD_DIR = process.env.REVIEW_GOLD_DIR
   ? resolve(process.cwd(), process.env.REVIEW_GOLD_DIR)
@@ -27,6 +29,8 @@ const onlyIdx = process.argv.indexOf('--case');
 const only = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
 const jsonlIdx = process.argv.indexOf('--jsonl');
 const jsonlPath = jsonlIdx >= 0 ? resolve(process.cwd(), process.argv[jsonlIdx + 1]) : null;
+const tagIdx = process.argv.indexOf('--tag');
+const onlyTag = tagIdx >= 0 ? process.argv[tagIdx + 1] : null;
 
 let graphIndexCache;
 /** Индекс graph.json (REVIEW_GOLD_GRAPH или GRAPH) — один раз на прогон; нет файла → null. */
@@ -99,7 +103,10 @@ function footerFindings(text) {
 async function caseTree(meta) {
   if (!meta?.source?.local || process.env.REVIEW_GOLD_CHECKOUT === '0') return null;
   const repo = localRepoPath(meta);
-  const tree = join(CACHE_DIR, 'trees', `${meta.id}.${String(meta.source.sha).slice(0, 12)}`);
+  // Вне репозитория ai-reviewer: внутри gitignored `.ai-review/` graphify наследует чужой
+  // .gitignore и пропускает почти весь код (граф в 44 узла вместо 8 724).
+  const root = resolve(process.env.REVIEW_GOLD_TREES || join(tmpdir(), 'ai-reviewer-gold-trees'));
+  const tree = join(root, `${meta.id}.${String(meta.source.sha).slice(0, 12)}`);
   const done = join(tree, '.gold-tree-ok');
   try { await access(done); return tree; } catch { /* развернуть */ }
   await mkdir(tree, { recursive: true });
@@ -117,13 +124,31 @@ async function caseTree(meta) {
   return tree;
 }
 
+/**
+ * Профиль проекта кейса — как в его CI: `.ai-reviewer.json` в корне или
+ * `ops/ai-review/profile.json`. Нет файла — дефолтный профиль, а не профиль прошлого кейса:
+ * профиль process-wide, и иначе кейсы разных проектов ревьюились бы с чужими правилами.
+ */
+async function treeProfile(tree) {
+  for (const name of [...PROFILE_FILENAMES, 'ops/ai-review/profile.json']) {
+    try { await access(join(tree, name)); return join(tree, name); } catch { /* следующее */ }
+  }
+  resetProfile();
+  return null;
+}
+
 async function runCase(id) {
   const dir = join(GOLD_DIR, id);
   const meta = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8'));
   const diff = await ensureCaseDiff(dir, meta, { cacheDir: CACHE_DIR });
   const tree = await caseTree(meta);
+  // Граф в дереве нужен и карточкам символов (RFC 14), не только blast: без него сравнение
+  // REVIEW_SYMBOL_CARDS=0/1 вырождается. Строится, если задан GRAPHIFY_BIN.
+  if (tree && process.env.GRAPHIFY_BIN) await ensureTreeGraph(tree, meta.id);
+  const profile = tree ? await treeProfile(tree) : null;
   const env = {
     ...process.env,
+    ...(tree ? { REVIEW_PROFILE: profile || '' } : {}),
     // REVIEW_GOLD_OBSERVABILITY_DIR — JSONL прогона (токены, plan.symbolCards) для сравнения
     // конфигураций; по умолчанию выключено, как и было.
     ...(process.env.REVIEW_GOLD_OBSERVABILITY_DIR
@@ -132,30 +157,32 @@ async function runCase(id) {
     REVIEW_EXPORT: '0',
     REVIEW_AUTO_TRIAGE: '0',
   };
-  const cfg = loadReviewConfig(env, { dryRun: true, diffFile: diff.path, repo: '', prNumber: 0 });
-  // Граф для карточек: у кейса со своим деревом — только граф внутри дерева (если его там
-  // построили), общий REVIEW_GOLD_GRAPH относится к другому коду.
-  const graphIndex = !cfg.limits.symbolCards ? null
-    : tree ? await treeGraphIndex(tree) : await goldGraphIndex(cfg);
-  // Настоящий blast-radius — только у кейса со своим деревом: без дерева граф был бы чужим кодом.
-  let graphify = { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex }) };
-  let blastLive = false;
-  if (tree && envFlag('REVIEW_GOLD_BLAST', false, process.env)) {
-    const graph = await ensureTreeGraph(tree, meta.id);
-    if (graph) {
-      const g = { ...cfg.graphify, bin: resolve(cwdAtStart, process.env.GRAPHIFY_BIN), graph, report: join(dirname(graph), 'GRAPH_REPORT.md') };
-      graphify = createGraphifyClient({ ...cfg, graphify: g });
-      blastLive = true;
-    }
-  }
   const captured = [];
   const origLog = console.log;
-  console.log = (...a) => { captured.push(a.join(' ')); };
   const t0 = Date.now();
   const cwd0 = process.cwd();
   let code;
+  let blastLive = false;
   try {
+    // В дерево — до конфига: автопоиск профиля и относительные пути профиля идут от cwd,
+    // а в корне ai-reviewer лежит свой .ai-reviewer.json.
     if (tree) process.chdir(tree);
+    const cfg = loadReviewConfig(env, { dryRun: true, diffFile: diff.path, repo: '', prNumber: 0 });
+    // Граф для карточек: у кейса со своим деревом — только граф внутри дерева (если его там
+    // построили), общий REVIEW_GOLD_GRAPH относится к другому коду.
+    const graphIndex = !cfg.limits.symbolCards ? null
+      : tree ? await treeGraphIndex(tree) : await goldGraphIndex(cfg);
+    // Настоящий blast-radius — только у кейса со своим деревом: без дерева граф был бы чужим кодом.
+    let graphify = { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex }) };
+    if (tree && envFlag('REVIEW_GOLD_BLAST', false, process.env)) {
+      const graph = await ensureTreeGraph(tree, meta.id);
+      if (graph) {
+        const g = { ...cfg.graphify, bin: resolve(cwdAtStart, process.env.GRAPHIFY_BIN), graph, report: join(dirname(graph), 'GRAPH_REPORT.md') };
+        graphify = createGraphifyClient({ ...cfg, graphify: g });
+        blastLive = true;
+      }
+    }
+    console.log = (...a) => { captured.push(a.join(' ')); };
     const pipeline = createReviewPipeline(cfg, {
       // Blast-radius заглушен (кроме REVIEW_GOLD_BLAST), но при карточках символов (RFC 14)
       // индекс графа нужен — без него сравнение REVIEW_SYMBOL_CARDS=0/1 дало бы два одинаковых прогона.
@@ -170,6 +197,7 @@ async function runCase(id) {
   return {
     meta,
     code,
+    profile: profile ? profile.slice(tree.length + 1) : null,
     findings: footerFindings(captured.join('\n')),
     wallMs: Date.now() - t0,
     diffSource: diff.source,
@@ -188,6 +216,15 @@ const ids = (await readdir(GOLD_DIR, { withFileTypes: true }))
   .map((e) => e.name)
   .filter((id) => !only || id === only)
   .sort();
+// --tag contract — подмножество кейсов по тегу разметки (meta.tags).
+if (onlyTag) {
+  const tagged = [];
+  for (const id of ids) {
+    const meta = JSON.parse(await readFile(join(GOLD_DIR, id, 'meta.json'), 'utf8').catch(() => '{}'));
+    if (meta.tags?.includes(onlyTag)) tagged.push(id);
+  }
+  ids.splice(0, ids.length, ...tagged);
+}
 if (!ids.length) {
   console.error(`[gold] кейсы не найдены${only ? `: ${only}` : ''}`);
   process.exit(1);
@@ -200,13 +237,13 @@ const records = [];
 for (const id of ids) {
   process.stdout.write(`[gold] ${id} … `);
   try {
-    const { meta, code, findings, wallMs, diffSource, blastLive } = await runCase(id);
+    const { meta, code, findings, wallMs, diffSource, blastLive, profile } = await runCase(id);
     const wouldBlock = code === 1;
     const score = scoreGoldCase(meta, { wouldBlock, findings });
     const errors = score.precisionHints;
     const stat = errors.length ? '❌' : '✅';
     console.log(`${stat} wouldBlock=${code === 1} findings=${findings.length} wall=${(wallMs / 1000).toFixed(0)}с${blastLive ? " blast=live" : ""}`);
-    records.push({ id, meta, findings, wouldBlock, code, wallMs, diffSource, blastLive });
+    records.push({ id, meta, findings, wouldBlock, code, wallMs, diffSource, blastLive, profile });
     for (const e of errors) {
       console.log(`   ✗ ${e}`);
       failed++;
