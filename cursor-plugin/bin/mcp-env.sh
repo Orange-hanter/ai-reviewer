@@ -125,22 +125,16 @@ mcp_resolve_engine() {
     fi
     mcp_die ".engine-root не указывает на клон пакета: $root. Перезапустите cursor-plugin/bin/install-local.sh."
   fi
-  dir=$(pwd)
-  while [ -n "$dir" ] && [ "$dir" != / ]; do
-    if mcp_engine_ok "$dir"; then
-      printf '%s\n' "$dir"
-      return 0
-    fi
-    parent=$(dirname "$dir")
-    [ "$parent" = "$dir" ] && break
-    dir=$parent
-  done
+  # Предки cwd как источник движка (RFC 10, п. 3) сняты: cwd у plugin MCP — открытое окно
+  # Cursor, то есть недоверенный каталог. Выглядящий как клон пакета репозиторий отдал бы
+  # лаунчеру свой rust/target/*/pr-review или bin/pr-review-mcp.mjs на исполнение.
+  # Клон самого пакета находится по каталогу плагина ниже.
   plugin_parent=$(CDPATH= cd -- "$launcher_dir/../.." && pwd)
   if mcp_engine_ok "$plugin_parent"; then
     printf '%s\n' "$plugin_parent"
     return 0
   fi
-  mcp_die "движок не найден (нет AI_REVIEWER_ROOT, нет .engine-root, cwd не клон пакета). Запустите cursor-plugin/bin/install-local.sh или задайте корень в Plugins → Configure."
+  mcp_die "движок не найден (нет AI_REVIEWER_ROOT, нет .engine-root, плагин не внутри клона пакета). Запустите cursor-plugin/bin/install-local.sh или задайте корень в Plugins → Configure."
 }
 
 mcp_apply_consumer_root() {

@@ -53,7 +53,7 @@ last_updated: 2026-09-29
 
 1. usable `AI_REVIEWER_ROOT` (не плейсхолдер) → должен содержать `bin/pr-review-mcp.mjs`, иначе `exit 1`.
 2. файл `$(pluginDir)/.engine-root` (абсолютный путь клона; не в git).
-3. предки `cwd`, пока нет `bin/pr-review-mcp.mjs`.
+3. ~~предки `cwd`, пока нет `bin/pr-review-mcp.mjs`.~~ *Снято в RFC 16 (T31, безопасность): `cwd` plugin MCP — открытое окно Cursor, недоверенный каталог; репозиторий, похожий на клон пакета, отдавал бы лаунчеру на исполнение свой `rust/target/*/pr-review` или `bin/pr-review-mcp.mjs`.*
 4. если лаунчер живёт в `…/cursor-plugin/bin` внутри клона — `../..`.
 
 `REVIEW_MCP_ROOT`: usable env → иначе engine. `STRUCTURE_MCP_ROOT` = тот же, если не задан отдельно.

@@ -571,3 +571,29 @@ test('bin: настоящий pr-review — handshake обоих серверо�
     assert.ok(result.messages[1].result.tools.map((entry) => entry.name).includes(tool));
   }
 });
+
+test('безопасность: открытый в Cursor чужой каталог не даёт движок — его бинарь и JS не исполняются', async () => {
+  const dir = await isolatedPlugin();
+  // Рабочий каталог окна — недоверенный: выглядит как клон пакета и несёт закоммиченные исполняемые.
+  const evil = await mkdtemp(join(tmpdir(), 'mcp-evil-'));
+  await mkdir(join(evil, 'rust'), { recursive: true });
+  await writeFile(join(evil, 'rust/Cargo.toml'), '[package]\nname = "x"\n');
+  await mkdir(join(evil, 'cursor-plugin'), { recursive: true });
+  await writeFile(join(evil, 'cursor-plugin/mcp.json'), '{}\n');
+  await fakeBinary(join(evil, 'rust/target/release/pr-review'), 'EVIL-bin');
+  await mkdir(join(evil, 'bin'), { recursive: true });
+  await writeFile(join(evil, 'bin/pr-review-mcp.mjs'), "process.stderr.write('FAKE-EVIL-js\\n');\n");
+  for (const runtime of ['', 'node']) {
+    const result = await spawnFailFast(join(dir, 'bin/review-mcp.sh'), [], {
+      PATH: process.env.PATH,
+      AI_REVIEWER_ROOT: '',
+      REVIEW_MCP_ROOT: '',
+      AI_REVIEWER_BIN: '',
+      AI_REVIEWER_MCP_RUNTIME: runtime,
+      HOME,
+    }, evil);
+    assert.doesNotMatch(result.stderr, /FAKE-EVIL/, `runtime=${runtime || 'auto'}: ${result.stderr}`);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /движок не найден/);
+  }
+});
