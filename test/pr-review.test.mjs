@@ -96,6 +96,28 @@ test('collectBlastSymbols: добор экспортов из полного ф�
   assert.ok(syms.includes('makeDataStore'), 'export из файла попадает в blast даже без export в hunk');
 });
 
+test('extractChangedSymbols: Python — публичные def/async def/class верхнего уровня', () => {
+  const changed = [
+    'def row_id_for_slug(session, slug):',
+    'async def fetch_all(x):',
+    'class ProjectNotFoundError(LookupError):',
+    'class Plain:',
+    'def _private(x):',         // приватное — не экспорт
+    '    def method(self):',    // метод: имя в графе неоднозначно
+    'class _Hidden:',
+    'def ab(x):',               // короче 3
+  ].join('\n');
+  assert.deepEqual(extractChangedSymbols(changed), ['row_id_for_slug', 'fetch_all', 'ProjectNotFoundError', 'Plain']);
+});
+
+test('collectBlastSymbols: добор def из полного .py-файла, если hunk правит только тело', () => {
+  const changed = '    return session.scalar(stmt)\n';
+  const contentMap = new Map([
+    ['cod_doc/services/project_service.py', 'import x\n\n\ndef row_id_for_slug(session, slug):\n    return 1\n\n\ndef _helper():\n    pass\n'],
+  ]);
+  assert.deepEqual(collectBlastSymbols(changed, contentMap, 25), ['row_id_for_slug']);
+});
+
 test('Graphify: пустой blast-radius различает stale graph, неразрешимый символ и реальные зависимости', async () => {
   const calls = [];
   const cfg = {

@@ -295,6 +295,10 @@ fn symbol_patterns() -> &'static [regex::Regex] {
             r"(?-u:\b)export\s+const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:<[^>]*>\s*)?\(",
             r"(?-u:\b)export\s+const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?function",
             r"(?-u:\b)export\s*\{([^}]+)\}",
+            // Python: публичное определение верхнего уровня (колонка 0). Якорь `(?:^|\n)`
+            // вместо `(?m)` — у JS-флага `m` границы строк шире (`\r`, U+2028).
+            r"(?:^|\n)(?:async[ \t]+)?def[ \t]+([A-Za-z][A-Za-z0-9_]*)[ \t]*\(",
+            r"(?:^|\n)class[ \t]+([A-Za-z][A-Za-z0-9_]*)[ \t]*[(:]",
         ]
         .iter()
         .map(|src| regex::Regex::new(src).unwrap())
@@ -352,7 +356,7 @@ pub fn extract_changed_symbols(text: &str, max_symbols: usize) -> Vec<String> {
 }
 
 const CODE_EXTENSIONS: &[&str] = &[
-    ".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".js", ".jsx",
+    ".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".js", ".jsx", ".py", ".pyi",
 ];
 
 fn is_code_path(path: &str) -> bool {
@@ -361,7 +365,7 @@ fn is_code_path(path: &str) -> bool {
 }
 
 /// Символы для Graphify blast-radius: сначала из изменённых строк, затем добор
-/// экспортами из полных текстов затронутых `.ts`/`.js` файлов.
+/// экспортами из полных текстов затронутых `.ts`/`.js`/`.py` файлов.
 pub fn collect_blast_symbols(
     changed_text: &str,
     content_map: Option<&indexmap::IndexMap<String, String>>,
@@ -743,6 +747,25 @@ mod tests {
         );
         let syms = collect_blast_symbols(changed, Some(&content_map), 25);
         assert!(syms.contains(&"makeDataStore".to_string()));
+    }
+
+    #[test]
+    fn extract_changed_symbols_python_public_top_level() {
+        let changed = "def row_id_for_slug(session, slug):\nasync def fetch_all(x):\nclass ProjectNotFoundError(LookupError):\nclass Plain:\ndef _private(x):\n    def method(self):\nclass _Hidden:\ndef ab(x):";
+        let syms = extract_changed_symbols(changed, 25);
+        assert_eq!(syms, vec!["row_id_for_slug", "fetch_all", "ProjectNotFoundError", "Plain"]);
+    }
+
+    #[test]
+    fn collect_blast_symbols_picks_python_defs_from_full_file() {
+        let changed = "    return session.scalar(stmt)\n";
+        let mut content_map = indexmap::IndexMap::new();
+        content_map.insert(
+            "cod_doc/services/project_service.py".to_string(),
+            "import x\n\n\ndef row_id_for_slug(session, slug):\n    return 1\n\n\ndef _helper():\n    pass\n".to_string(),
+        );
+        let syms = collect_blast_symbols(changed, Some(&content_map), 25);
+        assert_eq!(syms, vec!["row_id_for_slug"]);
     }
 
     #[test]
