@@ -45,28 +45,28 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      # Node — только для инлайновых REST-хелперов шаблона (guard, create-PR): gh CLI на
+      # self-hosted раннере нет. Движку node не нужен — он prebuilt-бинарь.
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
 
-      # Чекаут выше сделан с ref: main, поэтому пин читается прямо из рабочего дерева —
+      # Чекаут выше сделан с ref: main, поэтому пин (ops/ai-reviewer-ref) и скрипт сверки
+      # (ops/ai-review/fetch-pr-review.sh) читаются прямо из рабочего дерева базовой ветки —
       # версия движка одна и та же у ревью и у harvest (иначе схема лога разъедется).
-      - name: Read pinned engine ref
-        id: pin
+      # Семантика сверки — как в pr-review.yml: недоступность релиза → bin пуст, шаги ниже
+      # пропускаются (fail-open); несовпадение sha256 → шаг красный (fail-closed поставки).
+      # Секретов у шага нет: релиз публичный.
+      - name: Fetch pinned pr-review binary
+        id: engine
         run: |
-          REF="$(tr -d '[:space:]' < ops/ai-reviewer-ref)"
-          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout pinned AI review engine
-        uses: actions/checkout@v7
-        with:
-          repository: Orange-hanter/ai-reviewer
-          ref: ${{ steps.pin.outputs.ref }}
-          path: .ai-reviewer-engine
+          ENGINE="$RUNNER_TEMP/ai-reviewer"   # вне рабочего дерева: в bot-PR не попадёт
+          rm -rf "$ENGINE" && mkdir -p "$ENGINE"
+          bash ops/ai-review/fetch-pr-review.sh ops/ai-reviewer-ref "$ENGINE/bin"
 
       - name: Guard against duplicate feedback PR
         id: guard
+        if: steps.engine.outputs.bin != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -100,8 +100,9 @@ jobs:
           fi
 
       - name: Migrate log + harvest feedback batch
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.engine.outputs.bin != '' && steps.guard.outputs.skip != 'true'
         env:
+          PR_REVIEW_BIN: ${{ steps.engine.outputs.bin }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
@@ -115,18 +116,19 @@ jobs:
           REVIEW_FEEDBACK_SINCE_DAYS: '14'
           REVIEW_FEEDBACK_PR_LIMIT: '30'
         run: |
-          # Движок — из отдельного репозитория по пину (шаг выше), код PR здесь не исполняется.
-          node .ai-reviewer-engine/feedback/migrate-feedback.mjs \
+          # Движок — сверенный бинарь по пину (шаг выше), код PR здесь не исполняется.
+          "$PR_REVIEW_BIN" feedback-migrate \
             --file "$GITHUB_WORKSPACE/ops/ai-review/feedback/fp-feedback.jsonl" --write
-          node .ai-reviewer-engine/bin/pr-review-feedback-batch.mjs
+          "$PR_REVIEW_BIN" feedback-batch
 
       # PR открываем ТОЛЬКО при новых записях. Байтовый `git diff` для этого не годится:
       # migrate-feedback переупаковывает JSON (порядок ключей) и даёт дифф при нуле новых
       # записей — из-за этого harvest каждый день плодил ветку и упирался в 403 на create-PR.
       # Сравниваем канонизированные множества записей, а не байты.
       - name: Create feedback data PR if new records
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.engine.outputs.bin != '' && steps.guard.outputs.skip != 'true'
         env:
+          PR_REVIEW_BIN: ${{ steps.engine.outputs.bin }}
           # PAT/app-токен, если repo-настройка «Allow GitHub Actions to create and approve
           # pull requests» выключена. Секрета нет → выражение даёт '' → берём GITHUB_TOKEN.
           GITHUB_TOKEN: ${{ secrets.FEEDBACK_PR_TOKEN || secrets.GITHUB_TOKEN }}
@@ -135,9 +137,8 @@ jobs:
           LOG="ops/ai-review/feedback/fp-feedback.jsonl"
           # Обе стороны прогоняем через ту же миграцию: иначе смена схемы (новое/переименованное
           # поле) сделала бы КАЖДУЮ старую запись «новой» и открыла бы PR с полным логом.
-          MIGRATE=".ai-reviewer-engine/feedback/migrate-feedback.mjs"
           git show "HEAD:$LOG" > "$RUNNER_TEMP/head.jsonl" 2>/dev/null || : > "$RUNNER_TEMP/head.jsonl"
-          node "$MIGRATE" --file "$RUNNER_TEMP/head.jsonl" --write > /dev/null
+          "$PR_REVIEW_BIN" feedback-migrate --file "$RUNNER_TEMP/head.jsonl" --write > /dev/null
           # LC_ALL=C: сортировка и сравнение — побайтовые. В записях есть кириллица, и при
           # локалезависимой сортировке смена раннера/локали переставила бы строки, а `comm`
           # на переставленном входе снова насчитал бы «новые» записи на пустом месте.

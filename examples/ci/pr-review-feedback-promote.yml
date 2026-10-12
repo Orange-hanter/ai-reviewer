@@ -22,41 +22,42 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Node — только для инлайнового REST-хелпера create-PR (gh CLI на self-hosted раннере нет).
+      # Движку node не нужен — он prebuilt-бинарь.
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
 
-      - name: Read pinned engine ref
-        id: pin
+      # Пин и скрипт сверки — из рабочего дерева базовой ветки (чекаут по умолчанию).
+      # Недоступность релиза → bin пуст, promote пропускается (fail-open); несовпадение sha256 →
+      # шаг красный (fail-closed поставки, см. pr-review.yml). Секретов у шага нет.
+      - name: Fetch pinned pr-review binary
+        id: engine
         run: |
-          REF="$(tr -d '[:space:]' < ops/ai-reviewer-ref)"
-          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout pinned AI review engine
-        uses: actions/checkout@v7
-        with:
-          repository: Orange-hanter/ai-reviewer
-          ref: ${{ steps.pin.outputs.ref }}
-          path: .ai-reviewer-engine
+          ENGINE="$RUNNER_TEMP/ai-reviewer"   # вне рабочего дерева: в bot-PR не попадёт
+          rm -rf "$ENGINE" && mkdir -p "$ENGINE"
+          bash ops/ai-review/fetch-pr-review.sh ops/ai-reviewer-ref "$ENGINE/bin"
 
       - name: Aggregate feedback → patterns + fixtures
+        if: steps.engine.outputs.bin != ''
         env:
+          PR_REVIEW_BIN: ${{ steps.engine.outputs.bin }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           REVIEW_FP_PROMOTE_MIN: '2'
           REVIEW_PROFILE: ops/ai-review/profile.json
           REVIEW_FIXTURES_DIR: ops/ai-review/fixtures
         run: |
-          node .ai-reviewer-engine/feedback/promote-feedback.mjs --aggregate
-          node .ai-reviewer-engine/bin/pr-review-eval.mjs --fixtures ops/ai-review/fixtures
+          "$PR_REVIEW_BIN" feedback-promote --aggregate
+          "$PR_REVIEW_BIN" eval --fixtures ops/ai-review/fixtures
 
       - name: Create PR if changes
+        if: steps.engine.outputs.bin != ''
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           CHANGES="$(git status --porcelain -- ops/ai-review/feedback/fp-patterns.jsonl ops/ai-review/fixtures)"
-          # Коммитим ТОЛЬКО данные обучения: чекаут движка лежит в рабочем дереве и в PR не идёт.
+          # Коммитим ТОЛЬКО данные обучения: бинарь движка лежит в $RUNNER_TEMP, вне рабочего дерева.
           if [ -z "$CHANGES" ]; then
             echo "No promote changes"
             exit 0

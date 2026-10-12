@@ -2,7 +2,7 @@ name: PR Review Metrics (weekly)
 # ШАБЛОН для репозитория-потребителя (скопируйте в .github/workflows/ и поправьте под себя).
 
 # Еженедельная агрегация observability (бэклог #9): скачиваем JSONL из артефактов
-# pr-review-observability-* за 14 дней и считаем сводку (.ai-reviewer-engine/bin/pr-review-metrics.mjs).
+# pr-review-observability-* за 14 дней и считаем сводку (`pr-review metrics` сверенного бинаря).
 # Результат — в job summary; лог run'а остаётся в Actions. Не гейтит ничего.
 on:
   schedule:
@@ -22,23 +22,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Node — только для инлайнового REST-хелпера списка артефактов (gh CLI на self-hosted
+      # раннере нет). Движку node не нужен — он prebuilt-бинарь.
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
 
-      - name: Read pinned engine ref
-        id: pin
+      # Пин и скрипт сверки — из рабочего дерева базовой ветки (чекаут по умолчанию).
+      # Недоступность релиза → bin пуст, отчёт пропускается (fail-open); несовпадение sha256 →
+      # шаг красный (fail-closed поставки, см. pr-review.yml). Секретов у шага нет.
+      - name: Fetch pinned pr-review binary
+        id: engine
         run: |
-          REF="$(tr -d '[:space:]' < ops/ai-reviewer-ref)"
-          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout pinned AI review engine
-        uses: actions/checkout@v7
-        with:
-          repository: Orange-hanter/ai-reviewer
-          ref: ${{ steps.pin.outputs.ref }}
-          path: .ai-reviewer-engine
+          ENGINE="$RUNNER_TEMP/ai-reviewer"   # вне рабочего дерева
+          rm -rf "$ENGINE" && mkdir -p "$ENGINE"
+          bash ops/ai-review/fetch-pr-review.sh ops/ai-reviewer-ref "$ENGINE/bin"
 
       # gh CLI на self-hosted раннере нет — список артефактов через REST (node).
       - name: Download observability artifacts (14d)
@@ -77,10 +75,13 @@ jobs:
           echo "строк JSONL: $(wc -l < merged.jsonl)"
 
       - name: Metrics report → job summary
+        if: steps.engine.outputs.bin != ''
+        env:
+          PR_REVIEW_BIN: ${{ steps.engine.outputs.bin }}
         run: |
           cd "$GITHUB_WORKSPACE"
           if [ -s "$RUNNER_TEMP/metr/merged.jsonl" ]; then
-            node .ai-reviewer-engine/bin/pr-review-metrics.mjs "$RUNNER_TEMP/metr/merged.jsonl" | tee metrics-report.md
+            "$PR_REVIEW_BIN" metrics "$RUNNER_TEMP/metr/merged.jsonl" | tee metrics-report.md
             cat metrics-report.md >> "$GITHUB_STEP_SUMMARY"
           else
             echo "Нет observability-артефактов за 14 дней (review ещё не запускался?)" | tee -a "$GITHUB_STEP_SUMMARY"

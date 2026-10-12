@@ -5,7 +5,9 @@ name: PR Review (AI)
 # Ревью постится как event=COMMENT, но БЛОКИРУЕТ merge через exit 1 на консенсус-блокерах
 # critical/major (red required-check). Чтобы блок был обязательным — сделать этот job required-check.
 # Инфра-сбои по умолчанию не блокируют, но полный LLM-аутедж блокирует merge при REVIEW_LLM_REQUIRED=1 (default).
-# Движок — внешний пакет ai-reviewer, пин версии лежит в ops/ai-reviewer-ref (см. docs/integration.md).
+# Движок — prebuilt-бинарь pr-review из релиза ai-reviewer: пин «<tag> sha256:<хэш SHA256SUMS>» лежит
+# в ops/ai-reviewer-ref, скрипт сверки — в ops/ai-review/fetch-pr-review.sh (см. docs/integration.md).
+# Node движку не нужен: setup-node ниже — для npm ci приложения (eslint prescan).
 on:
   pull_request:
     types: [opened, ready_for_review, synchronize, reopened]
@@ -104,39 +106,42 @@ jobs:
           fi
           wait "$NPM_PID"
 
-      # ЗАЩИТА ОТ pwn-request: движок берём из ОТДЕЛЬНОГО репозитория по пину, а сам пин читаем
-      # из base-ветки — код из чекаута PR с секретами в env не исполняется никогда. PR, правящий
-      # ops/ai-reviewer-ref, поменяет движок только ПОСЛЕ мержа (и это видно в диффе).
-      - name: Read pinned engine ref
-        id: pin
+      # ЗАЩИТА ОТ pwn-request: движок — prebuilt-бинарь pr-review из релиза Orange-hanter/ai-reviewer.
+      # Пин (ops/ai-reviewer-ref, «<tag> sha256:<sha256 SHA256SUMS>») и скрипт сверки
+      # (ops/ai-review/fetch-pr-review.sh) читаются из BASE-ветки через git show — код из чекаута
+      # PR не исполняется ни здесь, ни с секретами ниже. PR, правящий пин или скрипт, поменяет их
+      # только ПОСЛЕ мержа (и это видно в диффе). Секретов у шага нет: релиз публичный.
+      #
+      # Поставка и ревью живут по разным политикам:
+      #   • недоступность поставки (пустой пин/bootstrap, релиз или сеть не отвечают, платформа
+      #     раннера не собирается) — fail-open: bin пуст, шаг ревью пропускается, merge свободен;
+      #   • несовпадение sha256 (пин → SHA256SUMS → архив) или битый пин — fail-closed: шаг
+      #     красный. Это не аутедж, а подмена артефакта; пропусти её молча — и подменённый релиз
+      #     стал бы незаметным выключателем гейта. Бинарь распаковывается только после сверки.
+      - name: Fetch pinned pr-review binary
+        id: engine
         env:
           BASE_REF: ${{ github.base_ref }}   # через env, НЕ инлайнить ${{…}} в run: (script-injection)
         run: |
           BASE_REF="${BASE_REF:-main}"   # workflow_dispatch: base_ref пуст — пин берём из main
           [[ "$BASE_REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid BASE_REF"; exit 1; }
-          REF="$(git show "origin/$BASE_REF:ops/ai-reviewer-ref" 2>/dev/null | tr -d '[:space:]' || true)"
-          if [ -z "$REF" ]; then
-            echo "→ пин ops/ai-reviewer-ref отсутствует в origin/$BASE_REF (bootstrap-PR) — ревью пропускаем"
-            echo "ref=" >> "$GITHUB_OUTPUT"
+          ENGINE="$RUNNER_TEMP/ai-reviewer"   # вне рабочего дерева PR
+          rm -rf "$ENGINE" && mkdir -p "$ENGINE"
+          git show "origin/$BASE_REF:ops/ai-reviewer-ref" > "$ENGINE/ref" 2>/dev/null || : > "$ENGINE/ref"
+          if ! git show "origin/$BASE_REF:ops/ai-review/fetch-pr-review.sh" > "$ENGINE/fetch-pr-review.sh" 2>/dev/null; then
+            echo "→ ops/ai-review/fetch-pr-review.sh отсутствует в origin/$BASE_REF (bootstrap-PR) — ревью пропускаем"
+            echo "bin=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref: $REF"; exit 1; }
-          echo "→ движок ai-reviewer@$REF"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          bash "$ENGINE/fetch-pr-review.sh" "$ENGINE/ref" "$ENGINE/bin"
 
-      - name: Checkout pinned AI review engine
-        if: steps.pin.outputs.ref != ''
-        uses: actions/checkout@v7
-        with:
-          repository: Orange-hanter/ai-reviewer
-          ref: ${{ steps.pin.outputs.ref }}
-          path: .ai-reviewer-engine
-
-      # БЕЗ continue-on-error: скрипт выходит 1 ТОЛЬКО на находках critical/major (REVIEW_BLOCK_ON)
-      # внутри скрипта (die/throw), джоб зелёный, merge не блокируется.
+      # БЕЗ continue-on-error: бинарь выходит 1 ТОЛЬКО на подтверждённых блокерах critical/major
+      # (REVIEW_BLOCK_ON); инфра-сбой внутри ревью — exit 0 (fail-open движка), джоб зелёный,
+      # merge не блокируется. Секреты выставлены ТОЛЬКО этому шагу — шагу запуска сверенного бинаря.
       - name: Run AI review
-        if: steps.pin.outputs.ref != ''
+        if: steps.engine.outputs.bin != ''
         env:
+          PR_REVIEW_BIN: ${{ steps.engine.outputs.bin }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
@@ -152,7 +157,7 @@ jobs:
           REVIEW_BLOCK_ON: critical,major
           REVIEW_BLOCK_SINGLE: critical
           REVIEW_CONSENSUS: '1'
-          # REVIEW_LLM_REQUIRED не указываем: default в config.mjs = '1' (fail-closed).
+          # REVIEW_LLM_REQUIRED не указываем: default движка = '1' (fail-closed).
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GRAPHIFY_BIN: .graphify/venv/bin/graphify
@@ -180,7 +185,8 @@ jobs:
           REVIEW_TIME_BUDGET_MIN: '20'      # дедлайн LLM-фазы → частичный отчёт вместо убийства раннером
           REVIEW_PROVIDER_CONCURRENCY: '12' # глобальный cap LLM-вызовов + AIMD при 429 (бэклог #5)
           REVIEW_PROVIDER_PER_MODEL: '6'    # cap одновременных вызовов на модель
-        run: node .ai-reviewer-engine/bin/pr-review.mjs
+        run: |
+          "$PR_REVIEW_BIN" review
 
       - name: Upload review observability log
         if: always()
