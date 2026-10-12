@@ -45,7 +45,9 @@ last_updated: 2026-09-10
 - `dedupeAgainstPrescan`: LLM-находка снимается только prescan-находкой не ниже по severity.
 - `isRenameOnlySection` (JS и Rust): убран ранний выход по `rename from`.
 - `parseDiff` (JS и Rust): на `+++ /dev/null` путь из `diff --git`; `collectDeletedPaths` —
-  prescan не запускается на удалённых файлах.
+  prescan не запускается на удалённых файлах. Удаление распознаётся только по
+  `deleted file mode` в заголовке секции; внутри хунка `+++`/`---` — содержимое: строка
+  `++ /dev/null` в комментарии больше не выводит файл из prescan и не обрывает разбор файла.
 - `runVerifierStage`: батчи по `REVIEW_VERIFIER_MAX`, одно применение вердиктов со сдвигом
   `candidateIndex`; сбой хвостового батча сохраняет проверенное. `stats.batches` в событии `verifier`.
 - Фикстуры `gate-neighbour-minor-not-blocker`, `gate-neighbour-confidence-no-lift`,

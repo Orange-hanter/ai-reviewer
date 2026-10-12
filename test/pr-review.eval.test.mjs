@@ -892,6 +892,25 @@ diff --git a/README.md b/README.md
   assert.equal(routeDiff([...files.keys()], diff).route, 'full');
 });
 
+test('collectDeletedPaths: строка `++ /dev/null` в хунке не делает живой файл удалённым (RFC 17)', () => {
+  // в диффе добавленная строка `++ /dev/null` выглядит как `+++ /dev/null`; признай её
+  // заголовком — файл выпал бы из prescan, и blockRules (no-restricted-imports) не сработали бы
+  const diff = `diff --git a/server/auth.ts b/server/auth.ts
+--- a/server/auth.ts
++++ b/server/auth.ts
+@@ -1,2 +1,5 @@
+ const a = 1;
++/*
++++ /dev/null
++*/
++import { db } from '../../internal/raw-db';
+`;
+  assert.deepEqual([...collectDeletedPaths(diff)], []);
+  const { files, changedText } = parseDiff(diff);
+  assert.deepEqual([...files.keys()], ['server/auth.ts']);
+  assert.match(changedText, /raw-db/, 'строки после подделки остаются в changedText');
+});
+
 test('classifyFilePath: generated dist → skip', () => {
   assert.equal(classifyFilePath('dist/bundle.js'), 'skip');
 });
