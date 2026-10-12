@@ -23,8 +23,31 @@ last_updated: 2026-09-10
   строите — уберите флаг или задайте `0`. Дефолт движка — `0`, без шаблона ничего не меняется.
 - `graphifyy` в шаблоне CI и в `docs/model-tuning.md`: **0.9.52 → 0.9.87** (формат вывода
   `graphify affected` и строка `Built from commit` в отчёте не изменились; ключ кэша venv сменён).
+- **Блок решает сама находка, а не её соседи по 3 строкам** (RFC 17). Пропадут блоки, где
+  причиной в sticky стоял minor, critical с низкой confidence блокировал за счёт соседа или
+  eslint-правило вне `blockRules` блокировало через соседнюю находку. В экспорте
+  `consensusBlock` теперь только у блокирующей находки (форма артефакта та же).
+- **Rename с правками и удалённые файлы ревьюятся** (RFC 17): раньше первый уходил в skip,
+  второй был невидим роутеру. Такие PR теперь идут маршрутом full — больше LLM-вызовов.
+- **Verifier проверяет блокеры сверх `REVIEW_VERIFIER_MAX` батчами** (новая
+  `REVIEW_VERIFIER_BATCHES`, дефолт `3`) вместо молчаливого понижения в minor. Прежнее
+  поведение — `REVIEW_VERIFIER_BATCHES=1`.
 - Формат футера sticky, namespace маркеров, контракты `swarm` / `export` / `structure` —
   без изменений.
+
+### Исправлено — дыры гейта (RFC 17)
+
+- `clusterFindings`/`resolveBlockers` (JS и Rust): `consensusBlock` и `confidenceBlock`
+  считаются по находке; кластер даёт только счёт моделей. Блокер кластера — первая
+  блокирующая находка; `pipeline.mjs` считает блокирующие кластеры по `some`.
+- `dedupeAgainstPrescan`: LLM-находка снимается только prescan-находкой не ниже по severity.
+- `isRenameOnlySection` (JS и Rust): убран ранний выход по `rename from`.
+- `parseDiff` (JS и Rust): на `+++ /dev/null` путь из `diff --git`; `collectDeletedPaths` —
+  prescan не запускается на удалённых файлах.
+- `runVerifierStage`: батчи по `REVIEW_VERIFIER_MAX`, одно применение вердиктов со сдвигом
+  `candidateIndex`; сбой хвостового батча сохраняет проверенное. `stats.batches` в событии `verifier`.
+- Фикстуры `gate-neighbour-minor-not-blocker`, `gate-neighbour-confidence-no-lift`,
+  `gate-eslint-nonblock-via-neighbour` (eval: 20 seed-кейсов); parity-кейсы `rfc17 *`.
 
 ### Добавлено — `REVIEW_BLAST_REQUIRED` (RFC 16)
 

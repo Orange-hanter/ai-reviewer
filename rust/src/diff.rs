@@ -214,16 +214,25 @@ pub fn parse_diff(diff: &str) -> ParseDiffResult {
     let mut annotated_parts: Vec<String> = Vec::new();
     let mut changed_lines: Vec<String> = Vec::new();
     let mut cur_path: Option<String> = None;
+    let mut git_path: Option<String> = None;
     let mut new_line: u64 = 0;
 
     for raw in diff.split('\n') {
         if raw.starts_with("diff --git") {
             cur_path = None;
+            git_path = parse_diff_git_path(raw);
             annotated_parts.push(raw.to_string());
             continue;
         }
         if raw.starts_with("+++ ") {
-            cur_path = parse_diff_new_path(raw);
+            // Удалённый файл (`+++ /dev/null`) — путь из `diff --git` (RFC 17).
+            cur_path = parse_diff_new_path(raw).or_else(|| {
+                if raw.strip_suffix('\r').unwrap_or(raw) == "+++ /dev/null" {
+                    git_path.clone()
+                } else {
+                    None
+                }
+            });
             if let Some(p) = &cur_path {
                 files.entry(p.clone()).or_default();
             }
@@ -671,6 +680,16 @@ mod tests {
         assert_eq!(rec["changed"].as_array().unwrap().len(), 3);
         assert!(res.annotated.lines().any(|l| l.starts_with("    1: ")));
         assert!(res.changed_text.contains("export function foo"));
+    }
+
+    #[test]
+    fn parse_diff_keeps_deleted_file() {
+        let diff = "diff --git a/auth/guard.ts b/auth/guard.ts\ndeleted file mode 100644\n--- a/auth/guard.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export function guard() { return check(); }\n-export const x = 1;";
+        let r = parse_diff(diff);
+        let keys: Vec<&String> = r.files.keys().collect();
+        assert_eq!(keys, vec!["auth/guard.ts"]);
+        assert!(r.changed_text.contains("export function guard()"), "удалённые строки — в changedText для blast-radius");
+        assert!(r.files["auth/guard.ts"]["validLines"].as_array().unwrap().is_empty());
     }
 
     #[test]

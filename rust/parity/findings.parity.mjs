@@ -329,6 +329,32 @@ checkResolveBlockers('prescan block off advisory', [{
 }], ['a.ts'], { blockOn: ['critical'], blockSingle: ['critical'], consensusMin: 1, confidenceMin: 0.8 },
 { skipFpFilter: true, prescan: { enabled: true, blockEnabled: false, blockRules: ['no-restricted-imports'] } });
 
+// RFC 17: решение блокировки — свойство находки, а не кластера
+checkResolveBlockers('rfc17 neighbour minor not blocker', [
+  { file: 'a.ts', line: 10, severity: 'minor', confidence: 0.3, title: 'нейминг', model: 'm1' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.9, title: 'инъекция', model: 'm1' },
+], ['a.ts'], GATES.default, { skipFpFilter: true });
+checkResolveBlockers('rfc17 neighbour confidence no lift', [
+  { file: 'a.ts', line: 10, severity: 'critical', confidence: 0.5, title: 'шаткий', model: 'm1' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.95, title: 'уверенный', model: 'm1' },
+], ['a.ts'], GATES.default, { skipFpFilter: true });
+checkResolveBlockers('rfc17 eslint non-block via neighbour', [
+  { file: 'a.ts', line: 10, severity: 'major', confidence: 1, title: 'eslint: no-unused-vars', model: 'eslint-prescan', prescan: true, prescanBlock: false },
+  { file: 'a.ts', line: 11, severity: 'minor', confidence: 0.4, title: 'перенесённый', model: 'm1', carried: true },
+], ['a.ts'], GATES.default, { skipFpFilter: true, prescan: { enabled: true, blockEnabled: true, blockRules: ['no-restricted-imports'] } });
+checkResolveBlockers('rfc17 strict per finding', [
+  { file: 'a.ts', line: 10, severity: 'major', confidence: 0.9, title: 'не проверен', model: 'm1' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.9, title: 'проверен', model: 'm1', verifierStatus: 'verified' },
+], ['a.ts'], GATES.strict, { skipFpFilter: true });
+checkResolveBlockers('rfc17 blast beside llm', [
+  { file: 'a.ts', line: 10, severity: 'major', confidence: 0.9, title: 'caller', model: 'blast', source: 'blast-radius' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.9, title: 'llm', model: 'm1' },
+], ['a.ts'], GATES.default, { skipFpFilter: true });
+checkResolveBlockers('rfc17 consensus2 neighbours', [
+  { file: 'a.ts', line: 10, severity: 'major', confidence: 0.9, title: 'x', model: 'm1' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.7, title: 'x', model: 'm2' },
+], ['a.ts'], GATES.consensus2, { skipFpFilter: true });
+
 // ---------------------------------------------------------------------------
 // Корпус 3: fingerprint / attachFingerprints / filterStalePriorFindings
 // ---------------------------------------------------------------------------

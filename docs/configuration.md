@@ -104,11 +104,11 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_BLOCK_ON` | `critical,major` | Severity → exit 1 |
 | `REVIEW_BLOCK_SINGLE` | `critical` | Severity, которой хватает одной модели |
-| `REVIEW_CONSENSUS` | `1` (moa) / `2` (consensus) | Мин. моделей для кластера-блокера. В `moa` всегда `1` (значение зажимается); в `consensus` — не больше числа моделей |
-| `REVIEW_CONFIDENCE_MIN` | `0.8` | Блок только при confidence ≥ порога |
+| `REVIEW_CONSENSUS` | `1` (moa) / `2` (consensus) | Мин. моделей с находкой уровня блока в кластере (корзина `file|floor((line-1)/3)`), чтобы major стал блокером; остальное находка набирает сама (RFC 17). В `moa` всегда `1` (значение зажимается); в `consensus` — не больше числа моделей |
+| `REVIEW_CONFIDENCE_MIN` | `0.8` | Блок только при собственной confidence находки ≥ порога (уверенность соседа по кластеру не засчитывается, RFC 17) |
 | `REVIEW_LLM_REQUIRED` | `1` | Полный аутедж LLM блокирует merge (fail-closed); `0` — старое fail-open |
 | `REVIEW_INLINE_ON` | `critical,major` | Severity, которым положен inline (см. actionability) |
-| `REVIEW_STRICT` | `0` (или `strict: true` профиля) | Строгий гейт: кластер блокирует, только если в нём есть находка уровня блока от prescan или с `verifierStatus: verified`; то же условие для inline блокер-severity; advisory в строку не поднимаются и к verifier'у по доказуемости не допускаются. Включается env **или** профилем: `0` в env профильный `strict` не выключает |
+| `REVIEW_STRICT` | `0` (или `strict: true` профиля) | Строгий гейт: находка уровня блока блокирует, только если она сама от prescan или с `verifierStatus: verified`; то же условие для inline блокер-severity; advisory в строку не поднимаются и к verifier'у по доказуемости не допускаются. Включается env **или** профилем: `0` в env профильный `strict` не выключает |
 | `REVIEW_REQUIRE_QUOTE` | = `REVIEW_STRICT` | critical/major без `quote` (цитаты кода) отбрасываются при нормализации ответа модели |
 
 ## Маршрут находки (actionability)
@@ -130,7 +130,8 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_VERIFIER` | `1` | Второй проход по кандидатам в блокеры |
 | `REVIEW_VERIFIER_MODEL` | `deepseek-v4-pro` | Модель-судья (вне пула advisors) |
-| `REVIEW_VERIFIER_MAX` | `12` | Максимум кандидатов на проверку |
+| `REVIEW_VERIFIER_MAX` | `12` | Максимум кандидатов в одном вызове verifier |
+| `REVIEW_VERIFIER_BATCHES` | `3` | Сколько вызовов verifier допустимо на прогон. Блокеры сверх `REVIEW_VERIFIER_MAX` идут следующими батчами; не влезшие в `MAX × BATCHES`, в тайм-бюджет или в упавший хвостовой батч при `REVIEW_VERIFIER_STRICT=1` понижаются до minor (`verifierStatus: overflow`) |
 | `REVIEW_VERIFIER_TEMPERATURE` | `0.2` | — |
 | `REVIEW_VERIFIER_CONTEXT_MARGIN` | `80` | ±строк вокруг каждой строки-кандидата в контексте verifier'а. Пересекающиеся окна сливаются, пропуски помечаются `… (строки N–M пропущены)` — реальные номера строк сохраняются. Файл, у которого хоть один кандидат без строки, отдаётся целиком. Второй проход смотрит одну-две строки на файл и делает это ДРУГОЙ моделью (кэш префикса advisor'ов не работает), поэтому целый файл до `REVIEW_MAX_FILE_LINES` строк он не окупает — см. [`lib/context-window.mjs`](../lib/context-window.mjs) |
 | `REVIEW_VERIFIER_SYMBOL_CARDS` | `0` | Карточки символов ([RFC 14](../proposals/14-symbol-cards.md), решение 4) во входе verifier'а: карточки файлов кандидатов, тем же отбором и с теми же лимитами, что у advisors и жюри. Без них верная находка «вызов не совпадает с сигнатурой» verifier'у недоказуема и не становится блокером; с ними verifier может подтвердить ложную интерпретацию сигнатуры — поэтому выключено до gold ×3. Включённый флаг входит в отпечаток конфигурации инкрементального прогона |
@@ -167,7 +168,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_ROUTER` | `1` | `0` — всегда полный прогон |
 
-Классы: lockfile / generated / rename-only → **skip**; docs-only → **light**; ни одного
+Классы: lockfile / generated / rename-only (`similarity index 100%` или секция без строк `+`/`-`; rename с правками — обычный файл, RFC 17) → **skip**; удалённый файл классифицируется по своему пути; docs-only → **light**; ни одного
 файла-кода (только config `yml/yaml/json/toml/sh/sql`, docs, прочее) → **light**; хоть один
 файл-код → **full**. Список «кода» зашит в роутер (`LOGIC`/`CODE` в
 [`lib/router.mjs`](../lib/router.mjs), паритетно в `rust/src/router.rs`); `layout.logic`

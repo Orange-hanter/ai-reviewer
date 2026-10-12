@@ -130,6 +130,8 @@ checkRename('similarity 100.000', 'similarity index 100.0000%\nrename from a');
 checkRename('similarity 90 + rename from', 'similarity index 90%\nrename from a\nrename to b');
 checkRename('similarity 99', 'similarity index 99%\nrename from a\nrename to b');
 checkRename('content plus', '@@ -1 +1 @@\n-old\n+new');
+// RFC 17: rename с хунками — не rename-only
+checkRename('rename + hunks', 'similarity index 88%\nrename from a.ts\nrename to b.ts\n--- a/a.ts\n+++ b/b.ts\n@@ -1 +1 @@\n-return check(u);\n+return true;');
 checkRename('plus only', '+added');
 checkRename('minus only', '-removed');
 checkRename('headers only', '--- a/x\n+++ b/x\n@@ -0,0 +1 @@');

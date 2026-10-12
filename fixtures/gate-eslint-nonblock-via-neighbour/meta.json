@@ -1,0 +1,11 @@
+{
+  "id": "gate-eslint-nonblock-via-neighbour",
+  "description": "eslint-правило вне blockRules (major, conf 1) рядом с перенесённым minor: merge не блокируется (RFC 17, до — блокером становился minor). consensusMin 1 — как в дефолтном режиме moa",
+  "gate": {
+    "consensusMin": 1
+  },
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0
+  }
+}

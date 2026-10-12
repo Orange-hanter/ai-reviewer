@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
-import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths } from './lib/diff.mjs';
+import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths, collectDeletedPaths } from './lib/diff.mjs';
 import { createLlmClient } from './lib/llm.mjs';
 import { createCostTracker, efficiencyMetrics } from './lib/cost.mjs';
 import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
@@ -181,7 +181,12 @@ async function runVerifierStage(allFindings, {
       ctx: actionabilityCtx || {},
     }).filter((s) => s.promoted).map((s) => s.finding)
     : [];
-  const candidates = selectVerifierCandidates(allFindings, gate, verifier.maxCandidates, {
+  // Блокеры сверх капа одного вызова не понижаются молча, а идут следующими батчами
+  // (RFC 17): 13-й critical иначе переставал блокировать только потому, что был 13-м.
+  // Кап одного вызова держит размер промпта, число батчей — цену прогона.
+  const batchCap = Math.max(1, verifier.maxCandidates);
+  const maxBatches = Math.max(1, verifier.maxBatches ?? 1);
+  const candidates = selectVerifierCandidates(allFindings, gate, batchCap * maxBatches, {
     candidates: advisoryPool,
     max: actionability?.verifyAdvisory || 0,
   });
@@ -200,21 +205,30 @@ async function runVerifierStage(allFindings, {
     obs.logEvent('verifier_skip', { reason: 'no_candidates' });
     return empty;
   }
-  log(`verifier pass B: ${candidates.length} кандидат(ов) ${gate.blockOn.join('/')} · модель ${verifier.model}`);
-  try {
+  // Первый батч — как прежний единственный вызов: до капа блокеров плюс advisory.
+  // Остальные — только блокеры: advisory не стоят лишнего вызова.
+  const isBlockTier = (f) => gate.blockOn.includes(f.severity) && !f.prescan;
+  const blockTier = candidates.filter(isBlockTier);
+  const advisory = candidates.filter((f) => !isBlockTier(f));
+  const batches = [[...blockTier.slice(0, batchCap), ...advisory]];
+  for (let i = batchCap; i < blockTier.length; i += batchCap) batches.push(blockTier.slice(i, i + batchCap));
+  log(`verifier pass B: ${candidates.length} кандидат(ов) ${gate.blockOn.join('/')} · батчей ${batches.length} · модель ${verifier.model}`);
+
+  async function verifyBatch(batch, i) {
     // Verifier получает только файлы/секции диффа с кандидатами, а не весь PR —
     // иначе на большом PR это самый жирный промпт пайплайна.
-    const candFiles = new Set(candidates.map((c) => c.file).filter(Boolean));
+    const candFiles = new Set(batch.map((c) => c.file).filter(Boolean));
     // …и не файлы целиком, а окна ±contextMargin вокруг строк кандидатов: verifier смотрит
     // одну-две строки на файл, а платил за 1500 строк — причём другой моделью, то есть без
     // шанса переиспользовать кэш префикса advisor'ов (lib/context-window.mjs).
-    const ctxWindow = buildVerifierFileContents(contentMap, candidates, { margin: verifier.contextMargin });
+    const ctxWindow = buildVerifierFileContents(contentMap, batch, { margin: verifier.contextMargin });
     const fileContents = ctxWindow.text;
     const sections = [...extractFileDiffSections(annotated).entries()]
       .filter(([p]) => candFiles.has(p))
       .map(([, s]) => s);
     const annotatedScoped = sections.length ? sections.join('\n') : annotated;
-    log(`verifier ctx: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, контекст ${ctxWindow.before}→${ctxWindow.after} симв. (окна ±${verifier.contextMargin}), дифф ${annotatedScoped.length}/${annotated.length} симв.`);
+    const tag = batches.length > 1 ? ` [батч ${i + 1}/${batches.length}]` : '';
+    log(`verifier ctx${tag}: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, контекст ${ctxWindow.before}→${ctxWindow.after} симв. (окна ±${verifier.contextMargin}), дифф ${annotatedScoped.length}/${annotated.length} симв.`);
     // Карточки символов файлов-кандидатов (RFC 14, решение 4) — только под флагом: это вход
     // судьи, чей вердикт решает блокировку.
     const verifierCards = verifier.symbolCards && symbolCardsByPath?.size
@@ -223,40 +237,76 @@ async function runVerifierStage(allFindings, {
       }).cards
       : [];
     if (verifierCards.length) log(`verifier: карточек символов ${verifierCards.length}`);
-    const verdicts = await engine.verifyFindings(candidates, {
+    return engine.verifyFindings(batch, {
       annotated: annotatedScoped, fileContents, blastBlocks, pr, changedFilesSection,
       ...(verifierCards.length ? { symbolCards: verifierCards } : {}),
     });
-    const applied = applyVerifierVerdicts(allFindings, candidates, verdicts, log, {
-      strictUnverified: verifier.strictBlocks,
-    });
-    // Strict + overflow капа REVIEW_VERIFIER_MAX: eligible-находки сверх капа не верифицируются —
-    // блокировать без верификации они не должны (бэклог #7) → minor. Только при успешном verifier.
-    let overflowN = 0;
-    if (verifier.strictBlocks) {
-      const candSet = new Set(candidates);
-      for (const f of applied.findings) {
-        if (gate.blockOn.includes(f.severity) && !f.prescan && !candSet.has(f)) {
-          f.severity = 'minor';
-          f.verifierStatus = 'overflow';
-          f.verifierReason = `сверх капа verifier (${verifier.maxCandidates}) — понижено до minor`;
-          overflowN++;
-        }
+  }
+
+  // Сначала все вызовы, потом одно применение: applyVerifierVerdicts мутирует находки, и
+  // сбой посреди батчей не должен оставить набор наполовину применённым.
+  const sent = [];
+  const verdicts = [];
+  let batchesSent = 0;
+  let stopReason = '';
+  for (let i = 0; i < batches.length; i++) {
+    if (i > 0 && deadline && deadline - Date.now() < 120_000) {
+      stopReason = 'time_budget';
+      log(`verifier: тайм-бюджет — проверено ${sent.length} из ${candidates.length} кандидатов`);
+      break;
+    }
+    let batchVerdicts;
+    try {
+      batchVerdicts = await verifyBatch(batches[i], i);
+    } catch (e) {
+      if (i === 0) {
+        log('verifier pass failed (fail-open, findings сохранены):', e.message);
+        obs.logEvent('verifier_error', { error: e.message?.slice(0, 200) });
+        return empty;
       }
-      if (overflowN) {
-        applied.stats.overflow = overflowN;
-        log(`verifier strict: ${overflowN} находок сверх капа ${verifier.maxCandidates} → minor (без верификации не блокируют)`);
+      // Первый батч прошёл: его вердикты не выбрасываем, непроверенный хвост — как сверх
+      // капа (ниже). Иначе сбой N-го вызова отменял бы уже сделанную проверку.
+      log(`verifier: батч ${i + 1}/${batches.length} упал (${e.message}) — хвост не проверен`);
+      obs.logEvent('verifier_error', { batch: i, error: e.message?.slice(0, 200) });
+      stopReason = 'batch_error';
+      break;
+    }
+    for (const v of batchVerdicts || []) {
+      const idx = v?.candidateIndex;
+      if (Number.isInteger(idx) && idx >= 0 && idx < batches[i].length) {
+        verdicts.push({ ...v, candidateIndex: idx + sent.length });
       }
     }
-    log(`verifier итог: verified=${applied.stats.verified} rejected=${applied.stats.rejected} downgraded=${applied.stats.downgraded} missing=${applied.stats.missing}`);
-    obs.logEvent('verifier', applied.stats);
-    logFindingsStage(obs, 'after_verifier', applied.findings);
-    return { findings: applied.findings, stats: applied.stats };
-  } catch (e) {
-    log('verifier pass failed (fail-open, findings сохранены):', e.message);
-    obs.logEvent('verifier_error', { error: e.message?.slice(0, 200) });
-    return empty;
+    sent.push(...batches[i]);
+    batchesSent++;
   }
+  const applied = applyVerifierVerdicts(allFindings, sent, verdicts, log, {
+    strictUnverified: verifier.strictBlocks,
+  });
+  // Strict: eligible-находки, не дошедшие до verifier'а (сверх капа × батчей, тайм-бюджет,
+  // сбой хвостового батча), блокировать без верификации не должны (бэклог #7) → minor.
+  let overflowN = 0;
+  if (verifier.strictBlocks) {
+    const sentSet = new Set(sent);
+    const why = stopReason || `сверх капа ${batchCap} × ${maxBatches}`;
+    for (const f of applied.findings) {
+      if (isBlockTier(f) && !sentSet.has(f)) {
+        f.severity = 'minor';
+        f.verifierStatus = 'overflow';
+        f.verifierReason = `не проверено verifier'ом (${why}) — понижено до minor`;
+        overflowN++;
+      }
+    }
+    if (overflowN) {
+      applied.stats.overflow = overflowN;
+      log(`verifier strict: ${overflowN} находок не проверено (${why}) → minor (без верификации не блокируют)`);
+    }
+  }
+  applied.stats.batches = batchesSent;
+  log(`verifier итог: verified=${applied.stats.verified} rejected=${applied.stats.rejected} downgraded=${applied.stats.downgraded} missing=${applied.stats.missing}`);
+  obs.logEvent('verifier', applied.stats);
+  logFindingsStage(obs, 'after_verifier', applied.findings);
+  return { findings: applied.findings, stats: applied.stats };
 }
 
 /** Публикует inline и чистит устаревшие только после успешного post. */
@@ -460,6 +510,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       // файлов это половина всего входа. Символы для blast-radius не теряются:
       // collectBlastSymbols разбирает changedText, куда строки нового файла уже попали.
       const addedPaths = limits.skipAddedFileContext ? collectAddedPaths(diff) : new Set();
+      const deletedPaths = collectDeletedPaths(diff);
       if (addedPaths.size) log(`контекст: ${addedPaths.size} добавленных файл(ов) — дифф уже содержит их целиком, полный текст не прикладываем`);
       // Сначала читаем файлы: collectBlastSymbols добирает exports из полного текста,
       // а не только из hunk-строк (иначе правка тела функции → 0 symbols → пустой blast).
@@ -473,7 +524,8 @@ export function createReviewPipeline(cfg, deps = {}) {
           log(`prior sticky недоступен (${e.message}) — прогон без carry-over`);
           return { findings: [], runs: [], sha: '' };
         }),
-        prescan.run(changedPaths),
+        // Удалённым файлам линтер не нужен: их нет в рабочем дереве (RFC 17).
+        prescan.run(deletedPaths.size ? changedPaths.filter((p) => !deletedPaths.has(p)) : changedPaths),
       ]);
       const symbols = collectBlastSymbols(changedText, contentMap, limits.maxSymbols);
       log(`файлов: ${files.size} · символов под blast-radius: ${symbols.length}`, symbols);
@@ -939,7 +991,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       // Один расчёт отпечатков на прогон — до того, как набор разойдётся по футеру sticky,
       // Δ-блоку и артефакту экспорта: все трое обязаны показывать одну величину.
       attachFingerprints(allFindings, files);
-      const blockerClusters = gateResolution.clusters.filter((g) => g[0]?.consensusBlock);
+      const blockerClusters = gateResolution.clusters.filter((g) => g.some((f) => f.consensusBlock));
       const blockers = gateResolution.blockers;
       const fpRemoved = gateResolution.fpRemoved;
       const refutationStats = gateResolution.refutationStats;
