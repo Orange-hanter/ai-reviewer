@@ -13,10 +13,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Что это
 
-`ai-reviewer` — движок AI код-ревью для PR с правом блокировать merge. Чистый ESM (`.mjs`),
-Node ≥ 22, **ноль runtime-зависимостей**: `npm install` не нужен, и добавлять зависимости
-нельзя — README держит это как заявленное свойство пакета. Провайдер LLM по умолчанию —
-Ollama Cloud через `lib/llm.mjs`.
+`ai-reviewer` — движок AI код-ревью для PR с правом блокировать merge. Потребитель получает
+его единым Rust-бинарём `pr-review` (10 подкоманд, [RFC 16](proposals/16-standalone-rust-binary.md))
+из релиза по пину с sha256 — ни Node, ни `npm install` ему не нужны. В репозитории рядом живёт
+JS-ядро (чистый ESM `.mjs`, Node ≥ 22) — эталон порта и dev-тулы; **ядро удаляется в T33, не
+раньше** (после реального прогона релизной сборки T32). npm-зависимостей у JS-части нет, и
+добавлять их нельзя. Провайдер LLM по умолчанию — Ollama Cloud (`lib/llm.mjs` / `rust/src/llm`).
 
 Весь код, комментарии, документация и commit-сообщения — на русском; префиксы коммитов
 conventional (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `release:`).
@@ -24,7 +26,10 @@ conventional (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `release:`).
 ## Команды
 
 ```bash
-npm test          # node --test test/*.test.mjs — юнит + контракты (в т.ч. шаблоны examples/ci/)
+cargo build --manifest-path rust/Cargo.toml   # → rust/target/debug/pr-review (CARGO_TARGET_DIR не трогать)
+rust/target/debug/pr-review review --dry-run --diff /tmp/changes.patch   # то же, что bin/pr-review.mjs
+
+npm test          # node --test test/*.test.mjs — юнит + контракты (шаблоны examples/ci/ — test/ci-templates.test.mjs)
 npm run eval      # golden fixtures без LLM — гейт post-processing
 npm run check     # test + eval + check:rust (cargo build/test + check:parity); нужен cargo;
                   # ровно это гоняет CI (.github/workflows/ci.yml)
@@ -119,6 +124,15 @@ majors (`source === BLAST_FINDING_SOURCE`) — soft: без verifier не бло
 
 ## Rust-ядро
 
+**Единый бинарь `pr-review`** (`rust/src/main.rs`, подкоманды в `rust/src/cli/`) — то, что
+получает потребитель: шаблоны `examples/ci/` качают `pr-review-<triple>.tar.gz` по пину
+`<tag> sha256:<хэш SHA256SUMS>` из базовой ветки и сверяют хэши до запуска
+(`examples/ci/fetch-pr-review.sh`). Недоступность поставки — fail-open, несовпадение хэша —
+fail-closed; это политика поставки, а не движка. MCP-лаунчеры `cursor-plugin/bin/*.sh` зовут
+подкоманды бинаря и откатываются на node, пока JS не удалён (T33).
+
+Ниже — переходный слой, живой до T33:
+
 `rust/` — порт части `lib/*.mjs` (diff, router, findings, engine, llm, prompt, specialists,
 verifier, report, github, export, actionability, metrics, config/profile, json, structure-*).
 JS-модуль остаётся обёрткой с тем же API: зовёт бинарь из `rust/target/debug/` (JSON на stdin),
@@ -160,7 +174,9 @@ dry-run MoA, `wait: false` + поллинг по `jobId`, RFC 08–12) и `curso
   число seed-кейсов (16) — при добавлении поправь счётчик. Каталогов в `fixtures/` больше:
   `fixtures/structure/` — контрактные образцы схем, не eval-кейсы (нет `meta.json` → пропускаются).
 - **Gold** (`gold/<id>/`) — диффы для прогона с LLM; падающий кейс — сигнал, не мусор.
-- Шаблоны workflow в `examples/ci/` покрыты контрактными тестами в `test/pr-review.eval.test.mjs`.
+- Шаблоны workflow в `examples/ci/` и `fetch-pr-review.sh` покрыты `test/ci-templates.test.mjs`
+  (контракт шаблонов + поведение сверки на фейковом релизе через `file://`). Этот файл
+  переживает cutover T33.
 - FP-паттерны пакета (`feedback/fp-patterns.jsonl`) переносимы между проектами, поэтому
   каждый обязан быть ограничен по путям (`requiresPath`) — иначе проглотит верную находку
   в чужом репозитории. Тест на пересуппрессию держит это.
@@ -172,10 +188,13 @@ dry-run MoA, `wait: false` + поллинг по `jobId`, RFC 08–12) и `curso
 формату из `proposals/README.md`.
 
 Релиз: зелёный `npm run check`, секция в `CHANGELOG.md` (есть `## Unreleased`), версия в
-`package.json` и бейдж в README, пин в `examples/consumers/orakul/ai-reviewer-ref`, тег.
+`package.json` и бейдж в README, тег → `release.yml` (T32) публикует архивы и `SHA256SUMS`,
+затем пин `<tag> sha256:<хэш SHA256SUMS>` в `examples/consumers/orakul/ai-reviewer-ref`.
 Потребитель подключает движок по пину `ops/ai-reviewer-ref`, читаемому из базовой ветки —
-код PR никогда не исполняется с секретами прогона. Breaking для потребителя: смена namespace
-маркеров, формата футера sticky, контрактов `swarm`/`export`/`structure`.
+код PR никогда не исполняется с секретами прогона. Формат пина и артефактов — контракт
+(RFC 16, решение 9; держит `test/ci-templates.test.mjs`). Breaking для потребителя: смена namespace
+маркеров, формата футера sticky, контрактов `swarm`/`export`/`structure`, формата пина и
+имён релизных артефактов.
 
 `.ai-review/` и `.graphify/` — gitignored артефакты локальных прогонов.
 

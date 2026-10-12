@@ -18,6 +18,25 @@ default-off — `1`/`true`/`yes`/`on` как вкл. Пустое/незадан
 
 ## CLI
 
+Потребитель запускает единый бинарь `pr-review <подкоманда>` ([RFC 16](../proposals/16-standalone-rust-binary.md),
+поставка — [integration.md](integration.md)):
+
+```bash
+pr-review review [--dry-run] [--diff path/to.patch] [--head-sha SHA] [--pr N] [--repo owner/repo]
+pr-review eval [--fixtures dir] [--json]
+pr-review metrics [path.jsonl]
+pr-review feedback [--dry-run] [--pr N] [--repo owner/repo]
+pr-review feedback-batch [--dry-run] [--pr N] [--repo owner/repo]
+pr-review feedback-migrate [--file path.jsonl] [--write]
+pr-review feedback-promote [--aggregate] [--pr N] [--repo owner/repo]
+pr-review structure --graph … --lcov … --facts-out …
+pr-review review-mcp | structure-mcp          # stdio MCP
+```
+
+Флаги и env подкоманд совпадают с JS-командами ниже. JS-команды пакета (`npm`-`bin`) живут
+до cutover T33; после него остаются только dev-тулы `pr-review-gold`, `pr-review-gold-harvest`,
+`pr-review-probe-models`, `pr-review-benchmark`.
+
 ```bash
 pr-review [--dry-run] [--diff path/to.patch] [--head-sha SHA] [--pr N] [--repo owner/repo]
 pr-review-eval [--fixtures dir] [--json]
@@ -249,8 +268,10 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `REVIEW_MCP_ROOT` | лаунчер: корень engine | Единственный корень, из которого ревью-MCP читает `diffPath` / `priorExportPath` / sidecar / артефакты. `realpath`, symlink наружу не проходит. Плейсхолдер `${…}` ≡ не задано; битый путь — `exit 1` на старте |
-| `AI_REVIEWER_ROOT` | `.engine-root` / cwd-клон / `cursor-plugin/../..` | Клон пакета с `bin/pr-review-mcp.mjs`. Configure перебивает `.engine-root` |
-| `AI_REVIEWER_NODE` | `PATH`, `~/.local/bin/node`, Homebrew | Абсолютный путь к `node` ≥ 22, если GUI без `node` в PATH |
+| `AI_REVIEWER_ROOT` | `.engine-root` / cwd-клон / `cursor-plugin/../..` | Клон пакета (`bin/pr-review-mcp.mjs` или `rust/Cargo.toml` + `cursor-plugin/`). Configure перебивает `.engine-root` |
+| `AI_REVIEWER_BIN` | `rust/target/release/pr-review`, затем `…/debug/pr-review` клона | Путь к бинарю `pr-review`; лаунчер зовёт `pr-review review-mcp` / `structure-mcp`. Задан — клон не обязателен (`REVIEW_MCP_ROOT` по умолчанию cwd); неисполняемый — fail-fast |
+| `AI_REVIEWER_MCP_RUNTIME` | `auto` | `auto` — бинарь, если найден, иначе node; `bin` — только бинарь; `node` — только JS (до T33) |
+| `AI_REVIEWER_NODE` | `PATH`, `~/.local/bin/node`, Homebrew | Абсолютный путь к `node` ≥ 22 для отката на JS, если GUI без `node` в PATH |
 | `REVIEW_MCP_EXTRA` | `0` | `1` — в `tools/list` появляются `blast_scope`, `actionability_explain`, `review_metrics` |
 
 `review_run` — всегда dry-run, но по умолчанию пишет артефакт: если `REVIEW_EXPORT_DRY_RUN` не
@@ -381,6 +402,19 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | — | Пуш итога прогона (необязательно) |
+
+## Поставка бинаря в CI потребителя
+
+Переменные `examples/ci/fetch-pr-review.sh` ([integration.md](integration.md)). В CI оставлять
+по умолчанию; нужны для зеркала релизов и тестов.
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `AI_REVIEWER_RELEASE_URL` | `https://github.com/Orange-hanter/ai-reviewer/releases/download` | База загрузки: `<база>/<tag>/SHA256SUMS`, `<база>/<tag>/pr-review-<triple>.tar.gz`. Допустимы `https://` и `file://` |
+| `AI_REVIEWER_UNAME_S` / `AI_REVIEWER_UNAME_M` | `uname -s` / `uname -m` | Подмена платформы (тест неизвестной платформы) |
+
+Выход: `bin=<путь>` в `$GITHUB_OUTPUT` и путь в stdout; пропуск (fail-open) — `bin=` и exit `0`;
+несовпадение sha256 или битый пин — exit `1`.
 
 ## Rust-бинари
 

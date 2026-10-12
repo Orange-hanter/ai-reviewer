@@ -3,23 +3,68 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
+last_updated: 2026-10-12
 ---
 
 # Интеграция в репозиторий-потребитель
 
-Движок живёт в отдельном репозитории и **никогда не берётся из кода PR**: CI выкачивает его
-по пину — так вредоносный PR не сможет выполнить свой код с секретами прогона.
+Движок — prebuilt-бинарь `pr-review` из релизов отдельного репозитория
+`Orange-hanter/ai-reviewer` ([RFC 16](../proposals/16-standalone-rust-binary.md), решение 9).
+Он **никогда не берётся из кода PR**: CI скачивает его по пину из базовой ветки и сверяет
+sha256 до запуска — так вредоносный PR не выполнит свой код с секретами прогона, а
+подменённый релизный артефакт не пройдёт сверку. Ни `node`, ни `npm install` движку не нужны.
 
 Готовые шаблоны workflow — в [`examples/ci/`](../examples/ci/).
 
-## 1. Пин версии
+> До первого релиза с бинарями (T32) шаблоны этого раздела запускать не на чем: оставайтесь
+> на пине старого формата (`v0.4.0`) и прежнем шаблоне (чекаут + `node`). Формат пина
+> различим по второму полю, поэтому старый и новый способы живут параллельно.
+
+## 1. Пин версии и скрипт сверки
 
 ```
-ops/ai-reviewer-ref     # одна строка: тег (v0.2.0) или полный commit SHA
+ops/ai-reviewer-ref              # одна строка: <tag> sha256:<sha256 файла SHA256SUMS релиза>
+ops/ai-review/fetch-pr-review.sh # копия examples/ci/fetch-pr-review.sh
+```
+
+Пример пина:
+
+```
+v0.5.0 sha256:3f1c…e9a0
+```
+
+Тег говорит, что качать; хэш `SHA256SUMS` закрывает цепочку доверия: файл сумм сверяется с
+пином, архив бинаря — с файлом сумм, и только потом распаковывается. Хэш берётся из релиза:
+
+```bash
+curl -fsSL https://github.com/Orange-hanter/ai-reviewer/releases/download/v0.5.0/SHA256SUMS | sha256sum
 ```
 
 Обновление версии движка = правка одной строки в PR: видно в диффе, откатывается ревертом.
+Скрипт сверки тоже читается из базовой ветки — PR не может его ослабить.
+
+### Контракт релиза
+
+| Артефакт | Содержимое |
+|----------|------------|
+| `pr-review-<target-triple>.tar.gz` | в корне архива — исполняемый файл `pr-review` |
+| `SHA256SUMS` | строки `<sha256-hex>  <имя-архива>` (формат `sha256sum`, имена без путей) |
+
+Таргеты: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`,
+`aarch64-apple-darwin`. Платформа раннера определяется по `uname -s`/`uname -m`.
+
+### Что происходит при сбое поставки
+
+| Ситуация | Исход шага | Почему |
+|----------|------------|--------|
+| пин или скрипт сверки отсутствует в базовой ветке, пин пуст | пропуск, exit `0` | bootstrap-PR |
+| релиз/сеть недоступны, платформа раннера не собирается, нет `curl`/`sha256sum` | пропуск, exit `0` | **fail-open**: недоступность ревью не блокирует merge |
+| sha256 `SHA256SUMS` ≠ пин или архив ≠ `SHA256SUMS` | шаг красный, exit `1` | **fail-closed поставки**: это подмена артефакта, а не аутедж |
+| пин старого формата или битый | шаг красный, exit `1` | ошибка конфигурации в базовой ветке |
+
+Пропуск — это пустой output `bin` шага сверки: шаг запуска стоит под
+`if: steps.engine.outputs.bin != ''`. Fail-closed поставки не меняет политику самого движка:
+внутри ревью инфра-сбой по-прежнему даёт exit `0`, а exit `1` — только подтверждённые блокеры.
 
 ## 2. Профиль проекта
 
@@ -39,36 +84,39 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
 ## 3. Workflow
 
 ```yaml
-      - name: Read pinned engine ref
-        id: pin
+      # Секретов у шага нет: релиз публичный. Пин и скрипт — из БАЗОВОЙ ветки.
+      - name: Fetch pinned pr-review binary
+        id: engine
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
           BASE_REF="${BASE_REF:-main}"
           [[ "$BASE_REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid BASE_REF"; exit 1; }
-          # Пин читаем из БАЗОВОЙ ветки: файл из кода PR позволил бы подменить движок.
-          REF="$(git show "origin/$BASE_REF:ops/ai-reviewer-ref" | tr -d '[:space:]')"
-          [[ "$REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid engine ref"; exit 1; }
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          ENGINE="$RUNNER_TEMP/ai-reviewer"
+          rm -rf "$ENGINE" && mkdir -p "$ENGINE"
+          git show "origin/$BASE_REF:ops/ai-reviewer-ref" > "$ENGINE/ref" 2>/dev/null || : > "$ENGINE/ref"
+          if ! git show "origin/$BASE_REF:ops/ai-review/fetch-pr-review.sh" > "$ENGINE/fetch-pr-review.sh" 2>/dev/null; then
+            echo "bin=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          bash "$ENGINE/fetch-pr-review.sh" "$ENGINE/ref" "$ENGINE/bin"
 
-      - name: Checkout pinned AI review engine
-        uses: actions/checkout@v7
-        with:
-          repository: Orange-hanter/ai-reviewer
-          ref: ${{ steps.pin.outputs.ref }}
-          path: .ai-reviewer-engine
-
+      # Секреты — только шагу запуска сверенного бинаря.
       - name: Run AI review
+        if: steps.engine.outputs.bin != ''
         env:
+          PR_REVIEW_BIN: ${{ steps.engine.outputs.bin }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           REVIEW_PROFILE: ops/ai-review/profile.json
-        run: node .ai-reviewer-engine/bin/pr-review.mjs
+        run: |
+          "$PR_REVIEW_BIN" review
 ```
 
 Полный шаблон со всеми моделями, бюджетами и артефактами —
-[`examples/ci/pr-review.yml`](../examples/ci/pr-review.yml).
+[`examples/ci/pr-review.yml`](../examples/ci/pr-review.yml). Его контракт (нет чекаута движка,
+бинарь только после сверки, пин из базовой ветки, секреты не у чекаутов) держит
+`test/ci-templates.test.mjs`.
 
 Требования к правам job'а: `contents: read`, `pull-requests: write`. **Не** давайте
 `contents: write` job'у, который исполняет линтеры на коде PR (flat-config eslint — это
@@ -76,12 +124,16 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
 
 ## 4. Остальные workflow
 
-| Шаблон | Что делает |
-|--------|------------|
-| [`pr-review.yml`](../examples/ci/pr-review.yml) | Ревью PR (гейт) |
-| [`pr-review-feedback.yml`](../examples/ci/pr-review-feedback.yml) | Сбор 👍/👎 и метки → bot PR с журналом |
-| [`pr-review-feedback-promote.yml`](../examples/ci/pr-review-feedback-promote.yml) | Еженедельно: ≥2 одинаковых FP → паттерн + fixture |
-| [`pr-review-metrics.yml`](../examples/ci/pr-review-metrics.yml) | Сводка по observability-логам прогонов |
+| Шаблон | Что делает | Подкоманды |
+|--------|------------|------------|
+| [`pr-review.yml`](../examples/ci/pr-review.yml) | Ревью PR (гейт) | `review` |
+| [`pr-review-feedback.yml`](../examples/ci/pr-review-feedback.yml) | Сбор 👍/👎 и метки → bot PR с журналом | `feedback-migrate`, `feedback-batch` |
+| [`pr-review-feedback-promote.yml`](../examples/ci/pr-review-feedback-promote.yml) | Еженедельно: ≥2 одинаковых FP → паттерн + fixture | `feedback-promote`, `eval` |
+| [`pr-review-metrics.yml`](../examples/ci/pr-review-metrics.yml) | Сводка по observability-логам прогонов | `metrics` |
+
+Служебные шаблоны чекаутят базовую ветку, поэтому пин и скрипт сверки читают из рабочего
+дерева (`bash ops/ai-review/fetch-pr-review.sh ops/ai-reviewer-ref …`). `setup-node` в них
+остаётся только для инлайновых REST-хелперов (gh CLI на self-hosted раннере нет), не для движка.
 
 Оба диспатчимых workflow потребителя (`ci.yml`, `pr-review.yml`) должны иметь
 `workflow_dispatch:` — feedback-бот дёргает их после мержа данных.
@@ -103,12 +155,15 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
 ## 6. Локальный прогон
 
 ```bash
+bash ops/ai-review/fetch-pr-review.sh ops/ai-reviewer-ref ~/.local/ai-reviewer   # печатает путь
 git diff origin/main... > /tmp/changes.patch
 OLLAMA_API_KEY=… REVIEW_PROFILE=ops/ai-review/profile.json \
-  node .ai-reviewer-engine/bin/pr-review.mjs --dry-run --diff /tmp/changes.patch
+  ~/.local/ai-reviewer/pr-review review --dry-run --diff /tmp/changes.patch
 ```
 
-В монорепо удобно держать клон движка рядом и запускать `node ../ai-reviewer/bin/pr-review.mjs`.
+Из клона движка: `cargo build --manifest-path rust/Cargo.toml` и
+`rust/target/debug/pr-review review --dry-run --diff …`. Прежний `node bin/pr-review.mjs`
+работает до удаления JS-ядра (T33).
 
 ## 7. Swarm / оркестратор (E22–E23)
 
@@ -123,8 +178,21 @@ OLLAMA_API_KEY=… REVIEW_PROFILE=ops/ai-review/profile.json \
 ## 8. Обновление версии
 
 1. В движке: зелёный `npm run check` (`npm test` + `npm run eval` + `check:rust`: `cargo build`,
-   `cargo test`, паритет JS ↔ Rust), тег `vX.Y.Z`.
-2. У потребителя: правка `ops/ai-reviewer-ref` → PR → ревью нового движка идёт **старым**
-   (пин читается из базовой ветки) → merge.
+   `cargo test`, паритет JS ↔ Rust), тег `vX.Y.Z` → релиз с четырьмя архивами и `SHA256SUMS`.
+2. У потребителя: правка `ops/ai-reviewer-ref` (`vX.Y.Z sha256:<хэш SHA256SUMS>`) → PR → ревью
+   нового движка идёт **старым** (пин читается из базовой ветки) → merge.
 3. Первый прогон после bump сравнить с предыдущим: Δ-блок в sticky показывает, что изменилось
    в наборе находок на том же коде.
+
+## 9. Переход со старого пина (чекаут + node)
+
+Breaking для потребителя ([CHANGELOG](../CHANGELOG.md), Unreleased). Порядок — одним PR:
+
+1. Скопировать `examples/ci/fetch-pr-review.sh` → `ops/ai-review/fetch-pr-review.sh`.
+2. Заменить workflow на шаблоны из `examples/ci/` (шаги `Read pinned engine ref` и
+   `Checkout pinned AI review engine` уходят, их место — `Fetch pinned pr-review binary`).
+3. `ops/ai-reviewer-ref`: `v0.4.0` → `vX.Y.Z sha256:<хэш SHA256SUMS>`.
+
+Ревью самого этого PR пойдёт по базовой ветке: старый шаблон из base не участвует — workflow
+берётся из PR, а пин и скрипт сверки ещё отсутствуют в базе, поэтому новый шаблон штатно
+пропустит ревью (bootstrap). Начиная со следующего PR работает бинарь.

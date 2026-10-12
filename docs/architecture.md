@@ -3,8 +3,8 @@ type: architecture
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
-last_reviewed: 2026-09-29
+last_updated: 2026-10-12
+last_reviewed: 2026-10-12
 ---
 
 # Архитектура
@@ -53,7 +53,7 @@ flowchart TB
 
 | Модуль | Назначение |
 |--------|------------|
-| `bin/pr-review.mjs` | CLI полного прогона |
+| `bin/pr-review.mjs` | CLI полного прогона (JS; у потребителя — `pr-review review`, удаляется в T33) |
 | `pipeline.mjs` | `createReviewPipeline()`, `run()` / `runDetailed()`, `runReview()` — оркестрация |
 | `lib/profile.mjs` | [Профиль проекта](profiles.md): маркеры, правила, раскладка, пути |
 | `lib/config.mjs` | `loadReviewConfig()` — профиль + env + CLI в один замороженный объект |
@@ -90,7 +90,8 @@ flowchart TB
 | `cursor-plugin/` | Cursor Plugin: команды, skill, rule; оба MCP. Не гейт |
 | `lib/observability.mjs`, `lib/metrics.mjs` | JSONL-лог прогонов и сводка по нему |
 | `lib/eval.mjs` | Golden fixtures без LLM |
-| `rust/` | Rust-порт части `lib/*.mjs`: обёртка зовёт бинарь из `rust/target/debug/`, при отсутствии бинаря — JS (см. ниже) |
+| `rust/` | Единый бинарь `pr-review` (подкоманды — ниже) и Rust-порт `lib/*.mjs`: обёртка зовёт бинарь из `rust/target/debug/`, при отсутствии бинаря — JS (см. ниже) |
+| `examples/ci/` | Шаблоны workflow потребителя и `fetch-pr-review.sh` — скачивание и сверка бинаря по пину |
 
 **Rust-слой.** Модули `diff`, `router`, `findings`, `engine`, `llm`, `prompt`, `specialists`,
 `verifier`, `report`, `github`, `export`, `actionability`, `metrics`, `config`/`profile`,
@@ -99,6 +100,18 @@ flowchart TB
 `AI_REVIEWER_<MOD>_FORCE_JS=1` включает чистый JS. Расхождение сторон ловят скрипты
 `rust/parity/*.parity.mjs` (`npm run check:parity`). Оркестрация (`pipeline.mjs`,
 `chunk-routing`, `specialist-merge`, `incremental`) остаётся в JS.
+
+**Единый бинарь `pr-review` и поставка потребителю** ([RFC 16](../proposals/16-standalone-rust-binary.md)).
+Порт свёл движок в один Rust-бинарь с десятью подкомандами (`review`, `eval`, `metrics`,
+`structure`, `structure-mcp`, `review-mcp`, `feedback`, `feedback-batch`, `feedback-migrate`,
+`feedback-promote`). Потребитель получает его prebuilt-архивом из релиза по пину
+`<tag> sha256:<хэш SHA256SUMS>`, читаемому из базовой ветки; цепочка пин → `SHA256SUMS` →
+архив сверяется до распаковки ([integration.md](integration.md)). Политики разведены:
+недоступность поставки — fail-open (ревью пропускается), несовпадение хэша — fail-closed
+(подмена артефакта не должна молча выключать гейт); внутри ревью действует прежний fail-open
+движка. JS-ядро (`pipeline.mjs`, `lib/*.mjs`, потребительские `bin/*.mjs`) пока живо и
+работает в разработке и как откат MCP-лаунчеров; его удаление — cutover T33, после
+реального прогона релизной сборки (T32).
 
 ## Ключевые решения
 
@@ -184,7 +197,7 @@ skill, rule). Находки в чате advisory; `previewWouldBlock` не бл
 
 | Что | Команда |
 |-----|---------|
-| Юнит + контракты | `npm test` |
+| Юнит + контракты (в т.ч. шаблоны `examples/ci/` — `test/ci-templates.test.mjs`) | `npm test` |
 | Golden fixtures без LLM (16 кейсов) | `npm run eval` |
 | Rust: `cargo build` + `cargo test` + паритет JS ↔ Rust | `npm run check:rust` (паритет отдельно — `npm run check:parity`) |
 | Всё выше, как в CI | `npm run check` |

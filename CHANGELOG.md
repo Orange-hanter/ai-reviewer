@@ -3,12 +3,48 @@ type: journal
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
+last_updated: 2026-10-12
 ---
 
 # Changelog
 
 ## Unreleased
+
+### Breaking для потребителя — подключение prebuilt-бинарём (RFC 16, T31)
+
+Шаблоны [`examples/ci/`](examples/ci/) больше не чекаутят репозиторий движка и не запускают
+`node .ai-reviewer-engine/…`. Движок — единый бинарь `pr-review` из релиза:
+
+- **Пин нового формата** `ops/ai-reviewer-ref`: `<tag> sha256:<sha256 файла SHA256SUMS>`
+  (например, `v0.5.0 sha256:3f1c…`). Старый пин (голый тег) работает только со старым
+  шаблоном; новый шаблон на старом пине — шаг красный с понятным сообщением.
+- **Скрипт сверки** `examples/ci/fetch-pr-review.sh` копируется в
+  `ops/ai-review/fetch-pr-review.sh`; в `pr-review.yml` он, как и пин, читается из базовой
+  ветки. Цепочка пин → `SHA256SUMS` → `pr-review-<target-triple>.tar.gz` сверяется до
+  распаковки; бинарь лежит в `$RUNNER_TEMP`, секреты получает только шаг запуска.
+- **Политика поставки:** недоступность релиза, сети или платформы — fail-open (ревью
+  пропускается, merge свободен); несовпадение sha256 или битый пин — fail-closed (шаг
+  красный). Политика самого движка не меняется.
+- Шаблоны зовут подкоманды: `review`, `feedback-migrate`, `feedback-batch`,
+  `feedback-promote`, `eval`, `metrics`. `setup-node` в служебных шаблонах остался только для
+  инлайновых REST-хелперов.
+- Первый релиз с бинарями — T32; до него оставайтесь на `v0.4.0` и прежнем шаблоне.
+  Переход — [docs/integration.md §9](docs/integration.md#9-переход-со-старого-пина-чекаут--node).
+
+### Cursor Plugin — лаунчеры на бинарь
+
+- `cursor-plugin/bin/review-mcp.sh` и `structure-mcp.sh` зовут `pr-review review-mcp` /
+  `pr-review structure-mcp`: `AI_REVIEWER_BIN` → `rust/target/{release,debug}/pr-review`
+  клона → откат на node-путь до удаления JS (T33). `AI_REVIEWER_MCP_RUNTIME=auto|bin|node`
+  фиксирует выбор. С `AI_REVIEWER_BIN` клон движка не обязателен.
+
+### Тесты
+
+- Контрактные тесты шаблонов вынесены из `test/pr-review.eval.test.mjs` в
+  `test/ci-templates.test.mjs` (переживёт cutover T33) и дополнены: нет чекаута движка и
+  node/npm для него, бинарь запускается только после сверки, пин из базовой ветки, секреты
+  не у чекаутов; поведение `fetch-pr-review.sh` — на фейковом релизе через `file://`
+  (совпадение, подмена `SHA256SUMS` и архива, неизвестная платформа, пустой/старый пин).
 
 ### Безопасность — JS-эталон и Rust-ядро
 

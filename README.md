@@ -12,8 +12,8 @@ last_updated: 2026-09-29
 
 [![CI](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml)
 [![version](https://img.shields.io/badge/version-0.4.0-blue)](CHANGELOG.md)
-[![node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
-[![deps](https://img.shields.io/badge/dependencies-0-success)](package.json)
+[![runtime](https://img.shields.io/badge/runtime-single%20binary-success)](docs/integration.md)
+[![dev](https://img.shields.io/badge/dev-node%20%E2%89%A522%20%2B%20cargo-brightgreen)](package.json)
 [![license](https://img.shields.io/badge/license-UNLICENSED-lightgrey)](#лицензия)
 
 **AI-ревью, которое шумит, хуже отсутствия ревью.<br>
@@ -45,8 +45,11 @@ verifier → inline-замечания и один живой sticky-отчёт 
   разницу прогонов.
 - **Петля обучения на FP.** <img src=".github/icons/fp-down.svg" alt="👎" height="15"> или метка → журнал → промоут в FP-паттерн **и** eval-fixture,
   который держит регрессию. Ошибка не повторяется из PR в PR.
-- **Ноль зависимостей.** Node ≥ 22 и всё: `npm install` не нужен, движок пинится по тегу
-  или SHA и никогда не исполняется из кода PR.
+- **Один бинарь.** Потребителю не нужны ни Node, ни `npm install`: prebuilt `pr-review` под
+  linux/macOS × x86_64/aarch64 пинится тегом и sha256 и никогда не исполняется из кода PR.
+  Rust-зависимости (crates) вкомпилированы в бинарь; внешние инструменты — eslint, ast-grep,
+  graphify — опциональны и fail-open. JS-часть репозитория по-прежнему без npm-зависимостей,
+  но это свойство разработки, а не поставки.
 - **Всё специфичное — в профиле.** Маркеры, правила проекта, раскладка каталогов, пути
   данных — один JSON на стороне потребителя; без профиля движок не выдумывает архитектуру.
 
@@ -176,35 +179,54 @@ MCP-сервер `pr-review-structure-mcp` и его метод `structure_conte
 
 Статусы, приоритеты evidence, cod-doc-интеграция — [docs/structure.md](docs/structure.md).
 
-## Быстрый старт
+## Установка
 
-Пакет `private` и в npm не опубликован: `npx pr-review*` в примерах ниже работает внутри клона
-или checkout'а, где пакет установлен; иначе — `node <клон>/bin/pr-review*.mjs`.
+Движок — единый бинарь `pr-review` с подкомандами ([RFC 16](proposals/16-standalone-rust-binary.md)).
+
+**Prebuilt из релиза** (так его получает CI потребителя). Пин — тег и sha256 файла
+`SHA256SUMS`; скрипт сверяет цепочку пин → `SHA256SUMS` → архив и только потом распаковывает:
+
+```bash
+echo "v0.5.0 sha256:<sha256 SHA256SUMS релиза>" > ops/ai-reviewer-ref
+bash examples/ci/fetch-pr-review.sh ops/ai-reviewer-ref ~/.local/ai-reviewer   # печатает путь к бинарю
+```
+
+Архивы релиза — `pr-review-<target-triple>.tar.gz` для `x86_64`/`aarch64` ×
+`unknown-linux-gnu`/`apple-darwin`. Первый релиз с бинарями выпускает T32; до него —
+сборка из исходников.
+
+**Из исходников:**
 
 ```bash
 git clone git@github.com:Orange-hanter/ai-reviewer.git
 cd ai-reviewer
-npm test && npm run eval          # зависимостей нет, npm install не нужен
+cargo build --release --manifest-path rust/Cargo.toml   # → rust/target/release/pr-review
+npm test && npm run eval                                 # JS-часть: npm install не нужен
 ```
+
+JS-команды пакета (`node bin/pr-review*.mjs`, `npx pr-review*` внутри клона) работают до
+удаления JS-ядра в T33; новые подключения стоит делать сразу на бинарь.
+
+## Быстрый старт
 
 Ревью произвольного диффа, без GitHub:
 
 ```bash
 git -C /path/to/repo diff origin/main... > /tmp/changes.patch
-OLLAMA_API_KEY=… npx pr-review --dry-run --diff /tmp/changes.patch
+OLLAMA_API_KEY=… pr-review review --dry-run --diff /tmp/changes.patch
 ```
 
 Ревью настоящего PR:
 
 ```bash
 GITHUB_TOKEN=… GITHUB_REPOSITORY=owner/repo PR_NUMBER=123 OLLAMA_API_KEY=… \
-  REVIEW_PROFILE=ops/ai-review/profile.json npx pr-review
+  REVIEW_PROFILE=ops/ai-review/profile.json pr-review review
 ```
 
 Структура, контракты, dependencies и тестовые evidence вне merge-гейта:
 
 ```bash
-npx pr-review-structure \
+pr-review structure \
   --graph .graphify/graphify-out/graph.json \
   --lcov coverage/lcov.info \
   --facts-out .ai-review/structure/structure-facts.json \
@@ -213,20 +235,28 @@ npx pr-review-structure \
 
 ## CLI
 
+Подкоманды бинаря `pr-review` (в скобках — JS-команда, живая до T33):
+
+| Подкоманда | Назначение |
+|------------|------------|
+| `review` (`pr-review`) | Полный прогон (PR или `--diff`) |
+| `eval` (`pr-review-eval`) | Golden fixtures без LLM — гейт post-processing |
+| `metrics` (`pr-review-metrics`) | Сводка по логам прогонов |
+| `feedback` · `feedback-batch` (`pr-review-feedback` · `-batch`) | Сбор <img src=".github/icons/fp-up.svg" alt="👍" height="15">/<img src=".github/icons/fp-down.svg" alt="👎" height="15"> с PR |
+| `feedback-migrate` · `feedback-promote` (`feedback/*.mjs`) | Миграция журнала feedback, промоут FP-паттернов и fixtures |
+| `structure` (`pr-review-structure`) | Structure facts/assessment, drift, property drafts и Markdown |
+| `structure-mcp` (`pr-review-structure-mcp`) | Pinned-SHA `structure_context` MCP для агентов |
+| `review-mcp` (`pr-review-mcp`) | Dry-run ревью из чата (`review_run` и дешёвые стадии); не гейт |
+
+Dev-тулы остаются JS-командами клона (их нет в бинаре):
+
 | Команда | Назначение |
 |---------|------------|
-| `pr-review` | Полный прогон (PR или `--diff`) |
-| `pr-review-eval` | Golden fixtures без LLM — гейт post-processing |
 | `pr-review-gold` | Shadow-прогон с LLM на размеченных TP/FP диффах |
-| `pr-review-metrics` | Сводка по логам прогонов |
 | `pr-review-probe-models` | Доступность, latency и JSON-mode моделей |
 | `pr-review-probe-cache` | Даёт ли endpoint скидку за общий префикс (стоит ли `REVIEW_PROMPT_LAYOUT=shared-prefix`) |
 | `pr-review-benchmark` | Precision/recall по результатам gold-прогонов без LLM |
 | `pr-review-gold-harvest` | Кандидаты публичного gold-набора из пар «виновник → фикс» |
-| `pr-review-feedback` · `-batch` | Сбор <img src=".github/icons/fp-up.svg" alt="👍" height="15">/<img src=".github/icons/fp-down.svg" alt="👎" height="15"> с PR |
-| `pr-review-structure` | Structure facts/assessment, drift, property drafts и Markdown |
-| `pr-review-structure-mcp` | Pinned-SHA `structure_context` MCP для агентов |
-| `pr-review-mcp` | Dry-run ревью из чата (`review_run` и дешёвые стадии); не гейт |
 
 ## Профиль проекта
 
@@ -252,13 +282,18 @@ npx pr-review-structure \
 
 ## Подключение к CI
 
-Движок берётся по пину и **никогда не исполняется из кода PR** — иначе вредоносный PR получил
+Бинарь берётся по пину и **никогда не исполняется из кода PR** — иначе вредоносный PR получил
 бы секреты прогона:
 
 ```
-ops/ai-reviewer-ref          # v0.4.0 или commit SHA — пин читается из базовой ветки
-ops/ai-review/profile.json   # профиль проекта
+ops/ai-reviewer-ref               # «v0.5.0 sha256:<хэш SHA256SUMS>» — читается из базовой ветки
+ops/ai-review/fetch-pr-review.sh  # копия examples/ci/fetch-pr-review.sh: скачивание + сверка
+ops/ai-review/profile.json        # профиль проекта
 ```
+
+Недоступность релиза — fail-open (ревью пропускается, merge свободен), несовпадение sha256 —
+fail-closed (подмена артефакта). Старый пин (`v0.4.0`, чекаут + `node`) работает со старым
+шаблоном до T33; переход — [integration.md §9](docs/integration.md#9-переход-со-старого-пина-чекаут--node).
 
 Готовые шаблоны workflow (ревью, сбор feedback, промоут паттернов, метрики) —
 [`examples/ci/`](examples/ci/), пошагово — [docs/integration.md](docs/integration.md).
@@ -284,7 +319,7 @@ ops/ai-review/profile.json   # профиль проекта
 ## Разработка
 
 ```bash
-npm test        # юнит + контракты (в т.ч. шаблоны workflow)
+npm test        # юнит + контракты (в т.ч. шаблоны workflow — test/ci-templates.test.mjs)
 npm run eval    # golden fixtures без LLM
 npm run check   # то и другое + check:rust (cargo build, cargo test, паритет JS ↔ Rust); ровно это гоняет CI
 ```
