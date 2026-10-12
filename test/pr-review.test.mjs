@@ -20,7 +20,7 @@ const {
   extractFileDiffSections, selectVerifierCandidates, applyVerifierVerdicts,
   parseJsonl, aggregateMetrics, formatMetricsReport,
   parseDiffNewPath, parseDiffGitPath, unescapeGitPath, buildSummary, filterStalePriorFindings,
-  filterFindingsFixedInDiff, findingFingerprint, createGraphifyClient, buildChangedFilesSection,
+  filterFindingsFixedInDiff, findingFingerprint, createGraphifyClient, blastUnavailableReason, buildChangedFilesSection,
   dedupeSameModelFindings, createCostTracker, formatCostStickyLine, scoreGoldCase, aggregateBenchmark,
   scoreFromRecord, locationMatches, DEFAULT_LOCATION_TOLERANCE,
   emitBlastRadiusFindings, resolveBlockers, normalizeFinding, setProfile, resetProfile,
@@ -164,6 +164,47 @@ test('Graphify: отсутствует graph.json → graph_missing, без вы
   assert.equal(metrics.skip_reasons.graph_missing, 1);
   assert.equal(metrics.symbols_resolved, 0);
   assert.equal(calls.length, 0, 'affected/git не вызываем без графа');
+});
+
+test('Graphify: blastUnavailableReason — инфра-сбой отличается от «зависимых нет»', async () => {
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const graphOk = async (path) => (String(path).endsWith('graph.json')
+    ? '{"nodes":[],"links":[]}'
+    : '# Graph Report\n- Built from commit: `abcdef12`\n');
+  const enoent = () => { const err = new Error('ENOENT'); err.code = 'ENOENT'; return err; };
+
+  const missing = await createGraphifyClient(cfg, {
+    execFileP: async () => ({ stdout: '' }), access: async () => { throw enoent(); },
+  }).buildBlastRadius(['foo']);
+  assert.equal(blastUnavailableReason(missing.metrics), 'graph_missing');
+
+  const noCli = await createGraphifyClient(cfg, {
+    execFileP: async (bin) => { if (bin === 'gf') throw enoent(); return { stdout: 'abcdef12' }; },
+    readFile: graphOk, access: async () => {},
+  }).buildBlastRadius(['foo', 'bar']);
+  assert.equal(blastUnavailableReason(noCli.metrics), 'graphify_unavailable');
+
+  const unreadable = await createGraphifyClient(cfg, {
+    execFileP: async () => ({ stdout: 'No affected nodes found' }),
+    readFile: async (path) => (String(path).endsWith('graph.json') ? '{broken' : graphOk(path)),
+    access: async () => {},
+  }).buildBlastRadius(['foo']);
+  assert.equal(blastUnavailableReason(unreadable.metrics), 'graph_unreadable');
+
+  const noDeps = await createGraphifyClient(cfg, {
+    execFileP: async (bin) => ({ stdout: bin === 'gf' ? 'No affected nodes found' : 'abcdef12' }),
+    readFile: graphOk, access: async () => {},
+  }).buildBlastRadius(['foo']);
+  assert.equal(blastUnavailableReason(noDeps.metrics), null, 'граф есть, зависимых нет — не сбой');
+
+  const noSymbols = await createGraphifyClient(cfg, {
+    execFileP: async () => ({ stdout: 'abcdef12' }), readFile: graphOk, access: async () => {},
+  }).buildBlastRadius([]);
+  assert.equal(blastUnavailableReason(noSymbols.metrics), null);
+  assert.equal(blastUnavailableReason({ skip_reason: 'client_did_not_report', graph_status: 'unknown' }), null);
 });
 
 test('Graphify: нет символов в диффе → честный skip no_symbols_in_diff', async () => {

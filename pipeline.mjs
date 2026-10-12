@@ -6,13 +6,13 @@ import { createLlmClient } from './lib/llm.mjs';
 import { createCostTracker, efficiencyMetrics } from './lib/cost.mjs';
 import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
 import { createPromptBuilder, buildChangedFilesSection } from './lib/prompt.mjs';
-import { createGraphifyClient } from './lib/graphify.mjs';
+import { createGraphifyClient, blastUnavailableReason } from './lib/graphify.mjs';
 import { createGithubClient } from './lib/github.mjs';
 import { withIcons } from './lib/icons.mjs';
 import { createReviewEngine } from './lib/engine.mjs';
 import { resolveBlockers, createFindingsFormatter, filterFalsePositiveFindings, filterStalePriorFindings, attachFingerprints } from './lib/findings.mjs';
 import { buildRepoPathIndex, listRepoFiles } from './lib/absent-path.mjs';
-import { BLAST_FINDING_SOURCE } from './lib/constants.mjs';
+import { BLAST_FINDING_SOURCE, MARKERS } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
 import { buildVerifierFileContents, windowChunkFileContents } from './lib/context-window.mjs';
@@ -88,6 +88,14 @@ function logActionabilityDistribution(obs, { findings, inlineCount, outside, thr
     histogram,
     topOutsideReasons,
   });
+}
+
+/** Sticky при `REVIEW_BLAST_REQUIRED=1` и непосчитанном blast-radius (LLM не вызывался). */
+function buildBlastUnavailableSummary(reason) {
+  return `${MARKERS.review}\n## 🤖 Авто код-ревью\n\n⛔ Blast-radius недоступен (\`${reason}\`): code graph Graphify не построен или не читается.\n\n`
+    + '<sub>Без графа гейт не видит callers вне диффа — merge заблокирован до LLM-ревью '
+    + '(fail-closed, `REVIEW_BLAST_REQUIRED=1`). Проверьте шаг сборки графа (`graphify update`), '
+    + '`GRAPH` и `GRAPHIFY_BIN`; осознанное ослабление — `REVIEW_BLAST_REQUIRED=0`. Детали — в логе CI job.</sub>';
 }
 
 /** Совместимость с тестовыми/custom Graphify-клиентами старого API, возвращавшими массив. */
@@ -491,6 +499,26 @@ export function createReviewPipeline(cfg, deps = {}) {
       const blastResult = await graphify.buildBlastRadius(symbols);
       const { blocks: blastBlocks, metrics: blastMetrics, graphIndex } = normalizeBlastRadius(blastResult, symbols);
       log(`prep parallel: ${Date.now() - prepT0}мс (graphify+files+prior+prescan)`);
+      // REVIEW_BLAST_REQUIRED: без code graph гейт не видит callers вне диффа → fail-closed
+      // ДО LLM (тратить токены на ревью, которое всё равно заблокируется, незачем).
+      const blastFailure = gate.blastRequired ? blastUnavailableReason(blastMetrics) : null;
+      if (blastFailure) {
+        log(`blast-radius недоступен (${blastFailure}) — fail-closed (REVIEW_BLAST_REQUIRED)`);
+        obs.logEvent('blast_failed', { reason: blastFailure, required: true, blast_radius: blastMetrics });
+        await persistAndCapture(buildReviewJson({
+          pr, headSha, reviewMode, route, wouldBlock: true,
+          counts: { critical: 0, major: 0, minor: 0, nit: 0 },
+          total: 0, findings: [], blockers: [], reviews: [],
+          blastMetrics, changedPaths,
+        }));
+        finalObs = { exitCode: 1, wouldBlock: true, blastFailed: blastFailure, degraded: true };
+        if (!dryRun && postCreds) {
+          try { await github.upsertSticky(buildBlastUnavailableSummary(blastFailure)); } catch (e) {
+            log('заметку не запостили:', String(e?.message || e).slice(0, 200));
+          }
+        }
+        return detailedResult(1, { wouldBlock: true, degraded: true, reason: `blast-radius unavailable: ${blastFailure}` });
+      }
       // Fingerprint-инвалидация carry-over ДО LLM: устаревшие prior findings не подмешиваем.
       // Нормализуем форму: клиент github инжектируется (DI-тесты, кастомные провайдеры) и
       // может отдать массив по старому контракту или неполный объект. Ни то, ни другое не

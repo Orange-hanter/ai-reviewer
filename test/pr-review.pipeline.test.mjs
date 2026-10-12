@@ -445,6 +445,35 @@ test('pipeline: пустой blast-radius сохраняет измеримые 
   }
 });
 
+test('pipeline: REVIEW_BLAST_REQUIRED=1 + нет графа → fail-closed до LLM (exit 1), sticky', async () => {
+  const graphify = { buildBlastRadius: async () => ({ blocks: [], metrics: {
+    symbols_total: 1, symbols_resolved: 0, affected_nonempty: 0, graph_fresh: null,
+    graph_status: 'missing', skip_reason: 'graph_missing', skip_reasons: { graph_missing: 1 },
+  } }) };
+  const reviews = [{ model: 'm1', summary: '', verdict: 'comment', findings: [] }];
+  const required = await runPipeline({ diff: CODE_DIFF, reviews, graphify, env: { REVIEW_BLAST_REQUIRED: '1' } });
+  assert.equal(required.code, 1, 'без графа merge заблокирован');
+  assert.equal(required.calls.engineRuns, 0, 'LLM не вызывался');
+  assert.equal(required.calls.upsertSticky.length, 1);
+  assert.ok(required.calls.upsertSticky[0].includes('graph_missing'));
+  assert.ok(required.calls.upsertSticky[0].includes('REVIEW_BLAST_REQUIRED=1'));
+
+  const optional = await runPipeline({ diff: CODE_DIFF, reviews, graphify });
+  assert.equal(optional.code, 0, 'дефолт 0: отсутствие графа — fail-open');
+  assert.equal(optional.calls.engineRuns, 1);
+});
+
+test('pipeline: REVIEW_BLAST_REQUIRED=1 + граф есть, зависимых нет → обычный прогон', async () => {
+  const graphify = { buildBlastRadius: async () => ({ blocks: [], metrics: {
+    symbols_total: 1, symbols_resolved: 1, affected_nonempty: 0, graph_fresh: true,
+    graph_status: 'fresh', skip_reason: 'no_dependents', skip_reasons: { no_dependents: 1 },
+  } }) };
+  const reviews = [{ model: 'm1', summary: '', verdict: 'comment', findings: [] }];
+  const { code, calls } = await runPipeline({ diff: CODE_DIFF, reviews, graphify, env: { REVIEW_BLAST_REQUIRED: '1' } });
+  assert.equal(code, 0);
+  assert.equal(calls.engineRuns, 1);
+});
+
 test('pipeline: verifier strict — находки сверх капа (13-я) понижаются, без верификации не блокируют', async () => {
   const findings = Array.from({ length: 13 }, (_, i) => ({
     file: 'foo.ts', line: i + 1, severity: 'critical', title: `баг ${i + 1}`, body: '', confidence: 0.9, model: 'm1',
