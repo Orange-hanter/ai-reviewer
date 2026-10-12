@@ -338,10 +338,12 @@ triple → сверить с `SHA256SUMS` → распаковать → `chmod 
 
 **Две политики на этом пути (уточнено в T31).** Исходная редакция требовала fail-open на
 любом сбое. Это верно для **недоступности**: пустой пин (bootstrap), релиз или сеть не
-отвечают, платформа раннера не собирается, нет `curl`/`sha256sum` — `exit 0`, понятное
+отвечают (нет HTTP-ответа, 5xx, 429), платформа раннера не собирается, нет `curl`/`sha256sum` — `exit 0`, понятное
 сообщение, ревью пропускается; та же семантика, что у пустого пина в старом шаблоне и у
 `bin/pr-review.mjs:11-14`. Но **несовпадение sha256** (пин ↔ `SHA256SUMS` или
-`SHA256SUMS` ↔ архив) и битый пин — fail-closed, шаг красный: это не аутедж, а подмена
+`SHA256SUMS` ↔ архив), битый пин или заглушка из нулей, HTTP 404/410 на файл релиза (тег с
+опечаткой, релиз удалён или ещё не опубликован), сверенный архив не по контракту и пин нового
+формата без скрипта сверки в базовой ветке — fail-closed, шаг красный: это не аутедж, а подмена
 артефакта или ошибка в базовой ветке, и тихий пропуск превратил бы подменённый релиз в
 незаметный выключатель гейта. Политика самого движка (fail-open внутри ревью, exit 1 только
 на подтверждённых блокерах) не меняется.
@@ -352,7 +354,7 @@ triple → сверить с `SHA256SUMS` → распаковать → `chmod 
 | Что | Формат |
 |---|---|
 | URL | `https://github.com/Orange-hanter/ai-reviewer/releases/download/<tag>/<файл>` (публичный релиз, без токена) |
-| Архивы | `pr-review-<triple>.tar.gz`, triple ∈ {`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`}; gzip-tar, **в корне** — обычный исполняемый файл `pr-review` (не symlink); прочие файлы в архиве допустимы и игнорируются |
+| Архивы | `pr-review-<triple>.tar.gz`, triple ∈ {`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`}; gzip-tar, **в корне** — обычный исполняемый файл `pr-review` (не symlink), имя члена ровно `pr-review` (собирать `tar -czf <архив> -C <dir> pr-review`; `./pr-review` скрипт тоже принимает); прочие файлы в архиве допустимы и игнорируются |
 | `SHA256SUMS` | вывод `sha256sum` по архивам из каталога релиза: строки `<64 hex нижнего регистра>␠␠<имя архива>` (бинарный режим `␠*<имя>` тоже принимается), имена без путей, LF; файл сверяется побайтно |
 | Пин `ops/ai-reviewer-ref` | первая непустая строка `<tag> sha256:<64 hex нижнего регистра>`; tag — `[A-Za-z0-9][A-Za-z0-9._-]*`; хэш — sha256 файла `SHA256SUMS` целиком; лишние поля — ошибка |
 | Платформа | `uname -s` ∈ {`Linux`, `Darwin`} × `uname -m` ∈ {`x86_64`/`amd64`, `aarch64`/`arm64`}; прочее — пропуск |
@@ -520,7 +522,7 @@ T08 замораживает сигнатуры трейтов до того, к
 
 | # | Суть | DoD |
 |---|---|---|
-| ✅ T31 | `examples/ci/*.yml` (скачивание по пину + sha256), `docs/{integration,architecture,configuration}.md`, `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `package.json`, `examples/consumers/orakul/`, вынос `test/ci-templates.test.mjs` (сделано: шаг `Fetch pinned pr-review binary` + `examples/ci/fetch-pr-review.sh` — пин и скрипт из базовой ветки, цепочка пин → `SHA256SUMS` → архив до распаковки, бинарь в `$RUNNER_TEMP`, секреты только у шага запуска; недоступность — fail-open, несовпадение хэша — fail-closed (уточнение решения 9); контракт артефактов для T32 — в решении 9; `cursor-plugin/bin/*-mcp.sh` на подкоманды бинаря с откатом на node до T33; JS ничего не удалено) | `node --test test/ci-templates.test.mjs`; ни одного `node .ai-reviewer-engine/` в шаблонах |
+| ✅ T31 | `examples/ci/*.yml` (скачивание по пину + sha256), `docs/{integration,architecture,configuration}.md`, `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `package.json`, `examples/consumers/orakul/`, вынос `test/ci-templates.test.mjs` (сделано: шаг `Fetch pinned pr-review binary` + `examples/ci/fetch-pr-review.sh` — пин и скрипт из базовой ветки, цепочка пин → `SHA256SUMS` → архив до распаковки, бинарь в `$RUNNER_TEMP`, секреты только у шага запуска; недоступность — fail-open, несовпадение хэша — fail-closed (уточнение решения 9); по ревью T31 fail-closed расширен на HTTP 404/410, пин-заглушку, архив не по контракту и пин нового формата без скрипта, граница доверия prescan описана в docs/integration.md; контракт артефактов для T32 — в решении 9; `cursor-plugin/bin/*-mcp.sh` на подкоманды бинаря с откатом на node до T33; JS ничего не удалено) | `node --test test/ci-templates.test.mjs`; ни одного `node .ai-reviewer-engine/` в шаблонах |
 | T32 | `release.yml`: матрица 4 таргета, `SHA256SUMS`, публикация по тегу | `cargo build --release` локально; `actionlint` зелёный; реальный прогон по `workflow_dispatch` |
 | T42 | dev-тулы RFC 15 (`lib/cues.mjs`, `lib/brief.mjs`, `bin/pr-review-scout.mjs`) и пробники (`pr-review-probe-cache`, `pr-review-symbol-cards-probe`): остаются JS по non-goal «dev-тулы», поэтому решение 8 получает исключение — эти модули и их импорты (`diff`, `router`, `symbol-cards`) читают JSON-вывод бинаря или вынесены в `tools/`; порт `cues`/`brief` — только если RFC 15 перейдёт к этапу 1 (наряды в гейте) | `node bin/pr-review-scout.mjs --gold-dir gold` работает после T33 |
 | T33 | cutover: удаления по решению 8, `pr-review-gold.mjs` на спавн бинаря, новый порядок шагов `ci.yml` | `cargo build/test` и `npm test` зелёные; `grep -rn "pipeline.mjs\|lib/.*\.mjs" --include=*.mjs` не находит ссылок на удалённое; один бинарь запускает 9 подкоманд |

@@ -11,8 +11,10 @@ last_updated: 2026-10-12
 Движок — prebuilt-бинарь `pr-review` из релизов отдельного репозитория
 `Orange-hanter/ai-reviewer` ([RFC 16](../proposals/16-standalone-rust-binary.md), решение 9).
 Он **никогда не берётся из кода PR**: CI скачивает его по пину из базовой ветки и сверяет
-sha256 до запуска — так вредоносный PR не выполнит свой код с секретами прогона, а
-подменённый релизный артефакт не пройдёт сверку. Ни `node`, ни `npm install` движку не нужны.
+sha256 до запуска — так PR не подменит движок, а подменённый релизный артефакт не пройдёт
+сверку. Ни `node`, ни `npm install` движку не нужны. Код PR при этом в шаге ревью исполняется —
+через prescan (eslint из `node_modules` PR) и Graphify; граница доверия — в
+[§3](#секреты-и-код-pr).
 
 Готовые шаблоны workflow — в [`examples/ci/`](../examples/ci/).
 
@@ -47,7 +49,7 @@ curl -fsSL https://github.com/Orange-hanter/ai-reviewer/releases/download/v0.5.0
 
 | Артефакт | Содержимое |
 |----------|------------|
-| `pr-review-<target-triple>.tar.gz` | в корне архива — исполняемый файл `pr-review` |
+| `pr-review-<target-triple>.tar.gz` | в корне архива — исполняемый файл, член архива `pr-review` (`./pr-review` тоже принимается) |
 | `SHA256SUMS` | строки `<sha256-hex>  <имя-архива>` (формат `sha256sum`, имена без путей) |
 
 Таргеты: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`,
@@ -57,10 +59,13 @@ curl -fsSL https://github.com/Orange-hanter/ai-reviewer/releases/download/v0.5.0
 
 | Ситуация | Исход шага | Почему |
 |----------|------------|--------|
-| пин или скрипт сверки отсутствует в базовой ветке, пин пуст | пропуск, exit `0` | bootstrap-PR |
-| релиз/сеть недоступны, платформа раннера не собирается, нет `curl`/`sha256sum` | пропуск, exit `0` | **fail-open**: недоступность ревью не блокирует merge |
+| пина нет или он пуст; пин старого формата и нет скрипта сверки | пропуск, exit `0` | bootstrap-PR |
+| пин нового формата, а скрипта сверки в базовой ветке нет | шаг красный, exit `1` | пропущен шаг подключения: иначе required-check вечно зелёный без ревью |
+| сеть или сервер релизов не отвечают (нет HTTP-ответа, 5xx, 429), платформа раннера не собирается, нет `curl`/`sha256sum` | пропуск, exit `0`, `::warning::` | **fail-open**: недоступность ревью не блокирует merge |
+| релиза по тегу пина нет или в нём нет архива из `SHA256SUMS` (HTTP 404/410) | шаг красный, exit `1` | релиз ответил, и ответ противоречит пину: опечатка в теге, удалённый или ещё не опубликованный релиз |
 | sha256 `SHA256SUMS` ≠ пин или архив ≠ `SHA256SUMS` | шаг красный, exit `1` | **fail-closed поставки**: это подмена артефакта, а не аутедж |
-| пин старого формата или битый | шаг красный, exit `1` | ошибка конфигурации в базовой ветке |
+| сверенный архив без `pr-review` в корне или не распаковывается | шаг красный, exit `1` | релиз собран не по контракту |
+| пин старого формата при наличии скрипта, битый пин, хэш-заглушка из нулей | шаг красный, exit `1` | ошибка конфигурации в базовой ветке |
 
 Пропуск — это пустой output `bin` шага сверки: шаг запуска стоит под
 `if: steps.engine.outputs.bin != ''`. Fail-closed поставки не меняет политику самого движка:
@@ -96,6 +101,8 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
           rm -rf "$ENGINE" && mkdir -p "$ENGINE"
           git show "origin/$BASE_REF:ops/ai-reviewer-ref" > "$ENGINE/ref" 2>/dev/null || : > "$ENGINE/ref"
           if ! git show "origin/$BASE_REF:ops/ai-review/fetch-pr-review.sh" > "$ENGINE/fetch-pr-review.sh" 2>/dev/null; then
+            # пин нового формата без скрипта — не bootstrap, а пропущенный шаг подключения
+            grep -Eq '^[^[:space:]]+[[:space:]]+sha256:' "$ENGINE/ref" && exit 1
             echo "bin=" >> "$GITHUB_OUTPUT"; exit 0
           fi
           bash "$ENGINE/fetch-pr-review.sh" "$ENGINE/ref" "$ENGINE/bin"
@@ -121,6 +128,22 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
 Требования к правам job'а: `contents: read`, `pull-requests: write`. **Не** давайте
 `contents: write` job'у, который исполняет линтеры на коде PR (flat-config eslint — это
 исполняемый JS из чекаута PR).
+
+### Секреты и код PR
+
+Пин и скрипт сверки из базовой ветки защищают **движок**: PR не выбирает, какой бинарь
+запустится. Они не делают шаг ревью свободным от кода PR. С `REVIEW_PRESCAN=1` бинарь
+запускает `app/node_modules/.bin/eslint` — он поставлен `npm ci` по lock-файлу PR
+(`--ignore-scripts` отключает только lifecycle-скрипты) и грузит исполняемый
+`app/eslint.config.js` из PR; `GRAPHIFY_BIN=.graphify/venv/bin/graphify` тоже путь в рабочем
+дереве PR. Дочерние процессы наследуют env шага, то есть `OLLAMA_API_KEY`, `GITHUB_TOKEN`
+(`pull-requests: write`) и `TELEGRAM_BOT_TOKEN`; `actions/checkout` по умолчанию к тому же
+оставляет `GITHUB_TOKEN` в `.git/config`.
+
+| Откуда PR | Секреты в шаге ревью | Что делать |
+|-----------|----------------------|------------|
+| форк | пустые, `GITHUB_TOKEN` только на чтение | утекать нечему |
+| ветка этого репозитория | выдаются | приемлемо, если право push в репозиторий = доверие наравне с владельцами секретов; иначе `REVIEW_PRESCAN: '0'`, без `GRAPHIFY_BIN`, `persist-credentials: false` у чекаута |
 
 ## 4. Остальные workflow
 

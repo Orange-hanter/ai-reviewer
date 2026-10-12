@@ -10,7 +10,8 @@
    - `ai-reviewer-ref` → `ops/ai-reviewer-ref` — одна строка `<tag> sha256:<хэш SHA256SUMS>`.
      **Хэш в этом файле — заглушка из нулей до первого релиза с бинарями (T32)**: при
      релизе он заменяется настоящим (`curl -fsSL …/releases/download/<tag>/SHA256SUMS | sha256sum`).
-     С заглушкой шаг сверки красный (fail-closed) — копировать до релиза нельзя; до него
+     Скрипт сверки отвергает хэш из нулей (шаг красный, exit 1), а релиза по тегу до T32 нет
+     (HTTP 404 — тоже exit 1) — копировать до релиза нельзя; до него
      остаётся пин `v0.4.0` и прежний шаблон (чекаут + `node`).
 2. В `.github/workflows/` заменить шаблоны на `examples/ci/*.yml`: шаги `Read pinned engine
    ref` и `Checkout pinned AI review engine` уходят, их место — `Fetch pinned pr-review
