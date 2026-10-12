@@ -5,7 +5,7 @@ diff --git a/app/client/src/utils/preps.ts b/app/client/src/utils/preps.ts
    return round2(total);
  }
 +// prep deplete rounding guard (PR #254)
- diff --git a/app/e2e/prep-deplete.spec.ts b/app/e2e/prep-deplete.spec.ts
+diff --git a/app/e2e/prep-deplete.spec.ts b/app/e2e/prep-deplete.spec.ts
 --- a/app/e2e/prep-deplete.spec.ts
 +++ b/app/e2e/prep-deplete.spec.ts
 @@ -1,2 +1,3 @@
