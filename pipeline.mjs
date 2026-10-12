@@ -1100,14 +1100,25 @@ export function createReviewPipeline(cfg, deps = {}) {
       // переносить. Prescan и blast-radius в перенос не идут: они детерминированы, дёшевы
       // и пересчитываются на каждом прогоне заново.
       if (cfg.incremental?.enabled) {
-        const carryable = allFindings.filter((f) => !f.prescan && f.source !== BLAST_FINDING_SOURCE);
+        // Находка, до которой verifier не дошёл (сбой — RFC 18, кап — RFC 17), не переносится,
+        // а её файл не получает хэш: перенос считает находку прошедшей verifier и заново её не
+        // проверяет. Иначе «перезапустите ревью» после degraded-блока переносил бы непроверенный
+        // critical как minor без LLM и без verifier — и merge проходил бы.
+        const unverifiedPaths = new Set(allFindings
+          .filter((f) => f.verifierStatus === 'unavailable' || f.verifierStatus === 'overflow')
+          .map((f) => f.file));
+        const carryable = allFindings.filter((f) => !f.prescan && f.source !== BLAST_FINDING_SOURCE
+          && !unverifiedPaths.has(f.file));
+        if (unverifiedPaths.size) log(`инкрементальность: ${unverifiedPaths.size} файл(ов) с непроверенными verifier'ом находками — в следующем прогоне ревьюятся заново`);
         await writeIncrementalState(cfg.incremental.stateFile, {
           pr: pr.number,
           headSha,
           configFp,
           // Счётчик прогонов подряд без полного: страховка от накопления дрейфа.
           sinceFull: incrementalPlan.mode === 'incremental' ? Number(priorIncremental?.sinceFull || 0) + 1 : 0,
-          hashes: inputHashes,
+          hashes: unverifiedPaths.size
+            ? Object.fromEntries(Object.entries(inputHashes).filter(([p]) => !unverifiedPaths.has(p)))
+            : inputHashes,
           // Вход карточек по файлам — чтобы сбой графа в следующем прогоне не менял хэши.
           ...(cardsInput?.size ? { cardsInput: Object.fromEntries(cardsInput), cardsTargets } : {}),
           ...(cardsInputReused ? { cardsInputReused: true } : {}),

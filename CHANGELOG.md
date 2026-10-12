@@ -52,6 +52,8 @@ last_updated: 2026-09-10
 - `buildSummary` (JS и Rust): вход `verifierUnavailable`, заголовок «⛔ ревью не завершено», баннер;
   `verdict.blocked` и `blocked` в истории прогонов учитывают degraded-блок.
 - Событие `verifier_unavailable {reason, unverified}`.
+- Инкрементальный state: файл с находкой `unavailable`/`overflow` не получает хэш, находка не
+  переносится — перезапуск ревьюит файл заново, а не переносит непроверенное как minor.
 
 ### Исправлено — дыры гейта (RFC 17)
 

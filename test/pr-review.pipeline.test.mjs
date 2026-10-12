@@ -712,6 +712,38 @@ test('инкрементально: перенесённый блокер пер
   }
 });
 
+test('инкрементально: находка без вердикта из-за сбоя verifier не переносится — файл ревьюится заново (RFC 18)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr-vu-'));
+  const stateFile = join(dir, 'state.json');
+  const env = { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateFile, REVIEW_VERIFIER: '1' };
+  try {
+    const first = await runPipeline({
+      diff: TWO_FILE_DIFF, reviews: [structuredClone(barCritical)], env,
+      verifyFindings: async () => { throw new Error('503'); },
+    });
+    assert.equal(first.code, 1, 'degraded-блок: verifier недоступен');
+
+    const reviewedPaths = [];
+    const second = await runPipeline({
+      diff: TWO_FILE_DIFF_V2, reviews: [structuredClone(barCritical)], env,
+      verifyFindings: async (c) => c.map((_, i) => ({ candidateIndex: i, decision: 'verified' })),
+      mutateDeps: (deps) => {
+        const inner = deps.engine.reviewAllModels;
+        deps.engine.reviewAllModels = async (chunks, ctx) => {
+          for (const c of chunks) reviewedPaths.push(...(c.paths || []));
+          return inner(chunks, ctx);
+        };
+      },
+    });
+    assert.ok(reviewedPaths.includes('bar.ts'),
+      'bar.ts не изменился, но его находка не прошла verifier — файл обязан уйти в LLM заново, а не в перенос');
+    assert.equal(second.code, 1);
+    assert.ok(second.calls.upsertSticky[0].includes('нужны правки'), 'теперь блокер подтверждён verifier\'ом');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Порог допуска advisory к verifier'у (P1, docs/review-quality.md §2.2)
 // ---------------------------------------------------------------------------
