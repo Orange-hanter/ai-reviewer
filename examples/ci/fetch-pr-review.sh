@@ -11,6 +11,7 @@
 # Релиз <tag> обязан содержать:
 #   SHA256SUMS                         строки `<sha256-hex>  <имя-файла>` (формат sha256sum)
 #   pr-review-<target-triple>.tar.gz   в корне архива — исполняемый файл `pr-review`
+#                                      (член архива `pr-review`; `./pr-review` тоже принимается)
 # Цепочка доверия: пин → SHA256SUMS → архив. Бинарь распаковывается только после того,
 # как обе сверки сошлись; до этого он не существует на диске.
 #
@@ -19,12 +20,14 @@
 #
 # Семантика выхода — две разные политики, и смешивать их нельзя:
 #   exit 0, bin=   — FAIL-OPEN: инфраструктура поставки недоступна (пин пуст — bootstrap,
-#                    релиз/сеть не отвечают, платформа раннера не собирается, нет sha256-
-#                    утилиты). Это та же политика, что у движка: недоступность ревью не
-#                    блокирует чужой merge.
-#   exit 1         — FAIL-CLOSED: хэш не сошёлся или пин битый. Это не сбой ревью, а сигнал
-#                    подмены артефакта (или ошибка в пине базовой ветки): тихо пропустить
-#                    его значило бы, что подменённый релиз выключает гейт незаметно.
+#                    сеть или сервер релизов не отвечают — нет HTTP-ответа, 5xx, 429, —
+#                    платформа раннера не собирается, нет sha256-утилиты). Это та же
+#                    политика, что у движка: недоступность ревью не блокирует чужой merge.
+#   exit 1         — FAIL-CLOSED: хэш не сошёлся, пин битый или заглушка, релиза по пину нет
+#                    (HTTP 404/410), сверенный архив собран не по контракту. Это не аутедж,
+#                    а подмена артефакта или ошибка конфигурации: релиз ответил, и ответ
+#                    противоречит пину. Тихий пропуск здесь превратил бы опечатку в теге,
+#                    удалённый релиз или подменённый артефакт в незаметный выключатель гейта.
 #
 # Переменные (для тестов и зеркал; в CI оставить по умолчанию):
 #   AI_REVIEWER_RELEASE_URL  база загрузки, по умолчанию
@@ -47,6 +50,9 @@ emit_bin() {
 # Fail-open: ревью пропускается, merge не блокируется.
 skip() {
   log "$* — ревью пропускается (fail-open, merge не блокируется)"
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    printf '::warning::AI-ревью пропущено: %s\n' "$*" >&2
+  fi
   emit_bin ''
   exit 0
 }
@@ -54,6 +60,9 @@ skip() {
 # Fail-closed: подмена артефакта или битый пин.
 die() {
   log "ОШИБКА: $*"
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    printf '::error::fetch-pr-review: %s\n' "$*" >&2
+  fi
   emit_bin ''
   exit 1
 }
@@ -76,6 +85,9 @@ fi
 [[ "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "недопустимый тег в пине: «$tag»"
 [[ "$sums_pin" =~ ^sha256:[0-9a-f]{64}$ ]] || die "второе поле пина должно быть sha256:<64 hex в нижнем регистре>, получено «$sums_pin»"
 sums_pin=${sums_pin#sha256:}
+# Хэш из одних нулей — заглушка kit до публикации релиза, а не значение из SHA256SUMS.
+[[ ! "$sums_pin" =~ ^0{64}$ ]] \
+  || die "пин $pin_file — заглушка (sha256 из нулей): впишите sha256 SHA256SUMS релиза $tag"
 
 # --- 2. Платформа и инструменты -------------------------------------------------------------
 os=${AI_REVIEWER_UNAME_S:-$(uname -s)}
@@ -105,14 +117,30 @@ command -v tar >/dev/null 2>&1 || skip "нет tar"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+# fetch <файл-релиза> <куда>: 0 — скачан; 1 — релиз ответил «нет такого файла» (HTTP 404/410,
+# у file:// — curl exit 37); 2 — недоступность (нет HTTP-ответа, 5xx, 429 и прочее).
+# Различие и есть граница политик: «нет файла» — это ответ, противоречащий пину (опечатка в
+# теге, удалённый или ещё не опубликованный релиз), и он fail-closed; «не ответил» — аутедж.
 fetch() {
-  curl -fsSL --proto '=https,file' --proto-redir '=https' --retry 3 \
-    --connect-timeout 20 --max-time 300 -o "$2" "$base_url/$tag/$1"
+  local code rc=0
+  code=$(curl -fsSL --proto '=https,file' --proto-redir '=https' --retry 3 \
+    --connect-timeout 20 --max-time 300 -w '%{http_code}' -o "$2" "$base_url/$tag/$1") || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  case "$rc:$code" in
+    37:*|22:404|22:410) return 1 ;;
+  esac
+  log "curl exit $rc, HTTP ${code:-000} на $base_url/$tag/$1"
+  return 2
 }
 
 # --- 3. SHA256SUMS ← пин --------------------------------------------------------------------
 log "релиз $tag, платформа $triple"
-fetch SHA256SUMS "$work/SHA256SUMS" || skip "SHA256SUMS релиза $tag не скачался"
+rc=0; fetch SHA256SUMS "$work/SHA256SUMS" || rc=$?
+case "$rc" in
+  0) ;;
+  1) die "в релизах нет $tag/SHA256SUMS (HTTP 404): тег в пине с опечаткой, релиз удалён или ещё не опубликован" ;;
+  *) skip "SHA256SUMS релиза $tag не скачался" ;;
+esac
 sums_actual=$(sha256_of "$work/SHA256SUMS")
 [ "$sums_actual" = "$sums_pin" ] \
   || die "sha256 SHA256SUMS релиза $tag = $sums_actual, а пин требует $sums_pin. Релиз подменён или пин устарел — бинарь не запускаем"
@@ -122,17 +150,27 @@ sums_actual=$(sha256_of "$work/SHA256SUMS")
 asset_sum=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1; exit }' "$work/SHA256SUMS")
 [ -n "$asset_sum" ] || skip "в SHA256SUMS релиза $tag нет $asset — платформа не собрана"
 [[ "$asset_sum" =~ ^[0-9a-f]{64}$ ]] || die "строка $asset в SHA256SUMS битая: «$asset_sum»"
-fetch "$asset" "$work/$asset" || skip "$asset релиза $tag не скачался"
+rc=0; fetch "$asset" "$work/$asset" || rc=$?
+case "$rc" in
+  0) ;;
+  1) die "$asset указан в сверенном SHA256SUMS, но в релизе $tag его нет (HTTP 404) — релиз неполон" ;;
+  *) skip "$asset релиза $tag не скачался" ;;
+esac
 asset_actual=$(sha256_of "$work/$asset")
 [ "$asset_actual" = "$asset_sum" ] \
   || die "sha256 $asset = $asset_actual, а SHA256SUMS требует $asset_sum. Артефакт подменён — бинарь не запускаем"
 
 # --- 5. Распаковка только сверенного -------------------------------------------------------
+# Архив уже сверен: его дефект — ошибка сборки релиза, а не аутедж, поэтому die. Член ищем
+# по списку: `tar -czf … -C dir .` даёт `./pr-review`, и GNU tar по имени `pr-review` его
+# не найдёт (bsdtar найдёт) — принимаем оба написания.
+member=$(tar -tzf "$work/$asset" 2>/dev/null | awk '$0 == "pr-review" || $0 == "./pr-review" { print; exit }') || true
+[ -n "$member" ] || die "в $asset нет файла pr-review в корне — релиз собран не по контракту"
 mkdir -p "$work/x"
-tar -xzf "$work/$asset" -C "$work/x" pr-review 2>/dev/null \
-  || skip "в $asset нет файла pr-review в корне — релиз собран не по контракту"
+tar -xzf "$work/$asset" -C "$work/x" "$member" 2>/dev/null \
+  || die "$asset не распаковался — релиз собран не по контракту"
 [ -f "$work/x/pr-review" ] && [ ! -L "$work/x/pr-review" ] \
-  || skip "pr-review в $asset — не обычный файл"
+  || die "pr-review в $asset — не обычный файл"
 mkdir -p "$dest"
 dest=$(CDPATH='' cd -- "$dest" && pwd)
 rm -f "$dest/pr-review"

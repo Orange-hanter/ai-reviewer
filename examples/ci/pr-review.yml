@@ -108,9 +108,9 @@ jobs:
 
       # ЗАЩИТА ОТ pwn-request: движок — prebuilt-бинарь pr-review из релиза Orange-hanter/ai-reviewer.
       # Пин (ops/ai-reviewer-ref, «<tag> sha256:<sha256 SHA256SUMS>») и скрипт сверки
-      # (ops/ai-review/fetch-pr-review.sh) читаются из BASE-ветки через git show — код из чекаута
-      # PR не исполняется ни здесь, ни с секретами ниже. PR, правящий пин или скрипт, поменяет их
-      # только ПОСЛЕ мержа (и это видно в диффе). Секретов у шага нет: релиз публичный.
+      # (ops/ai-review/fetch-pr-review.sh) читаются из BASE-ветки через git show — PR не выбирает
+      # ни версию движка, ни код сверки; поменяет их только ПОСЛЕ мержа (и это видно в диффе).
+      # Секретов у шага нет: релиз публичный. Код PR при этом исполняется в шаге ревью — см. ниже.
       #
       # Поставка и ревью живут по разным политикам:
       #   • недоступность поставки (пустой пин/bootstrap, релиз или сеть не отвечают, платформа
@@ -129,6 +129,12 @@ jobs:
           rm -rf "$ENGINE" && mkdir -p "$ENGINE"
           git show "origin/$BASE_REF:ops/ai-reviewer-ref" > "$ENGINE/ref" 2>/dev/null || : > "$ENGINE/ref"
           if ! git show "origin/$BASE_REF:ops/ai-review/fetch-pr-review.sh" > "$ENGINE/fetch-pr-review.sh" 2>/dev/null; then
+            # Пин нового формата без скрипта сверки — не bootstrap, а пропущенный шаг подключения:
+            # тихий пропуск сделал бы required-check вечно зелёным без ревью.
+            if grep -Eq '^[^[:space:]]+[[:space:]]+sha256:' "$ENGINE/ref"; then
+              echo "::error::в origin/$BASE_REF пин нового формата, но нет ops/ai-review/fetch-pr-review.sh — скопируйте examples/ci/fetch-pr-review.sh (docs/integration.md §1)"
+              exit 1
+            fi
             echo "→ ops/ai-review/fetch-pr-review.sh отсутствует в origin/$BASE_REF (bootstrap-PR) — ревью пропускаем"
             echo "bin=" >> "$GITHUB_OUTPUT"
             exit 0
@@ -138,6 +144,11 @@ jobs:
       # БЕЗ continue-on-error: бинарь выходит 1 ТОЛЬКО на подтверждённых блокерах critical/major
       # (REVIEW_BLOCK_ON); инфра-сбой внутри ревью — exit 0 (fail-open движка), джоб зелёный,
       # merge не блокируется. Секреты выставлены ТОЛЬКО этому шагу — шагу запуска сверенного бинаря.
+      # ОСТАТОЧНЫЙ РИСК: с REVIEW_PRESCAN=1 бинарь запускает app/node_modules/.bin/eslint (поставлен
+      # npm ci по lock-файлу PR) с flat-config app/eslint.config.js из PR, а GRAPHIFY_BIN — из
+      # рабочего дерева; дочерние процессы наследуют env шага, то есть секреты ниже. PR из форков
+      # секретов не получают; PR из этого же репозитория — получают. Где авторы PR не доверены
+      # наравне с владельцами секретов — REVIEW_PRESCAN: '0' и без GRAPHIFY_BIN (docs/integration.md).
       - name: Run AI review
         if: steps.engine.outputs.bin != ''
         env:

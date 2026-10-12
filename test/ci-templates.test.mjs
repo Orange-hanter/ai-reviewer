@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -480,6 +480,8 @@ async function makeRelease({
   binaryMode = false,
   tamperAsset = null,
   noRelease = false,
+  dropAsset = null,
+  member = 'pr-review',
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'fake-release-'));
   const relDir = join(root, TAG);
@@ -490,7 +492,11 @@ async function makeRelease({
     await writeFile(join(src, 'pr-review'), `#!/bin/sh\necho "fake-pr-review ${triple} $*"\n`);
     await chmod(join(src, 'pr-review'), 0o755);
     const asset = `pr-review-${triple}.tar.gz`;
-    const tar = spawnSync('tar', ['-czf', join(relDir, asset), '-C', src, 'pr-review'], { encoding: 'utf8' });
+    // member: '.' — упаковка каталогом (члены `./pr-review`), 'other' — архив без pr-review.
+    const tarArgs = member === 'other'
+      ? ['-czf', join(relDir, asset), '-C', join(src, '..'), basename(src)]
+      : ['-czf', join(relDir, asset), '-C', src, member];
+    const tar = spawnSync('tar', tarArgs, { encoding: 'utf8' });
     assert.equal(tar.status, 0, tar.stderr);
     if (sumsTriples.includes(triple)) {
       sums.push(`${sha256(await readFile(join(relDir, asset)))}${binaryMode ? ' *' : '  '}${asset}`);
@@ -502,11 +508,12 @@ async function makeRelease({
     // Архив подменён ПОСЛЕ того, как SHA256SUMS посчитан (и закреплён пином).
     await writeFile(join(relDir, `pr-review-${tamperAsset}.tar.gz`), 'evil');
   }
+  if (dropAsset) await rm(join(relDir, `pr-review-${dropAsset}.tar.gz`));
   if (noRelease) await rm(relDir, { recursive: true, force: true });
   return { root, pin: `${TAG} sha256:${sha256(sumsText)}` };
 }
 
-async function runFetch({ root, pin, env = LINUX_X64, pinFile = true }) {
+async function runFetch({ root, pin, env = LINUX_X64, pinFile = true, url = null }) {
   const dir = await mkdtemp(join(tmpdir(), 'fetch-run-'));
   const pinPath = join(dir, 'ai-reviewer-ref');
   if (pinFile) await writeFile(pinPath, `${pin}\n`);
@@ -519,7 +526,7 @@ async function runFetch({ root, pin, env = LINUX_X64, pinFile = true }) {
     env: {
       ...process.env,
       ...env,
-      AI_REVIEWER_RELEASE_URL: pathToFileURL(root).href,
+      AI_REVIEWER_RELEASE_URL: url ?? pathToFileURL(root).href,
       GITHUB_OUTPUT: out,
     },
   });
@@ -561,9 +568,9 @@ test('fetch-pr-review.sh: SHA256SUMS не совпал с пином → exit 1,
   const missing = fetchToolsMissing();
   if (missing) return t.skip(`${missing} недоступен`);
   const release = await makeRelease();
-  const res = await runFetch({ ...release, pin: `${TAG} sha256:${'0'.repeat(64)}` });
+  const res = await runFetch({ ...release, pin: `${TAG} sha256:${sha256('другой релиз')}` });
   assert.equal(res.status, 1, res.stderr);
-  assert.match(res.stderr, /SHA256SUMS/);
+  assert.match(res.stderr, /sha256 SHA256SUMS/);
   assert.deepEqual(res.outputs, ['bin=']);
   assert.equal(res.exists, false, 'бинарь не должен появиться до/без сверки');
 });
@@ -599,15 +606,17 @@ test('fetch-pr-review.sh: неизвестная платформа → проп
   assert.match(partial.stderr, /платформа не собрана/);
 });
 
-test('fetch-pr-review.sh: релиз недоступен или пин пуст → пропуск (fail-open)', async (t) => {
+test('fetch-pr-review.sh: сервер релизов не отвечает или пин пуст → пропуск (fail-open)', async (t) => {
   const missing = fetchToolsMissing();
   if (missing) return t.skip(`${missing} недоступен`);
-  const gone = await runFetch(await makeRelease({ noRelease: true }));
-  assert.equal(gone.status, 0, gone.stderr);
-  assert.deepEqual(gone.outputs, ['bin=']);
-  assert.match(gone.stderr, /не скачался/);
-
   const release = await makeRelease();
+  // Нет HTTP-ответа вовсе (connection refused на loopback) — аутедж, а не ответ «нет файла».
+  const down = await runFetch({ ...release, url: 'https://127.0.0.1:1/releases/download' });
+  assert.equal(down.status, 0, down.stderr);
+  assert.deepEqual(down.outputs, ['bin=']);
+  assert.match(down.stderr, /не скачался/);
+  assert.equal(down.exists, false);
+
   const empty = await runFetch({ ...release, pin: '' });
   assert.equal(empty.status, 0, empty.stderr);
   assert.deepEqual(empty.outputs, ['bin=']);
@@ -615,6 +624,106 @@ test('fetch-pr-review.sh: релиз недоступен или пин пуст
   const absent = await runFetch({ ...release, pinFile: false });
   assert.equal(absent.status, 0, absent.stderr);
   assert.deepEqual(absent.outputs, ['bin=']);
+});
+
+test('fetch-pr-review.sh: релиза по тегу пина нет (404) → exit 1, а не тихий пропуск', async (t) => {
+  const missing = fetchToolsMissing();
+  if (missing) return t.skip(`${missing} недоступен`);
+  // Опечатка в теге, удалённый или ещё не опубликованный релиз: сервер ответил, и ответ
+  // противоречит пину. Пропуск здесь выключал бы гейт у всех потребителей без сигнала.
+  const gone = await runFetch(await makeRelease({ noRelease: true }));
+  assert.equal(gone.status, 1, gone.stderr);
+  assert.deepEqual(gone.outputs, ['bin=']);
+  assert.match(gone.stderr, /нет v9\.9\.9\/SHA256SUMS/);
+  // SHA256SUMS сверен и называет архив, а архива в релизе нет.
+  const partial = await runFetch(await makeRelease({ dropAsset: 'x86_64-unknown-linux-gnu' }));
+  assert.equal(partial.status, 1, partial.stderr);
+  assert.match(partial.stderr, /релиз неполон/);
+  assert.equal(partial.exists, false);
+});
+
+test('fetch-pr-review.sh: член архива ./pr-review принимается, архив без pr-review → exit 1', async (t) => {
+  const missing = fetchToolsMissing();
+  if (missing) return t.skip(`${missing} недоступен`);
+  // `tar -czf … -C dir .` — привычная упаковка; GNU tar по имени `pr-review` такой член не найдёт.
+  const dot = await runFetch(await makeRelease({ member: '.' }));
+  assert.equal(dot.status, 0, dot.stderr);
+  assert.deepEqual(dot.outputs, [`bin=${dot.binary}`]);
+  assert.equal(spawnSync(dot.binary, ['review'], { encoding: 'utf8' }).stdout.trim(),
+    'fake-pr-review x86_64-unknown-linux-gnu review');
+  // Сверенный архив не по контракту — ошибка сборки релиза, не аутедж.
+  const other = await runFetch(await makeRelease({ member: 'other' }));
+  assert.equal(other.status, 1, other.stderr);
+  assert.match(other.stderr, /нет файла pr-review в корне/);
+  assert.deepEqual(other.outputs, ['bin=']);
+  assert.equal(other.exists, false);
+});
+
+test('fetch-pr-review.sh: пин-заглушка kit (хэш из нулей) → exit 1 ещё до сети', async (t) => {
+  const missing = fetchToolsMissing();
+  if (missing) return t.skip(`${missing} недоступен`);
+  const kitPin = resolve(REPO_ROOT, 'examples/consumers/orakul/ai-reviewer-ref');
+  const pin = (await readFile(kitPin, 'utf8')).trim();
+  // Релиз, который совпал бы по тегу, есть — заглушку отвергает сама проверка пина.
+  const release = await makeRelease();
+  const res = await runFetch({ ...release, pin: pin.replace(/^\S+/, TAG) });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /заглушка/);
+  assert.deepEqual(res.outputs, ['bin=']);
+  // И с тегом kit как есть, на пустом «зеркале» — тоже красный, а не пропуск.
+  const asIs = await runFetch({ root: await mkdtemp(join(tmpdir(), 'empty-rel-')), pin });
+  assert.equal(asIs.status, 1, asIs.stderr);
+});
+
+test('pr-review.yml: bootstrap — пропуск только без пина нового формата', async (t) => {
+  if (spawnSync('git', ['--version']).error) return t.skip('git недоступен');
+  const script = workflowStepScript(await readWorkflow('pr-review.yml'), FETCH_STEP);
+  // Базовая ветка без скрипта сверки; пин — разный. git show читает origin/main.
+  const runStep = async (pin) => {
+    const repo = await mkdtemp(join(tmpdir(), 'bootstrap-'));
+    const git = (...args) => {
+      const res = spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
+      assert.equal(res.status, 0, res.stderr);
+    };
+    git('init', '-q');
+    await mkdir(join(repo, 'ops'), { recursive: true });
+    if (pin !== null) await writeFile(join(repo, 'ops/ai-reviewer-ref'), `${pin}\n`);
+    await writeFile(join(repo, 'README'), 'x\n');
+    git('add', '-A');
+    git('commit', '-qm', 'base');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const runnerTemp = await mkdtemp(join(tmpdir(), 'runner-temp-'));
+    const out = join(runnerTemp, 'github-output');
+    await writeFile(out, '');
+    const res = spawnSync('bash', ['-c', `set -eo pipefail\n${script}`], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, BASE_REF: 'main', RUNNER_TEMP: runnerTemp, GITHUB_OUTPUT: out },
+    });
+    return { ...res, outputs: (await readFile(out, 'utf8')).split('\n').filter(Boolean) };
+  };
+  for (const pin of [null, '', 'v0.4.0']) {
+    const res = await runStep(pin);
+    assert.equal(res.status, 0, `пин ${JSON.stringify(pin)}: ${res.stderr}`);
+    assert.deepEqual(res.outputs, ['bin=']);
+  }
+  // Пин нового формата есть, скрипта нет — шаг подключения пропущен: красный, а не вечный пропуск.
+  const broken = await runStep(`v9.9.9 sha256:${'a'.repeat(64)}`);
+  assert.equal(broken.status, 1, broken.stdout);
+  assert.match(broken.stdout, /::error::.*fetch-pr-review\.sh/);
+});
+
+test('граница доверия: шаблон и docs не обещают, что код PR не исполняется с секретами', async () => {
+  // prescan запускает eslint из node_modules PR с его flat-config, GRAPHIFY_BIN — из дерева PR;
+  // дочерние процессы наследуют env шага с секретами. Обещание обратного — ложный инвариант.
+  const workflow = await readWorkflow('pr-review.yml');
+  const run = workflowSteps(workflow).find((step) => step.name === 'Run AI review');
+  assert.equal(run.env.REVIEW_PRESCAN, '1');
+  assert.doesNotMatch(workflow, /не исполняется ни здесь, ни с секретами/);
+  assert.match(workflow, /ОСТАТОЧНЫЙ РИСК:.*REVIEW_PRESCAN=1/);
+  const docs = await readFile(resolve(REPO_ROOT, 'docs/integration.md'), 'utf8');
+  assert.doesNotMatch(docs, /вредоносный PR не выполнит свой код с секретами/);
+  assert.match(docs, /^### Секреты и код PR$/m);
 });
 
 test('fetch-pr-review.sh: пин старого формата или битый → exit 1', async (t) => {
