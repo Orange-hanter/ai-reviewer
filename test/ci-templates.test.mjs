@@ -635,3 +635,8 @@ test('fetch-pr-review.sh: пин старого формата или битый
     assert.equal(res.exists, false);
   }
 });
+
+test('kit Orakul: пин нового формата «<tag> sha256:<64 hex>»', async () => {
+  const pin = (await readFile(resolve(REPO_ROOT, 'examples/consumers/orakul/ai-reviewer-ref'), 'utf8')).trim();
+  assert.match(pin, /^v\d+\.\d+\.\d+ sha256:[0-9a-f]{64}$/);
+});
