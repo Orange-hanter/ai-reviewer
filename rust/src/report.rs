@@ -1124,6 +1124,26 @@ fn counts_object() -> serde_json::Map<String, Value> {
     m
 }
 
+/// Баннер «verifier недоступен» (RFC 18) — паритетно verifierUnavailableBannerJs.
+fn verifier_unavailable_banner(vu: &Value) -> String {
+    let reason = tmpl(vu.get("reason"));
+    let unverified = vu.get("unverified").and_then(Value::as_f64).unwrap_or(0.0);
+    let n = format!(
+        "{} замечани{} уровня блока",
+        tmpl(vu.get("unverified")),
+        if unverified == 1.0 { "е" } else { "й" },
+    );
+    if vu.get("blocked").and_then(Value::as_bool).unwrap_or(false) {
+        format!(
+            "> ⛔ **Merge заблокирован: verifier недоступен** ({reason}) — {n} не проверены вторым судьёй и показаны как minor. Перезапустите ревью. Пропускать merge при сбое verifier — `REVIEW_LLM_REQUIRED=0`.\n\n"
+        )
+    } else {
+        format!(
+            "> ⚠️ **Verifier недоступен** ({reason}) — {n} не проверены и понижены до minor; merge не блокируется (`REVIEW_LLM_REQUIRED=0`).\n\n"
+        )
+    }
+}
+
 /// Полный sticky (buildSummary). cfg — slim-конфиг (SummaryCfg::from_value),
 /// input — сериализованный input pipeline'а (см. шапку модуля), markers —
 /// MARKERS.review/dataKey активного профиля (аргументом, как MARKERS.inline
@@ -1147,6 +1167,12 @@ pub fn build_summary(
     let blast_metrics = input.get("blastMetrics").filter(|v| v.is_object());
     let note = str_coalesce(input.get("note"), "");
     let head_sha = input.get("headSha");
+    // Verifier недоступен (RFC 18): {reason, unverified, blocked} или null.
+    let verifier_unavailable = input.get("verifierUnavailable").filter(|v| v.is_object());
+    let degraded = verifier_unavailable
+        .and_then(|v| v.get("blocked"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     // Тексты файлов диффа (для запасного fp) — карта из обёртки.
     let texts: BTreeMap<String, LineText> = match file_texts {
@@ -1178,6 +1204,8 @@ pub fn build_summary(
     let total = all_findings.len();
     let verdict_ru = if blocking > 0 {
         "🔴 нужны правки"
+    } else if degraded {
+        "⛔ ревью не завершено"
     } else if total > 0 {
         "💬 есть замечания"
     } else {
@@ -1206,7 +1234,7 @@ pub fn build_summary(
     let mut md = format!("{review_marker}\n## 🤖 Авто код-ревью — {verdict_ru}\n\n");
     if blocking > 0 {
         md.push_str(&format!(
-            "> ⛔ **Merge заблокирован:** {} замечани{}. Правило блокировки: {rule_note}. Исправьте (или ослабьте `REVIEW_BLOCK_ON`/`REVIEW_BLOCK_SINGLE`/`REVIEW_CONSENSUS`). Инфра-сбои merge не блокируют.\n\n",
+            "> ⛔ **Merge заблокирован:** {} замечани{}. Правило блокировки: {rule_note}. Исправьте (или ослабьте `REVIEW_BLOCK_ON`/`REVIEW_BLOCK_SINGLE`/`REVIEW_CONSENSUS`).\n\n",
             blocking,
             if blocking == 1 { "е" } else { "й" },
         ));
@@ -1227,6 +1255,9 @@ pub fn build_summary(
                 cfg.gate_block_on.join("/"),
             ));
         }
+    }
+    if let Some(vu) = verifier_unavailable {
+        md.push_str(&verifier_unavailable_banner(vu));
     }
 
     md.push_str(&build_walkthrough_section(Some(&Value::Array(reviews.to_vec())))?);
@@ -1329,7 +1360,7 @@ pub fn build_summary(
     if let Some(v) = stability {
         current_run.insert("stability".into(), json!(v));
     }
-    current_run.insert("blocked".into(), Value::Bool(blocking > 0));
+    current_run.insert("blocked".into(), Value::Bool(blocking > 0 || degraded));
     let current_run = Value::Object(current_run);
 
     md.push_str(&build_delta_section(
@@ -1637,7 +1668,7 @@ pub fn build_summary(
 
     let mut verdict = serde_json::Map::new();
     verdict.insert("sha".into(), json!(sha7));
-    verdict.insert("blocked".into(), Value::Bool(blocking > 0));
+    verdict.insert("blocked".into(), Value::Bool(blocking > 0 || degraded));
     verdict.insert("reproducibility".into(), match reproducibility {
         None => Value::Null,
         Some(r) => json!({"total": r.total, "blocked": r.blocked, "flaky": r.flaky}),

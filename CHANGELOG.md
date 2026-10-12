@@ -34,8 +34,24 @@ last_updated: 2026-09-10
 - **Verifier проверяет блокеры сверх `REVIEW_VERIFIER_MAX` батчами** (новая
   `REVIEW_VERIFIER_BATCHES`, дефолт `3`) вместо молчаливого понижения в minor. Прежнее
   поведение — `REVIEW_VERIFIER_BATCHES=1`.
+- **Сбой verifier'а — одно состояние «недоступен»** (RFC 18). Раньше упавший HTTP-вызов
+  блокировал merge по слову агрегатора, а пустой ответ модели молча пропускал. Теперь находка
+  уровня блока без вердикта из-за сбоя показывается как minor с пометкой, а прогон при
+  `REVIEW_LLM_REQUIRED=1` (дефолт) блокируется как degraded с баннером «verifier недоступен —
+  перезапустите». Пропускать merge при сбое — `REVIEW_LLM_REQUIRED=0`; прежнее поведение
+  целиком — `REVIEW_VERIFIER_STRICT=0`. Из баннера блока убрана неверная фраза «Инфра-сбои
+  merge не блокируют».
 - Формат футера sticky, namespace маркеров, контракты `swarm` / `export` / `structure` —
   без изменений.
+
+### Исправлено — сбой verifier'а (RFC 18)
+
+- `markVerifierUnavailable` (`pipeline.mjs`): исключение первого вызова, ни одного валидного
+  вердикта, тайм-бюджет и сбой хвостового батча → `verifierStatus: unavailable`, severity → minor;
+  `degradedBlock` по `REVIEW_LLM_REQUIRED` в коде выхода, `wouldBlock`, событиях `gate`/`verdict`.
+- `buildSummary` (JS и Rust): вход `verifierUnavailable`, заголовок «⛔ ревью не завершено», баннер;
+  `verdict.blocked` и `blocked` в истории прогонов учитывают degraded-блок.
+- Событие `verifier_unavailable {reason, unverified}`.
 
 ### Исправлено — дыры гейта (RFC 17)
 

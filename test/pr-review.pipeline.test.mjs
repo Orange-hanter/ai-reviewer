@@ -811,3 +811,68 @@ test('pipeline: runDetailed отдаёт артефакт с cli.headSha на fi
     await rm(tmp, { force: true });
   }
 });
+
+// RFC 18: сбой verifier'а — одно состояние «недоступен» вместо исхода, зависящего от вида сбоя.
+// Раньше: исключение → блок по слову агрегатора без строки verifier в sticky; пустой ответ →
+// critical молча понижен, merge проходит.
+const VU_ENV = { REVIEW_VERIFIER: '1' };
+// Пайплайн мутирует находки (verifier понижает severity) — каждому прогону свежая копия.
+const freshCritical = () => structuredClone(criticalReview);
+const verifierFailures = {
+  'исключение (сеть/5xx)': async () => { throw new Error('503'); },
+  'пустой ответ': async () => [],
+  'вердикты с чужими индексами': async () => [{ candidateIndex: 7, decision: 'verified' }],
+};
+for (const [label, verifyFindings] of Object.entries(verifierFailures)) {
+  test(`pipeline: verifier недоступен (${label}) → degraded-блок, critical не выдаётся за подтверждённый`, async () => {
+    const { code, calls } = await runPipeline({ diff: CODE_DIFF, reviews: [freshCritical()], verifyFindings, env: VU_ENV });
+    assert.equal(code, 1, 'REVIEW_LLM_REQUIRED=1 (дефолт): merge заблокирован до перезапуска');
+    const md = calls.upsertSticky[0];
+    assert.ok(md.includes('⛔ ревью не завершено'), md.slice(0, 300));
+    assert.ok(md.includes('Merge заблокирован: verifier недоступен'));
+    assert.ok(md.includes('🔴0'), 'непроверенный critical не считается блокером');
+    assert.ok(!md.includes('нужны правки'));
+  });
+}
+
+test('pipeline: verifier недоступен + REVIEW_LLM_REQUIRED=0 → fail-open с заметкой', async () => {
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF, reviews: [freshCritical()], env: { ...VU_ENV, REVIEW_LLM_REQUIRED: '0' },
+    verifyFindings: async () => { throw new Error('503'); },
+  });
+  assert.equal(code, 0);
+  const md = calls.upsertSticky[0];
+  assert.ok(md.includes('⚠️ **Verifier недоступен**'));
+  assert.ok(md.includes('merge не блокируется'));
+});
+
+test('pipeline: тайм-бюджет перед verifier → то же состояние «недоступен»', async () => {
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF, reviews: [freshCritical()], env: { ...VU_ENV, REVIEW_TIME_BUDGET_MIN: '1' },
+    verifyFindings: async (c) => c.map((_, i) => ({ candidateIndex: i, decision: 'verified' })),
+  });
+  assert.equal(code, 1);
+  assert.ok(calls.upsertSticky[0].includes('verifier недоступен** (time_budget)'));
+});
+
+test('pipeline: REVIEW_VERIFIER_STRICT=0 — сбой verifier ведёт себя как раньше (доверие агрегатору)', async () => {
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF, reviews: [freshCritical()], env: { ...VU_ENV, REVIEW_VERIFIER_STRICT: '0' },
+    verifyFindings: async () => { throw new Error('503'); },
+  });
+  assert.equal(code, 1, 'critical остаётся и блокирует');
+  const md = calls.upsertSticky[0];
+  assert.ok(md.includes('нужны правки'));
+  assert.ok(!md.includes('verifier недоступен'));
+});
+
+test('pipeline: verifier без кандидатов уровня блока — его сбой гейт не трогает', async () => {
+  const minorOnly = freshCritical();
+  minorOnly.findings[0].severity = 'minor';
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF, reviews: [minorOnly], env: VU_ENV,
+    verifyFindings: async () => { throw new Error('503'); },
+  });
+  assert.equal(code, 0);
+  assert.ok(!calls.upsertSticky[0].includes('verifier недоступен'));
+});
