@@ -206,8 +206,11 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `GRAPHIFY_REPORT` | `.graphify/graphify-out/GRAPH_REPORT.md` | Отчёт графа |
 | `REVIEW_GRAPHIFY_DEPTH` | `2` | `--depth` для `graphify affected` (clamp 1…5) |
 | `REVIEW_GRAPHIFY_DROP_AMBIGUOUS` | `1` | `0`/`false`/`no`/`off` — оставлять AMBIGUOUS-рёбра в blast |
+| `REVIEW_BLAST_REQUIRED` | `0` | `1` — blast-radius не посчитан (нет/не читается `graph.json`, все запросы `affected` упали) → exit 1 до LLM, sticky с причиной (fail-closed). Шаблон `examples/ci/pr-review.yml` ставит `1` |
 
-Нет графа → blast-radius пустой, ревью продолжается.
+Нет графа → blast-radius пустой, ревью продолжается (при `REVIEW_BLAST_REQUIRED=1` — блок).
+Устаревший граф (`graph_stale`), неразрешённые символы и «зависимых нет» сбоем не считаются.
+Маршруты router `skip`/`light` graph не требуют: blast-radius там не строится.
 
 Движок после `affected` обогащает ответ из `graph.json`: имя caller, confidence
 (`EXTRACTED`/`INFERRED`), community (cross-community сильнее layer-эвристик). В метриках —

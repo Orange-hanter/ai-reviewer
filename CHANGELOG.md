@@ -17,8 +17,22 @@ last_updated: 2026-09-10
   — алиас). Если отчёты в вашем репозитории пишет PAT или GitHub App, задайте его логин —
   иначе первый прогон после обновления не узнает прежний sticky: создаст второй, Δ-блок
   начнётся без истории. Откат — `REVIEW_TRUSTED_AUTHORS=` (пусто: доверять любому автору).
+- **Blast-radius обязателен в шаблоне CI.** `examples/ci/pr-review.yml` ставит новую
+  `REVIEW_BLAST_REQUIRED=1`: если code graph не собран или graphify недоступен, ревью
+  блокирует merge до LLM-вызовов и пишет причину в sticky. Скопировали шаблон, а граф не
+  строите — уберите флаг или задайте `0`. Дефолт движка — `0`, без шаблона ничего не меняется.
+- `graphifyy` в шаблоне CI и в `docs/model-tuning.md`: **0.9.52 → 0.9.87** (формат вывода
+  `graphify affected` и строка `Built from commit` в отчёте не изменились; ключ кэша venv сменён).
 - Формат футера sticky, namespace маркеров, контракты `swarm` / `export` / `structure` —
   без изменений.
+
+### Добавлено — `REVIEW_BLAST_REQUIRED` (RFC 16)
+
+Fail-closed для blast-radius по образцу `REVIEW_LLM_REQUIRED`. `blastUnavailableReason`
+(`lib/graphify.mjs`) отличает инфра-сбой (`graph_missing`, `graph_unreadable`,
+`graphify_unavailable|timeout|error` на всех символах) от честного «зависимых нет»;
+пайплайн проверяет его сразу после blast-стадии и выходит с `1`, не тратя токены.
+В observability — событие `blast_failed`. Флаг есть и в Rust-конфиге (parity).
 
 ### Добавлено — пиктограммы в PR-комментариях
 

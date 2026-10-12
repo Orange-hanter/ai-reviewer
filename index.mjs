@@ -55,7 +55,7 @@ export {
 } from './lib/profile.mjs';
 export { publicErrorLabel, createAdaptiveSemaphore, redactSecretsForLog } from './lib/util.mjs';
 export { parseJsonl, aggregateMetrics, formatMetricsReport } from './lib/metrics.mjs';
-export { createGraphifyClient } from './lib/graphify.mjs';
+export { createGraphifyClient, blastUnavailableReason } from './lib/graphify.mjs';
 export {
   analyzeStructure, STRUCTURE_TOOL_VERSION,
 } from './lib/structure.mjs';
