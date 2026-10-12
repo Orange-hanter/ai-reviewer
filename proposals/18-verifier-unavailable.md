@@ -50,7 +50,11 @@ last_updated: 2026-10-13
 4. **Не трогаем**: `REVIEW_VERIFIER_STRICT=0` (потребитель сам выбрал доверять агрегатору —
    прежнее поведение), `REVIEW_VERIFIER=0`, prescan-блокеры (от verifier не зависят), сбой
    при отсутствии кандидатов уровня блока (гейту нечего ждать).
-5. Наблюдаемость: событие `verifier_unavailable {reason, unverified}`, поле
+5. **Инкрементальный перенос** (`REVIEW_INCREMENTAL`): файл с находкой `unavailable` или
+   `overflow` не получает хэш в state, сама находка не переносится. Перенос считает находку
+   прошедшей verifier (`markCarried`), и без этого «перезапустите ревью» перенёс бы
+   непроверенный critical как minor — без LLM и без verifier, merge прошёл бы.
+6. Наблюдаемость: событие `verifier_unavailable {reason, unverified}`, поле
    `verifierUnavailable` в событии `gate`; `verdict.blocked` и `blocked` в истории прогонов
    учитывают degraded-блок. Вход `buildSummary` — новое поле `verifierUnavailable`
    (JS и Rust, parity-кейсы `verifier unavailable *`).
