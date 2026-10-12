@@ -4,12 +4,12 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-10-09
+last_updated: 2026-10-13
 ---
 
 # 🧭 Project Navigator: ai-reviewer
 
-> 📊 Meta: `{"version": "0.4.0", "last_updated": "2026-10-09", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
+> 📊 Meta: `{"version": "0.5.0", "last_updated": "2026-10-13", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
 
 > L0 для агента. Истина по гейту — architecture. Журнал разработки — `docs/dev/journal.md`. RFC — `proposals/`.
 
@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:a294fa623346`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:61c634f763c6`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -137,12 +137,12 @@ graph TD
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:4b4b6daf3d33`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:6ef94ee71ec9`
 - **Статус:** `🟢 VERIFIED`
 
 ### README
 - **Описание:** точка входа потребителя: установка, CLI, подключение к CI.
-- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:a168dc34afcb`
+- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:534374df102f`
 - **Статус:** `🟢 VERIFIED`
 
 ### Индекс документации

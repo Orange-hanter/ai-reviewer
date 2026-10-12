@@ -13,6 +13,12 @@ audience: [next-session-agent, maintainers]
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
 
+## 2026-10-13 — 0.5.0
+
+**Сделано:** релиз `v0.5.0` — версия в `package.json`, бейдж и пример пина в README, пин `examples/consumers/orakul/ai-reviewer-ref`, секция CHANGELOG. Для потребителя: `REVIEW_TRUSTED_AUTHORS` (sticky от PAT/GitHub App — задать логин), шаблон CI ставит `REVIEW_BLAST_REQUIRED=1` и `graphifyy==0.9.87` (без сборки графа — флаг убрать). Формат футера и контракты `swarm` / `export` / `structure` сверены по диффу от `v0.4.0` — без изменений (`EXPORT_VERSION`, маркеры, `-data:` футер не тронуты).
+
+**Причина RFC 16:** локальные прогоны шли с `graph_status: missing` (0/25 символов) — blast-radius молча не работал. Живая проверка на 0.9.87: без графа — `graph_missing`, exit 1 до LLM; с графом — 9 блоков, 9/10 символов, `graph fresh`.
+
 ## 2026-10-09 — gold-private: разметка из истории своих проектов
 
 **Зачем.** Gold ×3 не измерил карточки символов: дефекты `gold/` — не контрактные, а диффы
