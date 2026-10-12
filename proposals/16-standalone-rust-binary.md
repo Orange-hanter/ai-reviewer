@@ -166,7 +166,7 @@ ref в `.ai-reviewer-engine` (127-133) и `run: node .ai-reviewer-engine/bin/pr-
 `node .ai-reviewer-engine/…` в `examples/ci/`. Пин сегодня — голая строка тега:
 `examples/consumers/orakul/ai-reviewer-ref` = `v0.2.4`,
 [`docs/integration.md:11`](../docs/integration.md) — «одна строка: тег (v0.2.0) или полный
-commit SHA».
+commit SHA». *(Состояние до T31; после T31 шаблоны качают сверенный бинарь — решение 9.)*
 
 ### Regex-диалект: crate `regex` не хватает в двух местах
 
@@ -334,10 +334,31 @@ v0.3.0 sha256:<sha256 файла SHA256SUMS>
 усиливается: теперь и подменённый релизный артефакт не проходит.
 
 Шаблон потребителя: скачать `SHA256SUMS` → сверить с пином → скачать бинарь под текущий
-triple → сверить с `SHA256SUMS` → `chmod +x` → `./pr-review review`. **Любой сбой на этом
-пути — fail-open: `exit 0` и понятное сообщение в лог, без блокировки merge.** Это ровно
-та же семантика, что у сегодняшнего пустого пина (`examples/ci/pr-review.yml:118-122`) и у
-`bin/pr-review.mjs:11-14`: недоступность инфраструктуры ревью не блокирует чужой merge.
+triple → сверить с `SHA256SUMS` → распаковать → `chmod +x` → `pr-review review`.
+
+**Две политики на этом пути (уточнено в T31).** Исходная редакция требовала fail-open на
+любом сбое. Это верно для **недоступности**: пустой пин (bootstrap), релиз или сеть не
+отвечают, платформа раннера не собирается, нет `curl`/`sha256sum` — `exit 0`, понятное
+сообщение, ревью пропускается; та же семантика, что у пустого пина в старом шаблоне и у
+`bin/pr-review.mjs:11-14`. Но **несовпадение sha256** (пин ↔ `SHA256SUMS` или
+`SHA256SUMS` ↔ архив) и битый пин — fail-closed, шаг красный: это не аутедж, а подмена
+артефакта или ошибка в базовой ветке, и тихий пропуск превратил бы подменённый релиз в
+незаметный выключатель гейта. Политика самого движка (fail-open внутри ревью, exit 1 только
+на подтверждённых блокерах) не меняется.
+
+**Контракт для T32** (зафиксирован в T31; держат `test/ci-templates.test.mjs` и
+`examples/ci/fetch-pr-review.sh`):
+
+| Что | Формат |
+|---|---|
+| URL | `https://github.com/Orange-hanter/ai-reviewer/releases/download/<tag>/<файл>` (публичный релиз, без токена) |
+| Архивы | `pr-review-<triple>.tar.gz`, triple ∈ {`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`}; gzip-tar, **в корне** — обычный исполняемый файл `pr-review` (не symlink); прочие файлы в архиве допустимы и игнорируются |
+| `SHA256SUMS` | вывод `sha256sum` по архивам из каталога релиза: строки `<64 hex нижнего регистра>␠␠<имя архива>` (бинарный режим `␠*<имя>` тоже принимается), имена без путей, LF; файл сверяется побайтно |
+| Пин `ops/ai-reviewer-ref` | первая непустая строка `<tag> sha256:<64 hex нижнего регистра>`; tag — `[A-Za-z0-9][A-Za-z0-9._-]*`; хэш — sha256 файла `SHA256SUMS` целиком; лишние поля — ошибка |
+| Платформа | `uname -s` ∈ {`Linux`, `Darwin`} × `uname -m` ∈ {`x86_64`/`amd64`, `aarch64`/`arm64`}; прочее — пропуск |
+| Скрипт сверки | `examples/ci/fetch-pr-review.sh <пин> <каталог>` → копия у потребителя `ops/ai-review/fetch-pr-review.sh`, читается из базовой ветки как и пин; выход: `bin=<путь>` в `$GITHUB_OUTPUT` (пусто — пропуск) |
+
+`release.yml` обязан собирать именно эти имена: шаблоны потребителя не перебирают варианты.
 
 ### 10. Программный API удаляется
 
@@ -499,7 +520,7 @@ T08 замораживает сигнатуры трейтов до того, к
 
 | # | Суть | DoD |
 |---|---|---|
-| T31 | `examples/ci/*.yml` (скачивание по пину + sha256), `docs/{integration,architecture,configuration}.md`, `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `package.json`, `examples/consumers/orakul/`, вынос `test/ci-templates.test.mjs` | `node --test test/ci-templates.test.mjs`; ни одного `node .ai-reviewer-engine/` в шаблонах |
+| ✅ T31 | `examples/ci/*.yml` (скачивание по пину + sha256), `docs/{integration,architecture,configuration}.md`, `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `package.json`, `examples/consumers/orakul/`, вынос `test/ci-templates.test.mjs` (сделано: шаг `Fetch pinned pr-review binary` + `examples/ci/fetch-pr-review.sh` — пин и скрипт из базовой ветки, цепочка пин → `SHA256SUMS` → архив до распаковки, бинарь в `$RUNNER_TEMP`, секреты только у шага запуска; недоступность — fail-open, несовпадение хэша — fail-closed (уточнение решения 9); контракт артефактов для T32 — в решении 9; `cursor-plugin/bin/*-mcp.sh` на подкоманды бинаря с откатом на node до T33; JS ничего не удалено) | `node --test test/ci-templates.test.mjs`; ни одного `node .ai-reviewer-engine/` в шаблонах |
 | T32 | `release.yml`: матрица 4 таргета, `SHA256SUMS`, публикация по тегу | `cargo build --release` локально; `actionlint` зелёный; реальный прогон по `workflow_dispatch` |
 | T42 | dev-тулы RFC 15 (`lib/cues.mjs`, `lib/brief.mjs`, `bin/pr-review-scout.mjs`) и пробники (`pr-review-probe-cache`, `pr-review-symbol-cards-probe`): остаются JS по non-goal «dev-тулы», поэтому решение 8 получает исключение — эти модули и их импорты (`diff`, `router`, `symbol-cards`) читают JSON-вывод бинаря или вынесены в `tools/`; порт `cues`/`brief` — только если RFC 15 перейдёт к этапу 1 (наряды в гейте) | `node bin/pr-review-scout.mjs --gold-dir gold` работает после T33 |
 | T33 | cutover: удаления по решению 8, `pr-review-gold.mjs` на спавн бинаря, новый порядок шагов `ci.yml` | `cargo build/test` и `npm test` зелёные; `grep -rn "pipeline.mjs\|lib/.*\.mjs" --include=*.mjs` не находит ссылок на удалённое; один бинарь запускает 9 подкоманд |
