@@ -147,17 +147,45 @@ async function persistExports(cfg, payload, log, obs) {
   }
 }
 
-/** Стадия verifier Pass B: кандидаты critical/major → второй проход. Fail-open при сбое LLM. */
+/**
+ * Verifier не дал вердикта по находкам уровня блока из-за сбоя (RFC 18): исключение первого
+ * вызова, ни одного валидного вердикта, тайм-бюджет. Такая находка не может считаться
+ * подтверждённым блокером — гейт обещает блок только с вердиктом второго судьи. Она
+ * понижается до minor с `verifierStatus: unavailable`, а судьбу прогона решает
+ * REVIEW_LLM_REQUIRED в pipeline: degraded-блок (дефолт) или fail-open.
+ *
+ * Раньше исход зависел от вида сбоя: исключение оставляло находку critical (блок по слову
+ * агрегатора, без строки verifier в sticky), пустой ответ понижал её до minor (merge проходил).
+ * REVIEW_VERIFIER_STRICT=0 — прежнее поведение: потребитель доверяет агрегатору сам.
+ */
+function markVerifierUnavailable(findings, pending, reason, log, obs) {
+  for (const f of pending) {
+    f.verifierReason = `verifier недоступен (${reason}) — было ${f.severity}, понижено до minor`;
+    f.severity = 'minor';
+    f.verifierStatus = 'unavailable';
+  }
+  log(`verifier недоступен (${reason}): ${pending.length} находок уровня блока не проверены → minor`);
+  obs.logEvent('verifier_unavailable', { reason, unverified: pending.length });
+  return { reason, unverified: pending.length };
+}
+
+/** Стадия verifier Pass B: кандидаты critical/major → второй проход. Сбой — см. markVerifierUnavailable. */
 async function runVerifierStage(allFindings, {
   engine, gate, verifier, deadline, contentMap, annotated, blastBlocks, pr, changedFilesSection,
   actionability, actionabilityCtx, files, symbolCardsByPath = null, limits = {},
 }, log, obs) {
-  const empty = { findings: allFindings, stats: null };
+  const empty = { findings: allFindings, stats: null, unavailable: null };
   if (!verifier.enabled) return empty;
+  const isBlockTier = (f) => gate.blockOn.includes(f.severity) && !f.prescan;
+  // Сбой судит только strict-режим verifier'а: при REVIEW_VERIFIER_STRICT=0 находка без
+  // вердикта и так остаётся как есть — потребитель выбрал доверять агрегатору.
+  const unavailable = (pending, reason) => (verifier.strictBlocks && pending.length
+    ? { ...empty, unavailable: markVerifierUnavailable(allFindings, pending, reason, log, obs) }
+    : empty);
   if (deadline && deadline - Date.now() < 120_000) {
     log('verifier pass B пропущен: тайм-бюджет на исходе (<2 мин в запасе)');
     obs.logEvent('verifier_skip', { reason: 'time_budget' });
-    return empty;
+    return unavailable(allFindings.filter(isBlockTier), 'time_budget');
   }
   // Advisory-кандидаты на подтверждение: доказуемые minor/nit, которые претендуют на строку
   // в PR. Verifier здесь работает не на гейт (severity их не блокирует), а на право занять
@@ -207,7 +235,6 @@ async function runVerifierStage(allFindings, {
   }
   // Первый батч — как прежний единственный вызов: до капа блокеров плюс advisory.
   // Остальные — только блокеры: advisory не стоят лишнего вызова.
-  const isBlockTier = (f) => gate.blockOn.includes(f.severity) && !f.prescan;
   const blockTier = candidates.filter(isBlockTier);
   const advisory = candidates.filter((f) => !isBlockTier(f));
   const batches = [[...blockTier.slice(0, batchCap), ...advisory]];
@@ -260,9 +287,9 @@ async function runVerifierStage(allFindings, {
       batchVerdicts = await verifyBatch(batches[i], i);
     } catch (e) {
       if (i === 0) {
-        log('verifier pass failed (fail-open, findings сохранены):', e.message);
+        log('verifier pass failed:', e.message);
         obs.logEvent('verifier_error', { error: e.message?.slice(0, 200) });
-        return empty;
+        return unavailable(blockTier, 'error');
       }
       // Первый батч прошёл: его вердикты не выбрасываем, непроверенный хвост — как сверх
       // капа (ниже). Иначе сбой N-го вызова отменял бы уже сделанную проверку.
@@ -280,15 +307,28 @@ async function runVerifierStage(allFindings, {
     sent.push(...batches[i]);
     batchesSent++;
   }
+  // Ни одного валидного вердикта (пустой ответ, чужие индексы, не тот ключ) — это сбой
+  // судьи, а не его решение: тот же исход, что у исключения.
+  if (!verdicts.length && sent.some(isBlockTier)) {
+    obs.logEvent('verifier_error', { error: 'no valid verdicts' });
+    return unavailable(blockTier, 'empty');
+  }
   const applied = applyVerifierVerdicts(allFindings, sent, verdicts, log, {
     strictUnverified: verifier.strictBlocks,
   });
+  // Хвост, не дошедший из-за сбоя или тайм-бюджета, — недоступность, а не кап.
+  let tailUnavailable = null;
+  if (stopReason) {
+    const sentSet = new Set(sent);
+    const tail = applied.findings.filter((f) => isBlockTier(f) && !sentSet.has(f));
+    tailUnavailable = unavailable(tail, stopReason).unavailable;
+  }
   // Strict: eligible-находки, не дошедшие до verifier'а (сверх капа × батчей, тайм-бюджет,
   // сбой хвостового батча), блокировать без верификации не должны (бэклог #7) → minor.
   let overflowN = 0;
   if (verifier.strictBlocks) {
     const sentSet = new Set(sent);
-    const why = stopReason || `сверх капа ${batchCap} × ${maxBatches}`;
+    const why = `сверх капа ${batchCap} × ${maxBatches}`;
     for (const f of applied.findings) {
       if (isBlockTier(f) && !sentSet.has(f)) {
         f.severity = 'minor';
@@ -306,7 +346,7 @@ async function runVerifierStage(allFindings, {
   log(`verifier итог: verified=${applied.stats.verified} rejected=${applied.stats.rejected} downgraded=${applied.stats.downgraded} missing=${applied.stats.missing}`);
   obs.logEvent('verifier', applied.stats);
   logFindingsStage(obs, 'after_verifier', applied.findings);
-  return { findings: applied.findings, stats: applied.stats };
+  return { findings: applied.findings, stats: applied.stats, unavailable: tailUnavailable };
 }
 
 /** Публикует inline и чистит устаревшие только после успешного post. */
@@ -970,9 +1010,10 @@ export function createReviewPipeline(cfg, deps = {}) {
                 symbolCardsByPath: symbolCards?.byPath ?? null,
                 limits,
               }, log, obs)
-            : { findings: currentFindings, stats: null };
+            : { findings: currentFindings, stats: null, unavailable: null };
           currentFindings = verifierStage.findings;
           const verifierStats = verifierStage.stats;
+          const verifierUnavailable = verifierStage.unavailable;
 
           // Перенесённые находки подмешиваем ПОСЛЕ refutation и verifier — намеренно.
           // Обе стадии они уже прошли в том прогоне, где были найдены, и принесли свои
@@ -984,7 +1025,7 @@ export function createReviewPipeline(cfg, deps = {}) {
             logFindingsStage(obs, 'after_carry_over', currentFindings);
           }
 
-          return { findings: currentFindings, refutationStats, verifierStats };
+          return { findings: currentFindings, refutationStats, verifierStats, verifierUnavailable };
         },
       });
       allFindings = gateResolution.findings;
@@ -996,14 +1037,23 @@ export function createReviewPipeline(cfg, deps = {}) {
       const fpRemoved = gateResolution.fpRemoved;
       const refutationStats = gateResolution.refutationStats;
       const verifierStats = gateResolution.verifierStats;
+      // Verifier не дал вердикта по находкам уровня блока из-за сбоя (RFC 18). Сами находки
+      // уже понижены и блокерами не считаются; блокирует ли прогон — как при аутедже LLM:
+      // REVIEW_LLM_REQUIRED=1 (дефолт) — degraded-блок до перезапуска, 0 — fail-open.
+      const verifierUnavailable = gateResolution.verifierUnavailable
+        ? { ...gateResolution.verifierUnavailable, blocked: Boolean(gate.llmRequired) }
+        : null;
+      const degradedBlock = Boolean(verifierUnavailable?.blocked);
+      const wouldBlock = blockers.length > 0 || degradedBlock;
       if (fpRemoved.length) {
         log(`ложных находок отфильтровано: ${fpRemoved.length}`);
       }
       obs.logEvent('fp_filter', { before: gateResolution.beforeFpCount, after: gateResolution.afterFpCount, removed: fpRemoved.length });
       logFindingsStage(obs, 'after_fp_filter', allFindings);
       obs.logEvent('gate', {
-        wouldBlock: blockers.length > 0,
+        wouldBlock,
         blockers: blockers.length,
+        ...(verifierUnavailable ? { verifierUnavailable } : {}),
         sample: slimFindings(blockers),
       });
       logFindingsStage(obs, 'after_gate', allFindings);
@@ -1022,7 +1072,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       });
       const { md, counts, total, delta, verdict } = buildSummary(cfg, {
         reviews, ok, allFindings, outside, blastBlocks, blastMetrics, files, pr, headSha, note, blockerClusters,
-        verifierStats, refutationStats, prescanResult, fpRemoved,
+        verifierStats, refutationStats, prescanResult, fpRemoved, verifierUnavailable,
         // Δ считаем против ПОЛНОГО набора прошлого прогона, а не против отфильтрованного
         // carry-over: «закрыто» — это то, что ушло из отчёта, включая снятое инвалидацией.
         priorFindings: priorSticky.findings, priorRuns: priorSticky.runs, priorSha: priorSticky.sha,
@@ -1039,7 +1089,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       obs.logEvent('verdict', verdict);
 
       await persistAndCapture(buildReviewJson({
-        pr, headSha, reviewMode, route, wouldBlock: blockers.length > 0, verdict,
+        pr, headSha, reviewMode, route, wouldBlock, verdict,
         counts, total, findings: allFindings, blockers, reviews,
         verifierStats, refutationStats, prescanResult,
         blastMetrics, changedPaths,
@@ -1070,13 +1120,18 @@ export function createReviewPipeline(cfg, deps = {}) {
         log(`модели-ок: ${ok.map((r) => r.model).join(', ')} · findings=${total} · inline=${inline.length} · outside=${outside.length}`);
         log(blockers.length
           ? `⛔ WOULD BLOCK merge: ${blockers.length} кластер(ов) × ${gate.blockOn.join('/')}`
-          : `✅ не блокирует (${reviewMode === 'moa' ? 'MoA-aggregator' : `консенсус ≥${gate.consensusMin}`})`);
+          : degradedBlock
+            ? `⛔ WOULD BLOCK merge: verifier недоступен (${verifierUnavailable.reason}), не проверено ${verifierUnavailable.unverified}`
+            : `✅ не блокирует (${reviewMode === 'moa' ? 'MoA-aggregator' : `консенсус ≥${gate.consensusMin}`})`);
         log('\n--- INLINE COMMENTS ---');
         for (const c of inline) log(`${c.path}:${c.line}\n  ${c.body.split('\n').slice(0, 2).join(' / ')}`);
         log('\n--- SUMMARY MARKDOWN ---\n' + md);
-        const exitCode = blockers.length ? 1 : 0;
-        finalObs = { exitCode, dryRun: true, wouldBlock: blockers.length > 0, blockers: blockers.length, total, counts, inline: inline.length };
-        return detailedResult(exitCode, { wouldBlock: blockers.length > 0 });
+        const exitCode = wouldBlock ? 1 : 0;
+        finalObs = {
+          exitCode, dryRun: true, wouldBlock, blockers: blockers.length, total, counts, inline: inline.length,
+          ...(degradedBlock ? { degraded: true } : {}),
+        };
+        return detailedResult(exitCode, { wouldBlock, ...(degradedBlock ? { degraded: true, reason: 'verifier unavailable' } : {}) });
       }
 
       const pub = await publishReview(github, { inline, md, headSha, maxInline: limits.maxInline }, log);
@@ -1108,6 +1163,11 @@ export function createReviewPipeline(cfg, deps = {}) {
         log(`⛔ merge ЗАБЛОКИРОВАН: ${blockers.length} кластер(ов) уровня ${gate.blockOn.join('/')}`);
         finalObs = { exitCode: 1, wouldBlock: true, blockers: blockers.length, total, counts, inline: inline.length };
         return detailedResult(1, { wouldBlock: true });
+      }
+      if (degradedBlock) {
+        log(`⛔ merge ЗАБЛОКИРОВАН (degraded): verifier недоступен (${verifierUnavailable.reason}), не проверено ${verifierUnavailable.unverified} — перезапустите ревью`);
+        finalObs = { exitCode: 1, wouldBlock: true, degraded: true, blockers: 0, total, counts, inline: inline.length };
+        return detailedResult(1, { wouldBlock: true, degraded: true, reason: 'verifier unavailable' });
       }
       log(`готово — блокеров нет (${reviewMode}).`);
       finalObs = { exitCode: 0, wouldBlock: false, blockers: 0, total, counts, inline: inline.length };

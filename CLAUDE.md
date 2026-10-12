@@ -95,7 +95,9 @@ export) — от рабочего каталога через `profile.paths.*`,
 **Fail-open по умолчанию, fail-closed осознанно.** `bin/pr-review.mjs` ловит любое исключение
 и выходит с `0`: инфра-сбой не блокирует merge. Exit `1` — только осознанный, внутри
 `runReview`, на подтверждённых блокерах. Исключения: `REVIEW_LLM_REQUIRED=1` и
-`REVIEW_VERIFIER_STRICT=1`. Не превращай мягкий сбой в жёсткий без причины.
+`REVIEW_VERIFIER_STRICT=1`; сбой verifier'а при находках уровня блока — тоже через
+`REVIEW_LLM_REQUIRED` (RFC 18), а не «блок по слову агрегатора». Не превращай мягкий сбой
+в жёсткий без причины.
 
 **Два независимых судьи.** Агрегатор и verifier намеренно вне пула advisors. Блок требует
 refutation жюри + вердикта verifier + `confidence ≥ REVIEW_CONFIDENCE_MIN`. Blast-radius
