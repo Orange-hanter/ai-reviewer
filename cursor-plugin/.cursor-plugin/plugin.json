@@ -9,7 +9,12 @@
       "AI_REVIEWER_ROOT": {
         "type": "string",
         "title": "Корень пакета ai-reviewer",
-        "description": "Абсолютный путь к клону пакета (нужен bin/pr-review-mcp.mjs). Движок в плагин не кладётся. Пусто — .engine-root после install-local.sh."
+        "description": "Абсолютный путь к клону пакета (rust/ или bin/pr-review-mcp.mjs). Движок в плагин не кладётся. Пусто — .engine-root после install-local.sh."
+      },
+      "AI_REVIEWER_BIN": {
+        "type": "string",
+        "title": "Бинарь pr-review",
+        "description": "Абсолютный путь к prebuilt-бинарю pr-review (RFC 16). Пусто — rust/target/{release,debug}/pr-review клона, затем node-путь (до удаления JS в T33)."
       },
       "REVIEW_MCP_ROOT": {
         "type": "string",

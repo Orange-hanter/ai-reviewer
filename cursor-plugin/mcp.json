@@ -6,6 +6,7 @@
       "args": ["-c", "exec \"$HOME/.cursor/plugins/local/ai-reviewer/bin/review-mcp.sh\""],
       "env": {
         "AI_REVIEWER_ROOT": "${AI_REVIEWER_ROOT}",
+        "AI_REVIEWER_BIN": "${AI_REVIEWER_BIN}",
         "REVIEW_MCP_ROOT": "${REVIEW_MCP_ROOT}",
         "REVIEW_PROFILE": "${REVIEW_PROFILE}",
         "OLLAMA_API_KEY": "${OLLAMA_API_KEY}"
@@ -17,6 +18,7 @@
       "args": ["-c", "exec \"$HOME/.cursor/plugins/local/ai-reviewer/bin/structure-mcp.sh\""],
       "env": {
         "AI_REVIEWER_ROOT": "${AI_REVIEWER_ROOT}",
+        "AI_REVIEWER_BIN": "${AI_REVIEWER_BIN}",
         "REVIEW_MCP_ROOT": "${REVIEW_MCP_ROOT}",
         "STRUCTURE_MCP_ROOT": "${REVIEW_MCP_ROOT}"
       }

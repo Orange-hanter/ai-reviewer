@@ -3,7 +3,7 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
+last_updated: 2026-10-12
 ---
 
 # Cursor Plugin для ai-reviewer
@@ -35,6 +35,7 @@ Configure (**Customize → Plugins → Configure**) — опциональный
 (иначе Cursor держит loading + Authenticate). В `mcp.json` только плейсхолдеры `${…}`:
 
 - `AI_REVIEWER_ROOT` — клон пакета; пусто — `.engine-root`
+- `AI_REVIEWER_BIN` — prebuilt-бинарь `pr-review` (RFC 16); пусто — сборка клона, затем node
 - `REVIEW_MCP_ROOT` — репозиторий ревью; пусто — тот же, что engine
 - `REVIEW_PROFILE` — опционально
 - `OLLAMA_API_KEY` — из Configure, в файлы плагина не кладётся; для `initialize` / дешёвых тулзов не нужен
@@ -42,7 +43,22 @@ Configure (**Customize → Plugins → Configure**) — опциональный
 `mcp.json` в **git-шаблоне** вызывает `/bin/sh -c` с `$HOME/.cursor/plugins/local/ai-reviewer/bin/review-mcp.sh`
 (не `./bin` от cwd окна). `install-local.sh` в установленной копии подставляет абсолютный
 `$dest/bin/review-mcp.sh`. cwd plugin MCP у Cursor — часто другое окно; относительный `./bin`
-даёт `Connection closed`. Лаунчер сам находит Node и клон движка. `type` — `stdio`.
+даёт `Connection closed`. Лаунчер сам находит бинарь (или Node) и клон движка. `type` — `stdio`.
+
+## Рантайм: бинарь `pr-review` или node
+
+Лаунчеры зовут подкоманды единого бинаря ([RFC 16](../proposals/16-standalone-rust-binary.md)):
+`pr-review review-mcp` и `pr-review structure-mcp`. Порядок поиска бинаря:
+
+1. `AI_REVIEWER_BIN` — явный путь (например, распакованный из релиза). Клон движка тогда
+   не обязателен; `REVIEW_MCP_ROOT` по умолчанию — cwd. Задан, но не исполняемый — fail-fast,
+   без тихого отката на node.
+2. `rust/target/release/pr-review`, затем `rust/target/debug/pr-review` клона (`cargo build`).
+3. Откат на node-путь (`bin/pr-review-mcp.mjs`, `bin/pr-review-structure-mcp.mjs`) — только
+   пока JS-ядро не удалено; удаление — задача T33, после неё остаются пункты 1–2.
+
+`AI_REVIEWER_MCP_RUNTIME` фиксирует выбор: `auto` (по умолчанию, порядок выше), `bin` (только
+бинарь, без него — ошибка), `node` (только JS; пригодится, если debug-сборка клона устарела).
 
 В Agent chat: `/review-prescan`, `/review-preview`, `/fp-check`, `/structure-context`.
 
@@ -54,10 +70,10 @@ Configure (**Customize → Plugins → Configure**) — опциональный
 
 ## Два сервера
 
-| Сервер | Bin | Тулзы |
+| Сервер | Подкоманда (откат до T33) | Тулзы |
 |--------|-----|--------|
-| `ai-reviewer` | `bin/pr-review-mcp.mjs` | `review_route`, `review_prescan`, `fp_check`, `fingerprint_check`, `review_artifact`, `review_run`, `review_findings`; при `REVIEW_MCP_EXTRA=1` ещё `blast_scope`, `actionability_explain`, `review_metrics` |
-| `ai-reviewer-structure` | `bin/pr-review-structure-mcp.mjs` | `structure_context` |
+| `ai-reviewer` | `pr-review review-mcp` (`bin/pr-review-mcp.mjs`) | `review_route`, `review_prescan`, `fp_check`, `fingerprint_check`, `review_artifact`, `review_run`, `review_findings`; при `REVIEW_MCP_EXTRA=1` ещё `blast_scope`, `actionability_explain`, `review_metrics` |
+| `ai-reviewer-structure` | `pr-review structure-mcp` (`bin/pr-review-structure-mcp.mjs`) | `structure_context` |
 
 `STRUCTURE_MCP_ROOT` = тот же `REVIEW_MCP_ROOT` (репозиторий потребителя), не клон движка.
 

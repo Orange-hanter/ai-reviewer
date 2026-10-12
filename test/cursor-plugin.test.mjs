@@ -94,13 +94,18 @@ async function isolatedPlugin({ engineRoot } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'mcp-plugin-'));
   await mkdir(join(dir, 'bin'));
   await cp(join(PLUGIN, 'bin/mcp-env.sh'), join(dir, 'bin/mcp-env.sh'));
-  await cp(join(PLUGIN, 'bin/review-mcp.sh'), join(dir, 'bin/review-mcp.sh'));
-  await chmod(join(dir, 'bin/review-mcp.sh'), 0o755);
+  for (const launcher of ['review-mcp.sh', 'structure-mcp.sh']) {
+    await cp(join(PLUGIN, 'bin', launcher), join(dir, 'bin', launcher));
+    await chmod(join(dir, 'bin', launcher), 0o755);
+  }
   if (engineRoot) await writeFile(join(dir, '.engine-root'), `${engineRoot}\n`);
   return dir;
 }
 
 const PATH_NO_NODE = '/usr/bin:/bin';
+// Тесты node-пути фиксируют рантайм: при собранном rust/target/…/pr-review режим auto
+// выбрал бы бинарь, и они проверяли бы не тот путь. Бинарный путь — тесты ниже (RFC 16, T31).
+const NODE_RUNTIME = 'node';
 const HOME = process.env.HOME;
 
 test('plugin.json: JSON Schema variables без required', async () => {
@@ -185,6 +190,7 @@ test('bin/pr-review-mcp.mjs не импортирует pipeline на верхн
 test('P-configure: initialize + tools/list через абсолютный node, без node в PATH', async () => {
   const result = await spawnHandshake(join(PLUGIN, 'bin/review-mcp.sh'), [], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: ROOT,
     REVIEW_MCP_ROOT: ROOT,
     HOME,
@@ -221,6 +227,7 @@ test('P-engine-install: .engine-root, пустой AI_REVIEWER_ROOT, PATH без
   const dir = await isolatedPlugin({ engineRoot: ROOT });
   const result = await spawnHandshake(join(dir, 'bin/review-mcp.sh'), [], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: '',
     REVIEW_MCP_ROOT: '',
     HOME,
@@ -236,6 +243,7 @@ test('плейсхолдеры в env резолвятся через .engine-ro
   const dir = await isolatedPlugin({ engineRoot: ROOT });
   const result = await spawnHandshake(join(dir, 'bin/review-mcp.sh'), [], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: '${AI_REVIEWER_ROOT}',
     REVIEW_MCP_ROOT: '${REVIEW_MCP_ROOT}',
     HOME,
@@ -248,6 +256,7 @@ test('плейсхолдеры в env резолвятся через .engine-ro
 test('клон: лаунчер без AI_REVIEWER_ROOT находит engine через cursor-plugin/../..', async () => {
   const result = await spawnHandshake(join(PLUGIN, 'bin/review-mcp.sh'), [], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: '',
     REVIEW_MCP_ROOT: '',
     HOME,
@@ -260,6 +269,7 @@ test('fail-fast: нет engine и нет .engine-root → exit ≠ 0', async () 
   const dir = await isolatedPlugin();
   const result = await spawnFailFast(join(dir, 'bin/review-mcp.sh'), [], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: '',
     REVIEW_MCP_ROOT: '',
     HOME,
@@ -274,6 +284,7 @@ test('fail-fast: битый REVIEW_MCP_ROOT → exit ≠ 0', async () => {
   const dir = await isolatedPlugin({ engineRoot: ROOT });
   const result = await spawnFailFast(join(dir, 'bin/review-mcp.sh'), [], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: '',
     REVIEW_MCP_ROOT: '/no/such/ai-reviewer-consumer',
     HOME,
@@ -294,6 +305,7 @@ test('fail-fast: битый REVIEW_MCP_ROOT в bin → exit 1', async () => {
 test('fail-fast: AI_REVIEWER_NODE не исполняемый', async () => {
   const result = await spawnFailFast(join(PLUGIN, 'bin/review-mcp.sh'), [], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_NODE: join(tmpdir(), 'no-such-node'),
     AI_REVIEWER_ROOT: ROOT,
     REVIEW_MCP_ROOT: ROOT,
@@ -313,6 +325,7 @@ test('fail-fast: нет node в PATH и fallbacks', async (t) => {
   const dir = await isolatedPlugin({ engineRoot: ROOT });
   const result = await spawnFailFast(join(dir, 'bin/review-mcp.sh'), [], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: '',
     REVIEW_MCP_ROOT: '',
     HOME: home,
@@ -350,6 +363,7 @@ test('абсолютный лаунчер: handshake из чужого cwd (не
   const launcher = `${dest}/bin/review-mcp.sh`;
   const result = await spawnHandshake('/bin/sh', [launcher], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: '',
     REVIEW_MCP_ROOT: '',
     HOME,
@@ -370,6 +384,7 @@ test('относительный ./bin из чужого cwd не находит
   assert.equal(installed.status, 0, installed.stderr);
   const result = await spawnFailFast('/bin/sh', ['./bin/review-mcp.sh'], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     HOME,
   }, alien);
   assert.notEqual(result.code, 0);
@@ -393,6 +408,7 @@ test('git-шаблон $HOME: handshake из чужого cwd после install
   const mcp = JSON.parse(await readFile(join(PLUGIN, 'mcp.json'), 'utf8'));
   const result = await spawnHandshake('/bin/sh', mcp.mcpServers['ai-reviewer'].args, {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: '',
     REVIEW_MCP_ROOT: '',
     HOME: home,
@@ -406,6 +422,7 @@ test('git-шаблон $HOME: handshake из чужого cwd после install
 test('structure handshake: tools/list без Rust/пайплайна', async () => {
   const result = await spawnHandshake(join(PLUGIN, 'bin/structure-mcp.sh'), [], {
     PATH: PATH_NO_NODE,
+    AI_REVIEWER_MCP_RUNTIME: NODE_RUNTIME,
     AI_REVIEWER_ROOT: ROOT,
     REVIEW_MCP_ROOT: ROOT,
     HOME,
@@ -415,4 +432,142 @@ test('structure handshake: tools/list без Rust/пайплайна', async () 
   assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer-structure');
   const names = result.messages[1].result.tools.map((tool) => tool.name);
   assert.ok(names.includes('structure_context'));
+});
+
+// ---------------------------------------------------------------------------------------------
+// Бинарный путь (RFC 16, T31): лаунчер зовёт подкоманду `pr-review`, node — откат до T33.
+// ---------------------------------------------------------------------------------------------
+
+/** Фейковый бинарь: печатает в stderr подкоманду и корни, stdout не трогает (там JSON-RPC). */
+async function fakeBinary(path, tag) {
+  await mkdir(join(path, '..'), { recursive: true });
+  await writeFile(path, `#!/bin/sh\necho "FAKE-${tag} $* root=$REVIEW_MCP_ROOT structure=$STRUCTURE_MCP_ROOT" >&2\n`);
+  await chmod(path, 0o755);
+  return path;
+}
+
+/** Клон движка без JS (каким он станет после T33): rust/Cargo.toml + cursor-plugin/mcp.json. */
+async function rustOnlyEngine({ release = false, debug = false } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-engine-'));
+  await mkdir(join(root, 'rust'), { recursive: true });
+  await mkdir(join(root, 'cursor-plugin'), { recursive: true });
+  await writeFile(join(root, 'rust/Cargo.toml'), '[package]\nname = "fake"\n');
+  await writeFile(join(root, 'cursor-plugin/mcp.json'), '{}\n');
+  if (release) await fakeBinary(join(root, 'rust/target/release/pr-review'), 'release');
+  if (debug) await fakeBinary(join(root, 'rust/target/debug/pr-review'), 'debug');
+  return root;
+}
+
+test('bin: auto берёт release-сборку клона раньше debug и зовёт подкоманду', async () => {
+  const engine = await rustOnlyEngine({ release: true, debug: true });
+  for (const [launcher, sub] of [['review-mcp.sh', 'review-mcp'], ['structure-mcp.sh', 'structure-mcp']]) {
+    const result = await spawnFailFast(join(PLUGIN, 'bin', launcher), [], {
+      PATH: PATH_NO_NODE,
+      AI_REVIEWER_ROOT: engine,
+      REVIEW_MCP_ROOT: '',
+      AI_REVIEWER_BIN: '',
+      AI_REVIEWER_MCP_RUNTIME: '',
+      HOME,
+    }, engine);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stderr, new RegExp(`FAKE-release ${sub} root=${engine} structure=${engine}`));
+  }
+});
+
+test('bin: только debug-сборка — берётся она; клон без JS резолвится через .engine-root', async () => {
+  const engine = await rustOnlyEngine({ debug: true });
+  const dir = await isolatedPlugin({ engineRoot: engine });
+  const result = await spawnFailFast(join(dir, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '${AI_REVIEWER_ROOT}',
+    REVIEW_MCP_ROOT: '${REVIEW_MCP_ROOT}',
+    AI_REVIEWER_BIN: '${AI_REVIEWER_BIN}',
+    HOME,
+  }, dir);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, /FAKE-debug review-mcp/);
+});
+
+test('bin: AI_REVIEWER_BIN без клона движка — standalone, корень ревью = cwd', async () => {
+  const dir = await isolatedPlugin();
+  const bin = await fakeBinary(join(await mkdtemp(join(tmpdir(), 'mcp-bin-')), 'pr-review'), 'explicit');
+  const consumer = await mkdtemp(join(tmpdir(), 'mcp-consumer-'));
+  const result = await spawnFailFast(join(dir, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: '',
+    REVIEW_MCP_ROOT: '',
+    AI_REVIEWER_BIN: bin,
+    HOME,
+  }, consumer);
+  assert.equal(result.code, 0, result.stderr);
+  // macOS: tmpdir за симлинком /var → /private/var, pwd отдаёт физический путь.
+  assert.match(result.stderr, /FAKE-explicit review-mcp root=\S*mcp-consumer-/);
+});
+
+test('bin: неисполняемый AI_REVIEWER_BIN → fail-fast, без тихого отката на node', async () => {
+  const result = await spawnFailFast(join(PLUGIN, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: ROOT,
+    REVIEW_MCP_ROOT: ROOT,
+    AI_REVIEWER_BIN: join(tmpdir(), 'no-such-pr-review'),
+    HOME,
+  }, ROOT);
+  assert.notEqual(result.code, 0);
+  assert.ok(result.ms < 2000, `fail-fast ${result.ms}ms`);
+  assert.match(result.stderr, /AI_REVIEWER_BIN не исполняемый/);
+});
+
+test('bin: AI_REVIEWER_MCP_RUNTIME=bin без бинаря → fail-fast; мусор в рантайме → fail-fast', async () => {
+  const engine = await rustOnlyEngine();
+  const strict = await spawnFailFast(join(PLUGIN, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: engine,
+    REVIEW_MCP_ROOT: engine,
+    AI_REVIEWER_MCP_RUNTIME: 'bin',
+    HOME,
+  }, engine);
+  assert.notEqual(strict.code, 0);
+  assert.match(strict.stderr, /бинарь pr-review не найден/);
+  // auto без бинаря и без JS — понятная ошибка, а не exec несуществующего скрипта.
+  const none = await spawnFailFast(join(PLUGIN, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: engine,
+    REVIEW_MCP_ROOT: engine,
+    HOME,
+  }, engine);
+  assert.notEqual(none.code, 0);
+  assert.match(none.stderr, /нет бинаря pr-review/);
+  const bogus = await spawnFailFast(join(PLUGIN, 'bin/review-mcp.sh'), [], {
+    PATH: PATH_NO_NODE,
+    AI_REVIEWER_ROOT: ROOT,
+    AI_REVIEWER_MCP_RUNTIME: 'python',
+    HOME,
+  }, ROOT);
+  assert.notEqual(bogus.code, 0);
+  assert.match(bogus.stderr, /AI_REVIEWER_MCP_RUNTIME/);
+});
+
+test('bin: настоящий pr-review — handshake обоих серверов без node', async (t) => {
+  const bin = join(ROOT, 'rust/target/debug/pr-review');
+  if (!existsSync(bin)) {
+    t.skip('rust/target/debug/pr-review не собран — бинарный handshake покрыт cargo test');
+    return;
+  }
+  for (const [launcher, server, tool] of [
+    ['review-mcp.sh', 'ai-reviewer', 'review_route'],
+    ['structure-mcp.sh', 'ai-reviewer-structure', 'structure_context'],
+  ]) {
+    const result = await spawnHandshake(join(PLUGIN, 'bin', launcher), [], {
+      PATH: PATH_NO_NODE,
+      AI_REVIEWER_ROOT: ROOT,
+      REVIEW_MCP_ROOT: ROOT,
+      AI_REVIEWER_BIN: bin,
+      AI_REVIEWER_MCP_RUNTIME: 'bin',
+      HOME,
+      OLLAMA_API_KEY: '',
+    });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.messages[0].result.serverInfo.name, server);
+    assert.ok(result.messages[1].result.tools.map((entry) => entry.name).includes(tool));
+  }
 });

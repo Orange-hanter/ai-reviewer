@@ -7,9 +7,10 @@ set -eu
 
 engine=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 src=$engine/cursor-plugin
-if [ ! -f "$src/mcp.json" ] || [ ! -f "$engine/bin/pr-review-mcp.mjs" ]; then
-  printf 'ai-reviewer MCP: install-local.sh запускайте из клона пакета (нужны %s и %s).\n' \
-    "$src/mcp.json" "$engine/bin/pr-review-mcp.mjs" >&2
+# Клон пакета: JS-лаунчер (до T33) или Rust-ядро (RFC 16) — лаунчер выберет бинарь сам.
+if [ ! -f "$src/mcp.json" ] || { [ ! -f "$engine/bin/pr-review-mcp.mjs" ] && [ ! -f "$engine/rust/Cargo.toml" ]; }; then
+  printf 'ai-reviewer MCP: install-local.sh запускайте из клона пакета (нужны %s и %s или %s).\n' \
+    "$src/mcp.json" "$engine/bin/pr-review-mcp.mjs" "$engine/rust/Cargo.toml" >&2
   exit 1
 fi
 
@@ -34,6 +35,7 @@ cat > "$dest/mcp.json" <<EOF
       "args": ["$review_sh"],
       "env": {
         "AI_REVIEWER_ROOT": "\${AI_REVIEWER_ROOT}",
+        "AI_REVIEWER_BIN": "\${AI_REVIEWER_BIN}",
         "REVIEW_MCP_ROOT": "\${REVIEW_MCP_ROOT}",
         "REVIEW_PROFILE": "\${REVIEW_PROFILE}",
         "OLLAMA_API_KEY": "\${OLLAMA_API_KEY}"
@@ -45,6 +47,7 @@ cat > "$dest/mcp.json" <<EOF
       "args": ["$structure_sh"],
       "env": {
         "AI_REVIEWER_ROOT": "\${AI_REVIEWER_ROOT}",
+        "AI_REVIEWER_BIN": "\${AI_REVIEWER_BIN}",
         "REVIEW_MCP_ROOT": "\${REVIEW_MCP_ROOT}",
         "STRUCTURE_MCP_ROOT": "\${REVIEW_MCP_ROOT}"
       }

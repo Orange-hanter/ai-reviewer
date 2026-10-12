@@ -5,9 +5,5 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$here/mcp-env.sh"
 
 mcp_drop_placeholder_env
-engine=$(mcp_resolve_engine "$here")
-mcp_apply_consumer_root "$engine"
-script=$engine/bin/pr-review-mcp.mjs
-[ -f "$script" ] || mcp_die "нет $script — AI_REVIEWER_ROOT должен указывать на клон пакета"
-node=$(mcp_resolve_node)
-exec "$node" "$script"
+# Бинарь: `pr-review review-mcp`; откат на node bin/pr-review-mcp.mjs, пока JS не удалён (T33).
+mcp_exec review-mcp bin/pr-review-mcp.mjs "$here"
