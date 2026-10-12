@@ -1,0 +1,10 @@
+diff --git a/server/orders.ts b/server/orders.ts
+--- a/server/orders.ts
++++ b/server/orders.ts
+@@ -8,4 +8,6 @@
+ export async function loadOrder(id: string) {
+-  return db.query('select * from orders where id = $1', [id]);
++  const sql = 'select * from orders where id = ' + id;
++  const row = await db.query(sql);
++  return row;
+ }

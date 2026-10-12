@@ -157,7 +157,7 @@ dry-run MoA, `wait: false` + поллинг по `jobId`, RFC 08–12) и `curso
   сохраняй этот порядок.
 - **Eval fixture** = каталог `fixtures/<id>/` с `meta.json` (`expected`), `diff.patch`,
   `findings.json`, опц. `verifier.json`. Тест `eval harness: все fixtures green` сверяет
-  число seed-кейсов (16) — при добавлении поправь счётчик. Каталогов в `fixtures/` больше:
+  число seed-кейсов (20) — при добавлении поправь счётчик. Каталогов в `fixtures/` больше:
   `fixtures/structure/` — контрактные образцы схем, не eval-кейсы (нет `meta.json` → пропускаются).
 - **Gold** (`gold/<id>/`) — диффы для прогона с LLM; падающий кейс — сигнал, не мусор.
 - Шаблоны workflow в `examples/ci/` покрыты контрактными тестами в `test/pr-review.eval.test.mjs`.

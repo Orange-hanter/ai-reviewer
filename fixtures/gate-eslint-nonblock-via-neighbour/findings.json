@@ -1,0 +1,26 @@
+{
+  "findings": [
+    {
+      "file": "server/orders.ts",
+      "line": 10,
+      "severity": "major",
+      "confidence": 1,
+      "title": "eslint: no-unused-vars",
+      "body": "'sql' is assigned but never used",
+      "model": "eslint-prescan",
+      "prescan": true,
+      "ruleId": "no-unused-vars",
+      "prescanBlock": false
+    },
+    {
+      "file": "server/orders.ts",
+      "line": 11,
+      "severity": "minor",
+      "confidence": 0.4,
+      "title": "лишняя переменная row",
+      "body": "можно вернуть сразу",
+      "model": "m1",
+      "carried": true
+    }
+  ]
+}

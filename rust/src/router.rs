@@ -112,14 +112,10 @@ pub fn is_rename_only_section(section: Option<&str>) -> bool {
     if section.is_empty() {
         return false;
     }
-    static RE_RENAME: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    // `rename from` сам по себе rename-only НЕ делает: «переименовал и поменял логику»
+    // приходит с хунками и обязан ревьюиться (RFC 17). Rename без правок либо
+    // `similarity index 100%`, либо секция без строк `+`/`-` — оба случая ниже.
     static RE_SIMILARITY: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    if RE_RENAME
-        .get_or_init(|| regex::Regex::new(r"(?m)^rename from ").unwrap())
-        .is_match(section)
-    {
-        return true;
-    }
     if RE_SIMILARITY
         .get_or_init(|| regex::Regex::new(r"(?m)^similarity index 100(?:\.0*)?%").unwrap())
         .is_match(section)
@@ -301,8 +297,12 @@ mod tests {
         assert!(!is_rename_only_section(Some("+add only")));
         assert!(!is_rename_only_section(None));
         assert!(!is_rename_only_section(Some("")));
-        // JS проверяет `rename from` ПЕРВЫМ — similarity 90% не спасает от rename-only
+        // rename без хунков — rename-only при любой similarity
         assert!(is_rename_only_section(Some("similarity index 90%\nrename from a\nrename to b")));
+        // rename с правками — ревьюится (RFC 17)
+        assert!(!is_rename_only_section(Some(
+            "similarity index 90%\nrename from a.ts\nrename to b.ts\n--- a/a.ts\n+++ b/b.ts\n@@ -1 +1 @@\n-return check(user);\n+return true;"
+        )));
     }
 
     #[test]
