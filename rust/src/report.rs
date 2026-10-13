@@ -1144,6 +1144,22 @@ fn verifier_unavailable_banner(vu: &Value) -> String {
     }
 }
 
+/// Баннер «ревью неполное» (RFC 19) — паритетно coverageGapBannerJs.
+fn coverage_gap_banner(cg: &Value) -> String {
+    let n = format!(
+        "{} из {} частей PR не отревьюены из-за сбоя модели",
+        tmpl(cg.get("failed")),
+        tmpl(cg.get("total")),
+    );
+    if cg.get("blocked").and_then(Value::as_bool).unwrap_or(false) {
+        format!(
+            "> ⛔ **Merge заблокирован: ревью неполное** — {n}, находок по ним нет. Перезапустите ревью. Пропускать merge при сбое — `REVIEW_LLM_REQUIRED=0`.\n\n"
+        )
+    } else {
+        format!("> ⚠️ **Ревью неполное** — {n}; merge не блокируется (`REVIEW_LLM_REQUIRED=0`).\n\n")
+    }
+}
+
 /// Полный sticky (buildSummary). cfg — slim-конфиг (SummaryCfg::from_value),
 /// input — сериализованный input pipeline'а (см. шапку модуля), markers —
 /// MARKERS.review/dataKey активного профиля (аргументом, как MARKERS.inline
@@ -1169,10 +1185,10 @@ pub fn build_summary(
     let head_sha = input.get("headSha");
     // Verifier недоступен (RFC 18): {reason, unverified, blocked} или null.
     let verifier_unavailable = input.get("verifierUnavailable").filter(|v| v.is_object());
-    let degraded = verifier_unavailable
-        .and_then(|v| v.get("blocked"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    // Части PR без ревью из-за сбоя модели (RFC 19): {failed, total, blocked} или null.
+    let coverage_gap = input.get("coverageGap").filter(|v| v.is_object());
+    let blocked_of = |v: Option<&Value>| v.and_then(|v| v.get("blocked")).and_then(Value::as_bool).unwrap_or(false);
+    let degraded = blocked_of(verifier_unavailable) || blocked_of(coverage_gap);
 
     // Тексты файлов диффа (для запасного fp) — карта из обёртки.
     let texts: BTreeMap<String, LineText> = match file_texts {
@@ -1258,6 +1274,9 @@ pub fn build_summary(
     }
     if let Some(vu) = verifier_unavailable {
         md.push_str(&verifier_unavailable_banner(vu));
+    }
+    if let Some(cg) = coverage_gap {
+        md.push_str(&coverage_gap_banner(cg));
     }
 
     md.push_str(&build_walkthrough_section(Some(&Value::Array(reviews.to_vec())))?);

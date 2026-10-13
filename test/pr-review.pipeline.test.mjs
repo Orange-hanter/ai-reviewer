@@ -908,3 +908,94 @@ test('pipeline: verifier без кандидатов уровня блока —
   assert.equal(code, 0);
   assert.ok(!calls.upsertSticky[0].includes('verifier недоступен'));
 });
+
+// ---------------------------------------------------------------------------
+// RFC 19: покрытие по чанкам — упавшая часть PR не выдаётся за отревьюенную
+// ---------------------------------------------------------------------------
+
+const okEmpty = (model) => ({ model, summary: 'ok', verdict: 'comment', findings: [] });
+
+test('pipeline: чанк упал у всех моделей → degraded-блок «ревью неполное» (RFC 19)', async () => {
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF,
+    reviews: [{ ...okEmpty('m1'), failedChunks: [0] }, { ...okEmpty('m2'), failedChunks: [0] }],
+  });
+  assert.equal(code, 1, 'REVIEW_LLM_REQUIRED=1 (дефолт): часть PR без ревью блокирует до перезапуска');
+  const md = calls.upsertSticky[0];
+  assert.ok(md.includes('⛔ ревью не завершено'));
+  assert.ok(md.includes('Merge заблокирован: ревью неполное** — 1 из 1 частей PR'));
+});
+
+test('pipeline: чанк упал у одной модели, другая его отревьюила → покрыт, не блок', async () => {
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF,
+    reviews: [{ ...okEmpty('m1'), failedChunks: [0] }, okEmpty('m2')],
+  });
+  assert.equal(code, 0);
+  assert.ok(!calls.upsertSticky[0].includes('ревью неполное'));
+});
+
+test('pipeline: часть PR без ревью + REVIEW_LLM_REQUIRED=0 → fail-open с заметкой', async () => {
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF,
+    reviews: [{ ...okEmpty('m1'), failedChunks: [0] }, { ...okEmpty('m2'), failedChunks: [0] }],
+    env: { REVIEW_LLM_REQUIRED: '0' },
+  });
+  assert.equal(code, 0);
+  assert.ok(calls.upsertSticky[0].includes('⚠️ **Ревью неполное**'));
+});
+
+test('инкрементально: файл упавшей части PR ревьюится заново, а не считается просмотренным (RFC 19)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr-cov-'));
+  const stateFile = join(dir, 'state.json');
+  const env = { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateFile, REVIEW_LLM_REQUIRED: '0' };
+  try {
+    const failBar = (chunks) => {
+      const ci = chunks.findIndex((c) => (c.paths || []).includes('bar.ts'));
+      return ci >= 0 ? [ci] : [];
+    };
+    await runPipeline({
+      diff: TWO_FILE_DIFF, reviews: [], env,
+      mutateDeps: (deps) => {
+        deps.engine.reviewAllModels = async (chunks) => ['m1', 'm2'].map((m) => ({ ...okEmpty(m), failedChunks: failBar(chunks) }));
+      },
+    });
+    const reviewedPaths = [];
+    await runPipeline({
+      diff: TWO_FILE_DIFF_V2, reviews: [], env,
+      mutateDeps: (deps) => {
+        deps.engine.reviewAllModels = async (chunks) => {
+          for (const c of chunks) reviewedPaths.push(...(c.paths || []));
+          return ['m1', 'm2'].map(okEmpty);
+        };
+      },
+    });
+    assert.ok(reviewedPaths.includes('bar.ts'),
+      'bar.ts не изменился, но в первом прогоне его часть упала — он обязан уйти в LLM заново');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('engine: индексы чанков, упавших у модели, доходят до результата (RFC 19)', async () => {
+  const { createReviewEngine } = await import('../lib/engine.mjs');
+  const { createPromptBuilder } = await import('../lib/prompt.mjs');
+  const cfg = loadReviewConfig({ ...ENV, OLLAMA_MODELS: 'm1' }, { dryRun: true, diffFile: '/dev/null', repo: 'o/r', prNumber: 1 });
+  // Падает ровно вызов по чанку b.ts: заголовок его диффа есть только в его промпте.
+  const ollama = {
+    chatJson: async (messages) => {
+      if (JSON.stringify(messages).includes('diff --git a/b.ts')) throw new Error('503');
+      return { summary: 's', findings: [] };
+    },
+  };
+  const engine = createReviewEngine(cfg, { ollama, prompt: createPromptBuilder(), log: () => {} });
+  const chunk = (p) => ({ annotated: `diff --git a/${p} b/${p}\n`, fileContents: '', paths: [p] });
+  const results = await engine.reviewAllModels([chunk('a.ts'), chunk('b.ts'), chunk('c.ts')], {
+    blastBlocks: [], pr: { number: 1, title: 't', body: '' }, priorFindings: [], changedPaths: ['a.ts', 'b.ts', 'c.ts'],
+    prescanSection: '', deadline: 0,
+  });
+  assert.equal(results.length, 1);
+  assert.ok(!results[0].error, 'частичный сбой — не ошибка модели целиком');
+  assert.deepEqual(results[0].failedChunks, [1]);
+  assert.deepEqual(results[0].skippedChunkIndexes, []);
+});
