@@ -9,14 +9,23 @@
 //! Ошибки:        exit 2 + {"error","status","empty","networky","throttled"} в stderr —
 //!                 JS-обёртка reconstruct'ит Error с флагами status/empty (как у JS-ветки).
 //!
-//! Семафоры и JSON-mode graceful fallback намеренно в JS-обёртке (lib/llm.mjs): бинарь —
-//! одноразовый процесс на запрос, сквозное состояние семафоров живёт только в JS.
+//! Режим каскада (с 0.6): во входе есть `"cascade": "json" | "prose"` — бинарь делает
+//! весь каскад ретраев chatJson/chatText (rust/src/llm/cascade.rs), а не один запрос.
+//!   json  → stdout {"value","repaired","usage","usages","throttled","log"}
+//!   prose → stdout {"content","usage","usages","throttled","log"}
+//!   сбой  → exit 2 + {"error","status","empty","networky","truncated","badEscape",
+//!           "throttled","usages","log"} в stderr.
+//! `log` — строки для лога обёртки, `usages` — usage каждого дошедшего ответа (учёт цены).
+//!
+//! Семафоры намеренно в JS-обёртке (lib/llm.mjs): бинарь — одноразовый процесс на
+//! запрос, сквозное состояние семафоров живёт только в JS.
 
 use std::io::Read;
 
 use anyhow::{Context, Result};
 use serde_json::json;
 
+use ai_reviewer::llm::cascade::{run_cascade, CascadeRequest};
 use ai_reviewer::llm::{chat, ChatRequest, LlmError};
 
 fn main() {
@@ -29,7 +38,18 @@ fn main() {
 fn run() -> Result<()> {
     let mut input = String::new();
     std::io::stdin().read_to_string(&mut input).context("чтение stdin")?;
-    let req: ChatRequest = serde_json::from_str(&input).context("вход должен быть ChatRequest JSON")?;
+    let raw: serde_json::Value = serde_json::from_str(&input).context("вход должен быть JSON")?;
+    if raw.get("cascade").is_some() {
+        let req: CascadeRequest = serde_json::from_value(raw).context("вход должен быть CascadeRequest JSON")?;
+        let (ok, payload) = run_cascade(&req).to_json(req.cascade);
+        if ok {
+            println!("{payload}");
+            return Ok(());
+        }
+        eprintln!("{payload}");
+        std::process::exit(2);
+    }
+    let req: ChatRequest = serde_json::from_value(raw).context("вход должен быть ChatRequest JSON")?;
     match chat(&req) {
         Ok(out) => {
             println!(

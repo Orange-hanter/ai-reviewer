@@ -35,6 +35,12 @@ last_updated: 2026-09-10
 обязана отдавать валидный JSON *и* на `low`, *и* на `none`. Advisors такому не подчиняются —
 у них `jsonMode: false`, им проза штатна.
 
+Исключение — модели с обязательным reasoning (на OpenRouter `gemini-3.8-flash`,
+`glm-5.3-flash`): на `none` они отвечают `400 Reasoning is mandatory`. С 0.6 каскад в Rust
+(`rust/src/llm/cascade.rs`, RFC 20) на такой 400 после `none` повторяет вызов на `low` с
+`max_tokens + 8000`, поэтому от них требуется валидный JSON только на `low`. Правило работает
+лишь с собранным бинарём `llm`: deprecated JS-каскад его не знает.
+
 Замеры `pr-review-probe-models` (2026-09-03, Ollama Cloud):
 
 | Модель | `low` | `none` | Годна на JSON-роль |
