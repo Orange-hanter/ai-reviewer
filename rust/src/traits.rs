@@ -155,6 +155,11 @@ pub struct PostReviewParams {
     pub inline: Vec<InlineComment>,
     /// Пустая строка — не передавать `commit_id` (`lib/github.mjs:190`).
     pub head_sha: String,
+    /// Шапка review; `None` — `review_summary_body(inline.len())`
+    /// (`postReview({ body = reviewSummaryBody(inline.length) })`, `lib/github.mjs:224`).
+    /// Через неё обёртка пиктограмм (`crate::icons`) подставляет шапку с картинкой.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 /// Результат `postReview`: `res?.id || null` (`lib/github.mjs:192`).

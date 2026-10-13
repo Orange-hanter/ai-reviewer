@@ -20,6 +20,8 @@ pub mod export;
 pub mod fixtures;
 pub mod findings;
 pub mod github;
+// RFC 20 drift (a8f19e2/b475ffb): пиктограммы вместо эмодзи (lib/icons.mjs).
+pub mod icons;
 pub mod json_repair;
 // RFC 20 T23: общий stdio-транспорт MCP (транспортная часть T40).
 pub mod mcp_stdio;

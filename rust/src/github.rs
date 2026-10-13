@@ -144,6 +144,17 @@ fn header_or(value: &str, fallback: &'static str) -> HeaderValue {
     HeaderValue::from_str(value).unwrap_or_else(|_| HeaderValue::from_static(fallback))
 }
 
+/// Тело review-сводки над inline-комментариями (`reviewSummaryBody`, `lib/github.mjs:86-90`).
+/// Вынесено, чтобы обёртка пиктограмм (`crate::icons::WithIcons`) подставляла ту же строку
+/// с картинкой через `PostReviewParams.body`.
+pub fn review_summary_body(inline_count: usize) -> &'static str {
+    if inline_count > 0 {
+        "🤖 Авто-ревью: инлайн-замечания ниже, общий вывод — в закреплённом комментарии."
+    } else {
+        "🤖 Авто-ревью: инлайн-замечаний нет, общий вывод — в закреплённом комментарии."
+    }
+}
+
 /// HTTP-клиент транспорта: per-op таймаут 30с — аналог `AbortController(30_000)`
 /// вокруг каждой попытки в `ghRaw`.
 ///
@@ -813,11 +824,7 @@ impl GithubApi for RealGithubClient {
     }
 
     fn post_review(&self, params: &PostReviewParams) -> Result<PostReviewResult> {
-        let body = if params.inline.is_empty() {
-            "🤖 Авто-ревью: инлайн-замечаний нет, общий вывод — в закреплённом комментарии."
-        } else {
-            "🤖 Авто-ревью: инлайн-замечания ниже, общий вывод — в закреплённом комментарии."
-        };
+        let body = params.body.as_deref().unwrap_or_else(|| review_summary_body(params.inline.len()));
         let mut payload = json!({
             "event": "COMMENT",
             "body": body,

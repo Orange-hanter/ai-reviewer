@@ -526,6 +526,10 @@ pub struct ReviewPipeline<'a> {
     profile: &'a Profile,
     deps: PipelineDeps<'a>,
     opts: PipelineOptions<'a>,
+    /// `withIcons(deps.github, cfg.render.iconBaseUrl)` (`pipeline.mjs:421-422`):
+    /// пиктограммы — на границе публикации, рендер и логи остаются с эмодзи.
+    /// `None` — база пустая, публикуем через `deps.github` как есть.
+    icons: Option<crate::icons::WithIcons<'a>>,
 }
 
 /// `createReviewPipeline(cfg, deps)`.
@@ -535,12 +539,21 @@ pub fn create_review_pipeline<'a>(
     deps: PipelineDeps<'a>,
     opts: PipelineOptions<'a>,
 ) -> ReviewPipeline<'a> {
-    ReviewPipeline { cfg, profile, deps, opts }
+    let icons = crate::icons::WithIcons::wrap(deps.github, &crate::icons::icon_base_from_cfg(cfg));
+    ReviewPipeline { cfg, profile, deps, opts, icons }
 }
 
 impl<'a> ReviewPipeline<'a> {
     fn log(&self, msg: &str) {
         (self.deps.log)(msg);
+    }
+
+    /// github-клиент прогона: с обёрткой пиктограмм, если база задана.
+    fn github(&self) -> &dyn crate::traits::GithubApi {
+        match &self.icons {
+            Some(w) => w,
+            None => self.deps.github,
+        }
     }
 
     fn now(&self) -> u64 {
@@ -760,12 +773,12 @@ impl<'a> ReviewPipeline<'a> {
                 inline.len()
             ));
         }
-        let gh = self.deps.github;
+        let gh = self.github();
         if to_post.is_empty() && cleanup_without_post {
             let cleared = gh.delete_stale_inline(&DeleteStaleOpts::default())?;
             return Ok((0, inline.len(), cleared));
         }
-        let posted = gh.post_review(&PostReviewParams { inline: to_post.clone(), head_sha: head_sha.to_string() })?;
+        let posted = gh.post_review(&PostReviewParams { inline: to_post.clone(), head_sha: head_sha.to_string(), body: None })?;
         // review id не пришёл → чистку пропускаем: иначе сотрём только что запощенное.
         let cleared = match posted.review_id {
             Some(id) => gh.delete_stale_inline(&DeleteStaleOpts { except_review_id: Some(id) })?,
@@ -828,7 +841,7 @@ impl<'a> ReviewPipeline<'a> {
         } else {
             // Сбой GitHub API при загрузке диффа — тот же мягкий отказ, что «нет диффа»:
             // инфра-сбой не превращается в блок.
-            let loaded = match self.deps.github.load_diff() {
+            let loaded = match self.github().load_diff() {
                 Ok(Some(l)) => l,
                 Ok(None) | Err(_) => {
                     return Err(die("не удалось загрузить дифф PR (нет REPO/PR/token или сбой GitHub API)"));
@@ -906,7 +919,7 @@ impl<'a> ReviewPipeline<'a> {
             let mut log = |s: &str| self.log(s);
             read_changed_files_in(&cwd, &changed_paths, lim("maxFileLines"), &mut log, Some(&added_paths))
         };
-        let prior_sticky = match self.deps.github.read_prior_sticky_data() {
+        let prior_sticky = match self.github().read_prior_sticky_data() {
             Ok(s) => s,
             Err(e) => {
                 // Молчаливый провал стоил бы сходимости: без prior findings прогон с нуля.
@@ -1650,7 +1663,7 @@ impl<'a> ReviewPipeline<'a> {
 
         let max_inline = usize_of(lim("maxInline"));
         let (posted, all_inline, cleared) = self.publish_inline(&inline, &head_sha, max_inline, false)?;
-        let op = self.deps.github.upsert_sticky(&summary.md)?;
+        let op = self.github().upsert_sticky(&summary.md)?;
         self.log(&format!("review запощен ({posted}/{all_inline} inline, очищено старых {cleared}) · summary {op}"));
 
         if truthy(cfg, &["triage", "enabled"]) {
@@ -1665,7 +1678,7 @@ impl<'a> ReviewPipeline<'a> {
                 "trustedAuthors": trusted,
             })));
             let log: &dyn Fn(&str) = self.deps.log;
-            let stats = run_auto_triage(self.deps.github, &tctx, &markers.inline, log);
+            let stats = run_auto_triage(self.github(), &tctx, &markers.inline, log);
             obs.log_event("auto_triage", &serde_json::to_value(stats).unwrap_or(Value::Null));
             if stats.resolved > 0 {
                 self.log(&format!("auto-triage: resolved {} thread(s)", stats.resolved));
@@ -1731,8 +1744,8 @@ impl<'a> ReviewPipeline<'a> {
             self.log(&format!("=== DRY-RUN: router {} — LLM пропущен ===", route.route));
             self.log(&format!("\n--- SUMMARY MARKDOWN ---\n{md}"));
         } else if post_creds {
-            let _ = self.deps.github.delete_stale_inline(&DeleteStaleOpts::default());
-            self.deps.github.upsert_sticky(&md)?;
+            let _ = self.github().delete_stale_inline(&DeleteStaleOpts::default());
+            self.github().upsert_sticky(&md)?;
             self.log(&format!("router {}: sticky обновлён, LLM не вызывался", route.route));
         }
         st.final_obs = json!({ "exitCode": 0, "route": route.route, "wouldBlock": false, "degraded": true });
@@ -1853,7 +1866,7 @@ impl<'a> ReviewPipeline<'a> {
                 js_slice_utf16(&format!("{e:#}"), 200)
             )),
         }
-        if let Err(e) = self.deps.github.upsert_sticky(&body) {
+        if let Err(e) = self.github().upsert_sticky(&body) {
             self.log(&format!("и заметку не запостили: {}", js_slice_utf16(&format!("{e:#}"), 200)));
         }
         // Неблокирующий fail-open дежурного не будит: диагноз остаётся в sticky.

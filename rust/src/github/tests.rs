@@ -19,7 +19,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::{
-    gh_list, gh_raw, GhRequest, GithubConfig, RealGithubClient, MAX_LIST_PAGES, MAX_THREAD_PAGES,
+    gh_list, gh_raw, review_summary_body, GhRequest, GithubConfig, RealGithubClient, MAX_LIST_PAGES,
+    MAX_THREAD_PAGES,
 };
 use crate::profile::Markers;
 use crate::traits::{
@@ -687,7 +688,7 @@ fn client_transient_500_ретрай_затем_успех() {
 fn client_non_transient_400_сразу_ошибка_без_ретрая() {
     let server = fake_server(|_| Some((400, vec![], b"bad".to_vec())));
     let err = client(&server.api)
-        .post_review(&PostReviewParams { inline: vec![], head_sha: "abc".to_string() })
+        .post_review(&PostReviewParams { inline: vec![], head_sha: "abc".to_string(), body: None })
         .unwrap_err();
     assert_eq!(err.to_string(), "GitHub POST /repos/o/r/pulls/7/reviews → 400: bad");
     assert_eq!(reqs(&server).len(), 1);
@@ -701,6 +702,7 @@ fn client_post_review_commit_id_и_id_ревью() {
     let params = PostReviewParams {
         inline: vec![InlineComment::new("a.ts", 1, "x")],
         head_sha: "deadbeef".to_string(),
+        body: None,
     };
     let res = client(&server.api).post_review(&params).unwrap();
     assert_eq!(res.review_id, Some(555));
@@ -722,7 +724,7 @@ fn client_post_review_commit_id_и_id_ревью() {
 fn client_post_review_без_инлайнов_меняет_текст_и_не_шлёт_commit_id() {
     let server = fake_server(|_| Some(json_res(json!({}))));
     let res = client(&server.api)
-        .post_review(&PostReviewParams { inline: vec![], head_sha: String::new() })
+        .post_review(&PostReviewParams { inline: vec![], head_sha: String::new(), body: None })
         .unwrap();
     assert_eq!(res.review_id, None, "нет id → чистку старых инлайнов пропускаем");
     let sent = body_of(&reqs(&server)[0]);
@@ -732,6 +734,22 @@ fn client_post_review_без_инлайнов_меняет_текст_и_не_ш
         sent["body"],
         json!("🤖 Авто-ревью: инлайн-замечаний нет, общий вывод — в закреплённом комментарии.")
     );
+}
+
+#[test]
+fn client_post_review_явный_body_уходит_как_есть() {
+    // lib/github.mjs:224 — `body = reviewSummaryBody(inline.length)` только по умолчанию.
+    let server = fake_server(|_| Some(json_res(json!({"id": 1}))));
+    client(&server.api)
+        .post_review(&PostReviewParams {
+            inline: vec![],
+            head_sha: "a".to_string(),
+            body: Some("<img alt=\"🤖\"> шапка".to_string()),
+        })
+        .unwrap();
+    assert_eq!(body_of(&reqs(&server)[0])["body"], json!("<img alt=\"🤖\"> шапка"));
+    assert!(review_summary_body(0).starts_with("🤖 Авто-ревью: инлайн-замечаний нет"));
+    assert!(review_summary_body(2).starts_with("🤖 Авто-ревью: инлайн-замечания ниже"));
 }
 
 // --- deleteStaleInline ---

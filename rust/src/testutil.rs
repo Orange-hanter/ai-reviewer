@@ -786,6 +786,7 @@ mod tests {
             .post_review(&PostReviewParams {
                 inline: vec![InlineComment::new("foo.ts", 3, "тело")],
                 head_sha: "deadbeef".to_string(),
+                body: None,
             })
             .unwrap();
         assert_eq!(posted.review_id, Some(555), "дефолт id повторяет JS-фейк");
