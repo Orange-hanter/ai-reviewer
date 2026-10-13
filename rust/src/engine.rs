@@ -816,6 +816,7 @@ impl<'a> RealEngine<'a> {
                 "model": model,
                 "res": demote_out_of_chunk(&res, &chunks[ci], ci),
                 "hasCode": has_code[ci],
+                "ci": ci,
             })
         })
     }
@@ -1118,6 +1119,7 @@ impl<'a> RealEngine<'a> {
                 "model": agg_model,
                 "res": demote_out_of_chunk(&res, &chunks[ci], ci),
                 "hasCode": needs[ci],
+                "ci": ci,
             })
         })
     }
@@ -1141,6 +1143,8 @@ impl<'a> RealEngine<'a> {
             Value::Array(merge_specialist_references(&chunk_results)),
         );
         o.insert("skippedChunks".into(), json!(skipped));
+        o.insert("failedChunks".into(), json!(failed_chunk_indexes(&done, None)));
+        o.insert("skippedChunkIndexes".into(), json!(skipped_chunk_indexes(&done, None)));
         vec![agg]
     }
 
@@ -1200,6 +1204,14 @@ impl<'a> RealEngine<'a> {
             let plain = self.run_models_over_chunks(std::slice::from_ref(&fb), chunks, ctx);
             let mut fb_res = self.aggregate_one(&fb, &plain);
             let o = fb_res.as_object_mut().expect("aggregate_model отдаёт объект");
+            // Покрытие резерва (RFC 19): его сбои и пропуски — свои, не упавшей модели.
+            let fb_skipped = plain
+                .iter()
+                .filter(|d| js_truthy(d.get("res").and_then(|r| r.get("skipped")).unwrap_or(&Value::Null)))
+                .count();
+            o.insert("skippedChunks".into(), json!(fb_skipped));
+            o.insert("failedChunks".into(), json!(failed_chunk_indexes(&plain, None)));
+            o.insert("skippedChunkIndexes".into(), json!(skipped_chunk_indexes(&plain, None)));
             o.insert(
                 "fallbackFor".into(),
                 json!(if moa_mode { self.cfg.moa_aggregator.clone() } else { prev_model }),
@@ -1257,9 +1269,10 @@ impl<'a> RealEngine<'a> {
                             )
                     })
                     .count();
-                agg.as_object_mut()
-                    .expect("aggregate_model отдаёт объект")
-                    .insert("skippedChunks".into(), json!(skipped));
+                let o = agg.as_object_mut().expect("aggregate_model отдаёт объект");
+                o.insert("skippedChunks".into(), json!(skipped));
+                o.insert("failedChunks".into(), json!(failed_chunk_indexes(&done, Some(model))));
+                o.insert("skippedChunkIndexes".into(), json!(skipped_chunk_indexes(&done, Some(model))));
                 agg
             })
             .collect();
@@ -1296,6 +1309,35 @@ impl EngineApi for RealEngine<'_> {
     fn verify_findings(&self, candidates: &[Value], ctx: &VerifyContext) -> Result<Vec<Value>> {
         self.verifier().verify_findings(candidates, ctx)
     }
+}
+
+/// Элемент `done` относится к модели (`model === undefined` — к любой).
+fn done_of_model(d: &Value, model: Option<&str>) -> bool {
+    model.is_none_or(|m| d.get("model").and_then(Value::as_str) == Some(m))
+}
+
+fn done_res_flag(d: &Value, key: &str) -> bool {
+    js_truthy(d.get("res").and_then(|r| r.get(key)).unwrap_or(&Value::Null))
+}
+
+fn done_ci(d: &Value) -> Value {
+    d.get("ci").cloned().unwrap_or(Value::Null)
+}
+
+/// `failedChunkIndexes` (`lib/engine.mjs`, RFC 19): индексы чанков, которые модель не
+/// отревьюила из-за сбоя (ошибка вызова, сорванный JSON), а не тайм-бюджета. Агрегат
+/// собирается из успешных чанков, и без этого поля «7 из 10 частей» выглядело бы как
+/// полный прогон.
+pub(crate) fn failed_chunk_indexes(done: &[Value], model: Option<&str>) -> Vec<Value> {
+    done.iter()
+        .filter(|d| done_of_model(d, model) && done_res_flag(d, "error") && !done_res_flag(d, "skipped"))
+        .map(done_ci)
+        .collect()
+}
+
+/// `skippedChunkIndexes`: индексы чанков, пропущенных по тайм-бюджету.
+pub(crate) fn skipped_chunk_indexes(done: &[Value], model: Option<&str>) -> Vec<Value> {
+    done.iter().filter(|d| done_of_model(d, model) && done_res_flag(d, "skipped")).map(done_ci).collect()
 }
 
 /// `String#length` в JS — число UTF-16 кодовых юнитов.
@@ -1336,6 +1378,9 @@ pub fn model_review_from_value(v: &Value) -> ModelReview {
         Some(Value::Array(a)) => a.clone(),
         _ => Vec::new(),
     };
+    let indexes = |key: &str| -> Vec<usize> {
+        arr(key).iter().filter_map(|x| x.as_u64()).map(|n| n as usize).collect()
+    };
     ModelReview {
         model: opt_str("model").unwrap_or_default(),
         summary: opt_str("summary"),
@@ -1343,6 +1388,8 @@ pub fn model_review_from_value(v: &Value) -> ModelReview {
         error: opt_str("error"),
         skipped: flag("skipped"),
         skipped_chunks: count("skippedChunks") as u32,
+        failed_chunks: indexes("failedChunks"),
+        skipped_chunk_indexes: indexes("skippedChunkIndexes"),
         aggregator: opt_str("aggregator"),
         moa_references: arr("moaReferences").iter().map(js_to_string).collect(),
         references: arr("references"),
@@ -1696,6 +1743,36 @@ mod tests {
         let engine = mk_engine(&llm, engine_cfg(), &log);
         engine.review_all_models(chunks, ctx).expect("движок не бросает");
         llm.json_prompts()
+    }
+
+    /// RFC 19: индексы чанков, упавших у модели, доходят до результата; тайм-бюджетные —
+    /// отдельным полем.
+    #[test]
+    fn failed_chunk_indexes_reach_model_review() {
+        let llm = FakeLlm::json(|messages, _| {
+            if messages.to_string().contains("diff --git a/b.ts") {
+                Err("503".to_string())
+            } else {
+                Ok(json!({"summary": "s", "findings": []}))
+            }
+        });
+        let log = |_: &str| {};
+        let engine = mk_engine(&llm, engine_cfg(), &log);
+        let chunk = |p: &str| chunk_of(&format!("diff --git a/{p} b/{p}\n"), &[p], &[], false);
+        let res = engine
+            .review_all_models(&[chunk("a.ts"), chunk("b.ts"), chunk("c.ts")], &ReviewContext::default())
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        assert!(res[0].error.is_none(), "частичный сбой — не ошибка модели целиком");
+        assert_eq!(res[0].failed_chunks, vec![1]);
+        assert!(res[0].skipped_chunk_indexes.is_empty());
+
+        let late = FakeLlm::json(|_, _| panic!("LLM не должен вызываться после дедлайна"));
+        let engine = mk_engine(&late, engine_cfg(), &log);
+        let ctx = ReviewContext { deadline: NOW - 1000, ..Default::default() };
+        let res = engine.review_all_models(&plain_chunks(), &ctx).unwrap();
+        assert_eq!(res[0].skipped_chunk_indexes, vec![0, 1]);
+        assert!(res[0].failed_chunks.is_empty(), "тайм-бюджет — не сбой");
     }
 
     #[test]
