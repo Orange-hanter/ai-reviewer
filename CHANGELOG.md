@@ -25,8 +25,51 @@ last_updated: 2026-09-10
   строите — уберите флаг или задайте `0`. Дефолт движка — `0`, без шаблона ничего не меняется.
 - `graphifyy` в шаблоне CI и в `docs/model-tuning.md`: **0.9.52 → 0.9.87** (формат вывода
   `graphify affected` и строка `Built from commit` в отчёте не изменились; ключ кэша venv сменён).
+- **Блок решает сама находка, а не её соседи по 3 строкам** (RFC 17). Пропадут блоки, где
+  причиной в sticky стоял minor, critical с низкой confidence блокировал за счёт соседа или
+  eslint-правило вне `blockRules` блокировало через соседнюю находку. В экспорте
+  `consensusBlock` теперь только у блокирующей находки (форма артефакта та же).
+- **Rename с правками и удалённые файлы ревьюятся** (RFC 17): раньше первый уходил в skip,
+  второй был невидим роутеру. Такие PR теперь идут маршрутом full — больше LLM-вызовов.
+- **Verifier проверяет блокеры сверх `REVIEW_VERIFIER_MAX` батчами** (новая
+  `REVIEW_VERIFIER_BATCHES`, дефолт `3`) вместо молчаливого понижения в minor. Прежнее
+  поведение — `REVIEW_VERIFIER_BATCHES=1`.
+- **Сбой verifier'а — одно состояние «недоступен»** (RFC 18). Раньше упавший HTTP-вызов
+  блокировал merge по слову агрегатора, а пустой ответ модели молча пропускал. Теперь находка
+  уровня блока без вердикта из-за сбоя показывается как minor с пометкой, а прогон при
+  `REVIEW_LLM_REQUIRED=1` (дефолт) блокируется как degraded с баннером «verifier недоступен —
+  перезапустите». Пропускать merge при сбое — `REVIEW_LLM_REQUIRED=0`; прежнее поведение
+  целиком — `REVIEW_VERIFIER_STRICT=0`. Из баннера блока убрана неверная фраза «Инфра-сбои
+  merge не блокируют».
 - Формат футера sticky, namespace маркеров, контракты `swarm` / `export` / `structure` —
   без изменений.
+
+### Исправлено — сбой verifier'а (RFC 18)
+
+- `markVerifierUnavailable` (`pipeline.mjs`): исключение первого вызова, ни одного валидного
+  вердикта, тайм-бюджет и сбой хвостового батча → `verifierStatus: unavailable`, severity → minor;
+  `degradedBlock` по `REVIEW_LLM_REQUIRED` в коде выхода, `wouldBlock`, событиях `gate`/`verdict`.
+- `buildSummary` (JS и Rust): вход `verifierUnavailable`, заголовок «⛔ ревью не завершено», баннер;
+  `verdict.blocked` и `blocked` в истории прогонов учитывают degraded-блок.
+- Событие `verifier_unavailable {reason, unverified}`.
+- Инкрементальный state: файл с находкой `unavailable`/`overflow` не получает хэш, находка не
+  переносится — перезапуск ревьюит файл заново, а не переносит непроверенное как minor.
+
+### Исправлено — дыры гейта (RFC 17)
+
+- `clusterFindings`/`resolveBlockers` (JS и Rust): `consensusBlock` и `confidenceBlock`
+  считаются по находке; кластер даёт только счёт моделей. Блокер кластера — первая
+  блокирующая находка; `pipeline.mjs` считает блокирующие кластеры по `some`.
+- `dedupeAgainstPrescan`: LLM-находка снимается только prescan-находкой не ниже по severity.
+- `isRenameOnlySection` (JS и Rust): убран ранний выход по `rename from`.
+- `parseDiff` (JS и Rust): на `+++ /dev/null` путь из `diff --git`; `collectDeletedPaths` —
+  prescan не запускается на удалённых файлах. Удаление распознаётся только по
+  `deleted file mode` в заголовке секции; внутри хунка `+++`/`---` — содержимое: строка
+  `++ /dev/null` в комментарии больше не выводит файл из prescan и не обрывает разбор файла.
+- `runVerifierStage`: батчи по `REVIEW_VERIFIER_MAX`, одно применение вердиктов со сдвигом
+  `candidateIndex`; сбой хвостового батча сохраняет проверенное. `stats.batches` в событии `verifier`.
+- Фикстуры `gate-neighbour-minor-not-blocker`, `gate-neighbour-confidence-no-lift`,
+  `gate-eslint-nonblock-via-neighbour` (eval: 20 seed-кейсов); parity-кейсы `rfc17 *`.
 
 ### Добавлено — `REVIEW_BLAST_REQUIRED` (RFC 16)
 

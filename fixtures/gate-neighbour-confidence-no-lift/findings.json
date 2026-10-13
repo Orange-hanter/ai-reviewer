@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "file": "server/orders.ts",
+      "line": 10,
+      "severity": "critical",
+      "confidence": 0.5,
+      "title": "возможная утечка соединения",
+      "body": "не уверен",
+      "model": "m1"
+    },
+    {
+      "file": "server/orders.ts",
+      "line": 11,
+      "severity": "major",
+      "confidence": 0.95,
+      "title": "SQL-инъекция через конкатенацию id",
+      "body": "id без параметризации",
+      "model": "m1"
+    }
+  ]
+}

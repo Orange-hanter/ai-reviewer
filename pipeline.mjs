@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
-import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths } from './lib/diff.mjs';
+import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths, collectDeletedPaths } from './lib/diff.mjs';
 import { createLlmClient } from './lib/llm.mjs';
 import { createCostTracker, efficiencyMetrics } from './lib/cost.mjs';
 import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
@@ -147,17 +147,45 @@ async function persistExports(cfg, payload, log, obs) {
   }
 }
 
-/** Стадия verifier Pass B: кандидаты critical/major → второй проход. Fail-open при сбое LLM. */
+/**
+ * Verifier не дал вердикта по находкам уровня блока из-за сбоя (RFC 18): исключение первого
+ * вызова, ни одного валидного вердикта, тайм-бюджет. Такая находка не может считаться
+ * подтверждённым блокером — гейт обещает блок только с вердиктом второго судьи. Она
+ * понижается до minor с `verifierStatus: unavailable`, а судьбу прогона решает
+ * REVIEW_LLM_REQUIRED в pipeline: degraded-блок (дефолт) или fail-open.
+ *
+ * Раньше исход зависел от вида сбоя: исключение оставляло находку critical (блок по слову
+ * агрегатора, без строки verifier в sticky), пустой ответ понижал её до minor (merge проходил).
+ * REVIEW_VERIFIER_STRICT=0 — прежнее поведение: потребитель доверяет агрегатору сам.
+ */
+function markVerifierUnavailable(findings, pending, reason, log, obs) {
+  for (const f of pending) {
+    f.verifierReason = `verifier недоступен (${reason}) — было ${f.severity}, понижено до minor`;
+    f.severity = 'minor';
+    f.verifierStatus = 'unavailable';
+  }
+  log(`verifier недоступен (${reason}): ${pending.length} находок уровня блока не проверены → minor`);
+  obs.logEvent('verifier_unavailable', { reason, unverified: pending.length });
+  return { reason, unverified: pending.length };
+}
+
+/** Стадия verifier Pass B: кандидаты critical/major → второй проход. Сбой — см. markVerifierUnavailable. */
 async function runVerifierStage(allFindings, {
   engine, gate, verifier, deadline, contentMap, annotated, blastBlocks, pr, changedFilesSection,
   actionability, actionabilityCtx, files, symbolCardsByPath = null, limits = {},
 }, log, obs) {
-  const empty = { findings: allFindings, stats: null };
+  const empty = { findings: allFindings, stats: null, unavailable: null };
   if (!verifier.enabled) return empty;
+  const isBlockTier = (f) => gate.blockOn.includes(f.severity) && !f.prescan;
+  // Сбой судит только strict-режим verifier'а: при REVIEW_VERIFIER_STRICT=0 находка без
+  // вердикта и так остаётся как есть — потребитель выбрал доверять агрегатору.
+  const unavailable = (pending, reason) => (verifier.strictBlocks && pending.length
+    ? { ...empty, unavailable: markVerifierUnavailable(allFindings, pending, reason, log, obs) }
+    : empty);
   if (deadline && deadline - Date.now() < 120_000) {
     log('verifier pass B пропущен: тайм-бюджет на исходе (<2 мин в запасе)');
     obs.logEvent('verifier_skip', { reason: 'time_budget' });
-    return empty;
+    return unavailable(allFindings.filter(isBlockTier), 'time_budget');
   }
   // Advisory-кандидаты на подтверждение: доказуемые minor/nit, которые претендуют на строку
   // в PR. Verifier здесь работает не на гейт (severity их не блокирует), а на право занять
@@ -181,7 +209,12 @@ async function runVerifierStage(allFindings, {
       ctx: actionabilityCtx || {},
     }).filter((s) => s.promoted).map((s) => s.finding)
     : [];
-  const candidates = selectVerifierCandidates(allFindings, gate, verifier.maxCandidates, {
+  // Блокеры сверх капа одного вызова не понижаются молча, а идут следующими батчами
+  // (RFC 17): 13-й critical иначе переставал блокировать только потому, что был 13-м.
+  // Кап одного вызова держит размер промпта, число батчей — цену прогона.
+  const batchCap = Math.max(1, verifier.maxCandidates);
+  const maxBatches = Math.max(1, verifier.maxBatches ?? 1);
+  const candidates = selectVerifierCandidates(allFindings, gate, batchCap * maxBatches, {
     candidates: advisoryPool,
     max: actionability?.verifyAdvisory || 0,
   });
@@ -200,21 +233,29 @@ async function runVerifierStage(allFindings, {
     obs.logEvent('verifier_skip', { reason: 'no_candidates' });
     return empty;
   }
-  log(`verifier pass B: ${candidates.length} кандидат(ов) ${gate.blockOn.join('/')} · модель ${verifier.model}`);
-  try {
+  // Первый батч — как прежний единственный вызов: до капа блокеров плюс advisory.
+  // Остальные — только блокеры: advisory не стоят лишнего вызова.
+  const blockTier = candidates.filter(isBlockTier);
+  const advisory = candidates.filter((f) => !isBlockTier(f));
+  const batches = [[...blockTier.slice(0, batchCap), ...advisory]];
+  for (let i = batchCap; i < blockTier.length; i += batchCap) batches.push(blockTier.slice(i, i + batchCap));
+  log(`verifier pass B: ${candidates.length} кандидат(ов) ${gate.blockOn.join('/')} · батчей ${batches.length} · модель ${verifier.model}`);
+
+  async function verifyBatch(batch, i) {
     // Verifier получает только файлы/секции диффа с кандидатами, а не весь PR —
     // иначе на большом PR это самый жирный промпт пайплайна.
-    const candFiles = new Set(candidates.map((c) => c.file).filter(Boolean));
+    const candFiles = new Set(batch.map((c) => c.file).filter(Boolean));
     // …и не файлы целиком, а окна ±contextMargin вокруг строк кандидатов: verifier смотрит
     // одну-две строки на файл, а платил за 1500 строк — причём другой моделью, то есть без
     // шанса переиспользовать кэш префикса advisor'ов (lib/context-window.mjs).
-    const ctxWindow = buildVerifierFileContents(contentMap, candidates, { margin: verifier.contextMargin });
+    const ctxWindow = buildVerifierFileContents(contentMap, batch, { margin: verifier.contextMargin });
     const fileContents = ctxWindow.text;
     const sections = [...extractFileDiffSections(annotated).entries()]
       .filter(([p]) => candFiles.has(p))
       .map(([, s]) => s);
     const annotatedScoped = sections.length ? sections.join('\n') : annotated;
-    log(`verifier ctx: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, контекст ${ctxWindow.before}→${ctxWindow.after} симв. (окна ±${verifier.contextMargin}), дифф ${annotatedScoped.length}/${annotated.length} симв.`);
+    const tag = batches.length > 1 ? ` [батч ${i + 1}/${batches.length}]` : '';
+    log(`verifier ctx${tag}: ${candFiles.size} файл(ов) с кандидатами из ${contentMap.size}, контекст ${ctxWindow.before}→${ctxWindow.after} симв. (окна ±${verifier.contextMargin}), дифф ${annotatedScoped.length}/${annotated.length} симв.`);
     // Карточки символов файлов-кандидатов (RFC 14, решение 4) — только под флагом: это вход
     // судьи, чей вердикт решает блокировку.
     const verifierCards = verifier.symbolCards && symbolCardsByPath?.size
@@ -223,40 +264,89 @@ async function runVerifierStage(allFindings, {
       }).cards
       : [];
     if (verifierCards.length) log(`verifier: карточек символов ${verifierCards.length}`);
-    const verdicts = await engine.verifyFindings(candidates, {
+    return engine.verifyFindings(batch, {
       annotated: annotatedScoped, fileContents, blastBlocks, pr, changedFilesSection,
       ...(verifierCards.length ? { symbolCards: verifierCards } : {}),
     });
-    const applied = applyVerifierVerdicts(allFindings, candidates, verdicts, log, {
-      strictUnverified: verifier.strictBlocks,
-    });
-    // Strict + overflow капа REVIEW_VERIFIER_MAX: eligible-находки сверх капа не верифицируются —
-    // блокировать без верификации они не должны (бэклог #7) → minor. Только при успешном verifier.
-    let overflowN = 0;
-    if (verifier.strictBlocks) {
-      const candSet = new Set(candidates);
-      for (const f of applied.findings) {
-        if (gate.blockOn.includes(f.severity) && !f.prescan && !candSet.has(f)) {
-          f.severity = 'minor';
-          f.verifierStatus = 'overflow';
-          f.verifierReason = `сверх капа verifier (${verifier.maxCandidates}) — понижено до minor`;
-          overflowN++;
-        }
+  }
+
+  // Сначала все вызовы, потом одно применение: applyVerifierVerdicts мутирует находки, и
+  // сбой посреди батчей не должен оставить набор наполовину применённым.
+  const sent = [];
+  const verdicts = [];
+  let batchesSent = 0;
+  let stopReason = '';
+  for (let i = 0; i < batches.length; i++) {
+    if (i > 0 && deadline && deadline - Date.now() < 120_000) {
+      stopReason = 'time_budget';
+      log(`verifier: тайм-бюджет — проверено ${sent.length} из ${candidates.length} кандидатов`);
+      break;
+    }
+    let batchVerdicts;
+    try {
+      batchVerdicts = await verifyBatch(batches[i], i);
+    } catch (e) {
+      if (i === 0) {
+        log('verifier pass failed:', e.message);
+        obs.logEvent('verifier_error', { error: e.message?.slice(0, 200) });
+        return unavailable(blockTier, 'error');
       }
-      if (overflowN) {
-        applied.stats.overflow = overflowN;
-        log(`verifier strict: ${overflowN} находок сверх капа ${verifier.maxCandidates} → minor (без верификации не блокируют)`);
+      // Первый батч прошёл: его вердикты не выбрасываем, непроверенный хвост — как сверх
+      // капа (ниже). Иначе сбой N-го вызова отменял бы уже сделанную проверку.
+      log(`verifier: батч ${i + 1}/${batches.length} упал (${e.message}) — хвост не проверен`);
+      obs.logEvent('verifier_error', { batch: i, error: e.message?.slice(0, 200) });
+      stopReason = 'batch_error';
+      break;
+    }
+    for (const v of batchVerdicts || []) {
+      const idx = v?.candidateIndex;
+      if (Number.isInteger(idx) && idx >= 0 && idx < batches[i].length) {
+        verdicts.push({ ...v, candidateIndex: idx + sent.length });
       }
     }
-    log(`verifier итог: verified=${applied.stats.verified} rejected=${applied.stats.rejected} downgraded=${applied.stats.downgraded} missing=${applied.stats.missing}`);
-    obs.logEvent('verifier', applied.stats);
-    logFindingsStage(obs, 'after_verifier', applied.findings);
-    return { findings: applied.findings, stats: applied.stats };
-  } catch (e) {
-    log('verifier pass failed (fail-open, findings сохранены):', e.message);
-    obs.logEvent('verifier_error', { error: e.message?.slice(0, 200) });
-    return empty;
+    sent.push(...batches[i]);
+    batchesSent++;
   }
+  // Ни одного валидного вердикта (пустой ответ, чужие индексы, не тот ключ) — это сбой
+  // судьи, а не его решение: тот же исход, что у исключения.
+  if (!verdicts.length && sent.some(isBlockTier)) {
+    obs.logEvent('verifier_error', { error: 'no valid verdicts' });
+    return unavailable(blockTier, 'empty');
+  }
+  const applied = applyVerifierVerdicts(allFindings, sent, verdicts, log, {
+    strictUnverified: verifier.strictBlocks,
+  });
+  // Хвост, не дошедший из-за сбоя или тайм-бюджета, — недоступность, а не кап.
+  let tailUnavailable = null;
+  if (stopReason) {
+    const sentSet = new Set(sent);
+    const tail = applied.findings.filter((f) => isBlockTier(f) && !sentSet.has(f));
+    tailUnavailable = unavailable(tail, stopReason).unavailable;
+  }
+  // Strict: eligible-находки, не дошедшие до verifier'а (сверх капа × батчей, тайм-бюджет,
+  // сбой хвостового батча), блокировать без верификации не должны (бэклог #7) → minor.
+  let overflowN = 0;
+  if (verifier.strictBlocks) {
+    const sentSet = new Set(sent);
+    const why = `сверх капа ${batchCap} × ${maxBatches}`;
+    for (const f of applied.findings) {
+      if (isBlockTier(f) && !sentSet.has(f)) {
+        f.severity = 'minor';
+        f.verifierStatus = 'overflow';
+        f.verifierReason = `не проверено verifier'ом (${why}) — понижено до minor`;
+        overflowN++;
+      }
+    }
+    if (overflowN) {
+      applied.stats.overflow = overflowN;
+      log(`verifier strict: ${overflowN} находок не проверено (${why}) → minor (без верификации не блокируют)`);
+    }
+  }
+  applied.stats.batches = batchesSent;
+  log(`verifier итог: verified=${applied.stats.verified} rejected=${applied.stats.rejected} downgraded=${applied.stats.downgraded} missing=${applied.stats.missing}`);
+  obs.logEvent('verifier', applied.stats);
+  logFindingsStage(obs, 'after_verifier', applied.findings);
+  return { findings: applied.findings, stats: applied.stats, unavailable: tailUnavailable };
 }
 
 /** Публикует inline и чистит устаревшие только после успешного post. */
@@ -460,6 +550,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       // файлов это половина всего входа. Символы для blast-radius не теряются:
       // collectBlastSymbols разбирает changedText, куда строки нового файла уже попали.
       const addedPaths = limits.skipAddedFileContext ? collectAddedPaths(diff) : new Set();
+      const deletedPaths = collectDeletedPaths(diff);
       if (addedPaths.size) log(`контекст: ${addedPaths.size} добавленных файл(ов) — дифф уже содержит их целиком, полный текст не прикладываем`);
       // Сначала читаем файлы: collectBlastSymbols добирает exports из полного текста,
       // а не только из hunk-строк (иначе правка тела функции → 0 symbols → пустой blast).
@@ -473,7 +564,8 @@ export function createReviewPipeline(cfg, deps = {}) {
           log(`prior sticky недоступен (${e.message}) — прогон без carry-over`);
           return { findings: [], runs: [], sha: '' };
         }),
-        prescan.run(changedPaths),
+        // Удалённым файлам линтер не нужен: их нет в рабочем дереве (RFC 17).
+        prescan.run(deletedPaths.size ? changedPaths.filter((p) => !deletedPaths.has(p)) : changedPaths),
       ]);
       const symbols = collectBlastSymbols(changedText, contentMap, limits.maxSymbols);
       log(`файлов: ${files.size} · символов под blast-radius: ${symbols.length}`, symbols);
@@ -918,9 +1010,10 @@ export function createReviewPipeline(cfg, deps = {}) {
                 symbolCardsByPath: symbolCards?.byPath ?? null,
                 limits,
               }, log, obs)
-            : { findings: currentFindings, stats: null };
+            : { findings: currentFindings, stats: null, unavailable: null };
           currentFindings = verifierStage.findings;
           const verifierStats = verifierStage.stats;
+          const verifierUnavailable = verifierStage.unavailable;
 
           // Перенесённые находки подмешиваем ПОСЛЕ refutation и verifier — намеренно.
           // Обе стадии они уже прошли в том прогоне, где были найдены, и принесли свои
@@ -932,26 +1025,35 @@ export function createReviewPipeline(cfg, deps = {}) {
             logFindingsStage(obs, 'after_carry_over', currentFindings);
           }
 
-          return { findings: currentFindings, refutationStats, verifierStats };
+          return { findings: currentFindings, refutationStats, verifierStats, verifierUnavailable };
         },
       });
       allFindings = gateResolution.findings;
       // Один расчёт отпечатков на прогон — до того, как набор разойдётся по футеру sticky,
       // Δ-блоку и артефакту экспорта: все трое обязаны показывать одну величину.
       attachFingerprints(allFindings, files);
-      const blockerClusters = gateResolution.clusters.filter((g) => g[0]?.consensusBlock);
+      const blockerClusters = gateResolution.clusters.filter((g) => g.some((f) => f.consensusBlock));
       const blockers = gateResolution.blockers;
       const fpRemoved = gateResolution.fpRemoved;
       const refutationStats = gateResolution.refutationStats;
       const verifierStats = gateResolution.verifierStats;
+      // Verifier не дал вердикта по находкам уровня блока из-за сбоя (RFC 18). Сами находки
+      // уже понижены и блокерами не считаются; блокирует ли прогон — как при аутедже LLM:
+      // REVIEW_LLM_REQUIRED=1 (дефолт) — degraded-блок до перезапуска, 0 — fail-open.
+      const verifierUnavailable = gateResolution.verifierUnavailable
+        ? { ...gateResolution.verifierUnavailable, blocked: Boolean(gate.llmRequired) }
+        : null;
+      const degradedBlock = Boolean(verifierUnavailable?.blocked);
+      const wouldBlock = blockers.length > 0 || degradedBlock;
       if (fpRemoved.length) {
         log(`ложных находок отфильтровано: ${fpRemoved.length}`);
       }
       obs.logEvent('fp_filter', { before: gateResolution.beforeFpCount, after: gateResolution.afterFpCount, removed: fpRemoved.length });
       logFindingsStage(obs, 'after_fp_filter', allFindings);
       obs.logEvent('gate', {
-        wouldBlock: blockers.length > 0,
+        wouldBlock,
         blockers: blockers.length,
+        ...(verifierUnavailable ? { verifierUnavailable } : {}),
         sample: slimFindings(blockers),
       });
       logFindingsStage(obs, 'after_gate', allFindings);
@@ -970,7 +1072,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       });
       const { md, counts, total, delta, verdict } = buildSummary(cfg, {
         reviews, ok, allFindings, outside, blastBlocks, blastMetrics, files, pr, headSha, note, blockerClusters,
-        verifierStats, refutationStats, prescanResult, fpRemoved,
+        verifierStats, refutationStats, prescanResult, fpRemoved, verifierUnavailable,
         // Δ считаем против ПОЛНОГО набора прошлого прогона, а не против отфильтрованного
         // carry-over: «закрыто» — это то, что ушло из отчёта, включая снятое инвалидацией.
         priorFindings: priorSticky.findings, priorRuns: priorSticky.runs, priorSha: priorSticky.sha,
@@ -987,7 +1089,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       obs.logEvent('verdict', verdict);
 
       await persistAndCapture(buildReviewJson({
-        pr, headSha, reviewMode, route, wouldBlock: blockers.length > 0, verdict,
+        pr, headSha, reviewMode, route, wouldBlock, verdict,
         counts, total, findings: allFindings, blockers, reviews,
         verifierStats, refutationStats, prescanResult,
         blastMetrics, changedPaths,
@@ -998,14 +1100,25 @@ export function createReviewPipeline(cfg, deps = {}) {
       // переносить. Prescan и blast-radius в перенос не идут: они детерминированы, дёшевы
       // и пересчитываются на каждом прогоне заново.
       if (cfg.incremental?.enabled) {
-        const carryable = allFindings.filter((f) => !f.prescan && f.source !== BLAST_FINDING_SOURCE);
+        // Находка, до которой verifier не дошёл (сбой — RFC 18, кап — RFC 17), не переносится,
+        // а её файл не получает хэш: перенос считает находку прошедшей verifier и заново её не
+        // проверяет. Иначе «перезапустите ревью» после degraded-блока переносил бы непроверенный
+        // critical как minor без LLM и без verifier — и merge проходил бы.
+        const unverifiedPaths = new Set(allFindings
+          .filter((f) => f.verifierStatus === 'unavailable' || f.verifierStatus === 'overflow')
+          .map((f) => f.file));
+        const carryable = allFindings.filter((f) => !f.prescan && f.source !== BLAST_FINDING_SOURCE
+          && !unverifiedPaths.has(f.file));
+        if (unverifiedPaths.size) log(`инкрементальность: ${unverifiedPaths.size} файл(ов) с непроверенными verifier'ом находками — в следующем прогоне ревьюятся заново`);
         await writeIncrementalState(cfg.incremental.stateFile, {
           pr: pr.number,
           headSha,
           configFp,
           // Счётчик прогонов подряд без полного: страховка от накопления дрейфа.
           sinceFull: incrementalPlan.mode === 'incremental' ? Number(priorIncremental?.sinceFull || 0) + 1 : 0,
-          hashes: inputHashes,
+          hashes: unverifiedPaths.size
+            ? Object.fromEntries(Object.entries(inputHashes).filter(([p]) => !unverifiedPaths.has(p)))
+            : inputHashes,
           // Вход карточек по файлам — чтобы сбой графа в следующем прогоне не менял хэши.
           ...(cardsInput?.size ? { cardsInput: Object.fromEntries(cardsInput), cardsTargets } : {}),
           ...(cardsInputReused ? { cardsInputReused: true } : {}),
@@ -1018,13 +1131,18 @@ export function createReviewPipeline(cfg, deps = {}) {
         log(`модели-ок: ${ok.map((r) => r.model).join(', ')} · findings=${total} · inline=${inline.length} · outside=${outside.length}`);
         log(blockers.length
           ? `⛔ WOULD BLOCK merge: ${blockers.length} кластер(ов) × ${gate.blockOn.join('/')}`
-          : `✅ не блокирует (${reviewMode === 'moa' ? 'MoA-aggregator' : `консенсус ≥${gate.consensusMin}`})`);
+          : degradedBlock
+            ? `⛔ WOULD BLOCK merge: verifier недоступен (${verifierUnavailable.reason}), не проверено ${verifierUnavailable.unverified}`
+            : `✅ не блокирует (${reviewMode === 'moa' ? 'MoA-aggregator' : `консенсус ≥${gate.consensusMin}`})`);
         log('\n--- INLINE COMMENTS ---');
         for (const c of inline) log(`${c.path}:${c.line}\n  ${c.body.split('\n').slice(0, 2).join(' / ')}`);
         log('\n--- SUMMARY MARKDOWN ---\n' + md);
-        const exitCode = blockers.length ? 1 : 0;
-        finalObs = { exitCode, dryRun: true, wouldBlock: blockers.length > 0, blockers: blockers.length, total, counts, inline: inline.length };
-        return detailedResult(exitCode, { wouldBlock: blockers.length > 0 });
+        const exitCode = wouldBlock ? 1 : 0;
+        finalObs = {
+          exitCode, dryRun: true, wouldBlock, blockers: blockers.length, total, counts, inline: inline.length,
+          ...(degradedBlock ? { degraded: true } : {}),
+        };
+        return detailedResult(exitCode, { wouldBlock, ...(degradedBlock ? { degraded: true, reason: 'verifier unavailable' } : {}) });
       }
 
       const pub = await publishReview(github, { inline, md, headSha, maxInline: limits.maxInline }, log);
@@ -1056,6 +1174,11 @@ export function createReviewPipeline(cfg, deps = {}) {
         log(`⛔ merge ЗАБЛОКИРОВАН: ${blockers.length} кластер(ов) уровня ${gate.blockOn.join('/')}`);
         finalObs = { exitCode: 1, wouldBlock: true, blockers: blockers.length, total, counts, inline: inline.length };
         return detailedResult(1, { wouldBlock: true });
+      }
+      if (degradedBlock) {
+        log(`⛔ merge ЗАБЛОКИРОВАН (degraded): verifier недоступен (${verifierUnavailable.reason}), не проверено ${verifierUnavailable.unverified} — перезапустите ревью`);
+        finalObs = { exitCode: 1, wouldBlock: true, degraded: true, blockers: 0, total, counts, inline: inline.length };
+        return detailedResult(1, { wouldBlock: true, degraded: true, reason: 'verifier unavailable' });
       }
       log(`готово — блокеров нет (${reviewMode}).`);
       finalObs = { exitCode: 0, wouldBlock: false, blockers: 0, total, counts, inline: inline.length };

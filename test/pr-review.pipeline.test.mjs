@@ -474,17 +474,59 @@ test('pipeline: REVIEW_BLAST_REQUIRED=1 + граф есть, зависимых 
   assert.equal(calls.engineRuns, 1);
 });
 
-test('pipeline: verifier strict — находки сверх капа (13-я) понижаются, без верификации не блокируют', async () => {
-  const findings = Array.from({ length: 13 }, (_, i) => ({
-    file: 'foo.ts', line: i + 1, severity: 'critical', title: `баг ${i + 1}`, body: '', confidence: 0.9, model: 'm1',
-  }));
-  const reviews = [{ model: 'm1', summary: 's', verdict: 'changes_requested', findings }];
-  const verifyFindings = async (candidates) => candidates.map((_, i) => ({ candidateIndex: i, decision: 'verified' }));
+const thirteenCriticals = () => Array.from({ length: 13 }, (_, i) => ({
+  file: 'foo.ts', line: i + 1, severity: 'critical', title: `баг ${i + 1}`, body: '', confidence: 0.9, model: 'm1',
+}));
+const verifyAllBatch = async (candidates) => candidates.map((_, i) => ({ candidateIndex: i, decision: 'verified' }));
+
+test('pipeline: verifier — 13-я находка уходит вторым батчем и блокирует наравне с первыми (RFC 17)', async () => {
+  const reviews = [{ model: 'm1', summary: 's', verdict: 'changes_requested', findings: thirteenCriticals() }];
+  const batchSizes = [];
+  const verifyFindings = async (candidates) => { batchSizes.push(candidates.length); return verifyAllBatch(candidates); };
   const { code, calls } = await runPipeline({ diff: CODE_DIFF, reviews, verifyFindings, env: { REVIEW_VERIFIER: '1' } });
+  assert.equal(code, 1);
+  assert.deepEqual(batchSizes, [12, 1], 'кап одного вызова держится, хвост — отдельным батчем');
+  const md = calls.upsertSticky[0];
+  assert.ok(md.includes('🔴13 🟠0 🟡0'), 'все 13 critical проверены, ни одна не понижена как overflow');
+});
+
+test('pipeline: verifier — вердикт второго батча ложится на свою находку, а не на находку первого', async () => {
+  const reviews = [{ model: 'm1', summary: 's', verdict: 'changes_requested', findings: thirteenCriticals() }];
+  let batch = 0;
+  // второй батч отклоняет свой единственный кандидат (индекс 0 внутри батча)
+  const verifyFindings = async (candidates) => (batch++ === 0
+    ? verifyAllBatch(candidates)
+    : [{ candidateIndex: 0, decision: 'rejected', reason: 'нет бага' }]);
+  const { calls } = await runPipeline({ diff: CODE_DIFF, reviews, verifyFindings, env: { REVIEW_VERIFIER: '1' } });
+  const md = calls.upsertSticky[0];
+  // 🔴12, а не 🔴11: rejected с индексом 0 второго батча не лёг на индекс 0 первого
+  assert.ok(md.includes('🔴12'), 'первые 12 подтверждены');
+  assert.ok(!md.includes('баг 13'), '13-я отклонена своим вердиктом');
+});
+
+test('pipeline: verifier strict — сверх капа × батчей (REVIEW_VERIFIER_BATCHES=1) 13-я понижается до minor', async () => {
+  const reviews = [{ model: 'm1', summary: 's', verdict: 'changes_requested', findings: thirteenCriticals() }];
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF, reviews, verifyFindings: verifyAllBatch, env: { REVIEW_VERIFIER: '1', REVIEW_VERIFIER_BATCHES: '1' },
+  });
   assert.equal(code, 1, '12 верифицированных critical блокируют');
   const md = calls.upsertSticky[0];
   assert.ok(md.includes('🔴12'), '12 critical после verifier');
   assert.ok(md.includes('🟡1'), '13-я находка (overflow капа) → minor');
+});
+
+test('pipeline: verifier — сбой хвостового батча не отменяет вердикты первого', async () => {
+  const reviews = [{ model: 'm1', summary: 's', verdict: 'changes_requested', findings: thirteenCriticals() }];
+  let batch = 0;
+  const verifyFindings = async (candidates) => {
+    if (batch++ > 0) throw new Error('rate limit');
+    return candidates.map((_, i) => ({ candidateIndex: i, decision: i === 0 ? 'rejected' : 'verified' }));
+  };
+  const { code, calls } = await runPipeline({ diff: CODE_DIFF, reviews, verifyFindings, env: { REVIEW_VERIFIER: '1' } });
+  assert.equal(code, 1);
+  const md = calls.upsertSticky[0];
+  assert.ok(md.includes('🔴11'), '11 подтверждены, 1 отклонён в первом батче');
+  assert.ok(md.includes('🟡1'), 'непроверенный хвост → minor, как сверх капа');
 });
 
 test('pipeline: sticky throw после postReview — ошибка не молчит (inline уже ушёл)', async () => {
@@ -670,6 +712,38 @@ test('инкрементально: перенесённый блокер пер
   }
 });
 
+test('инкрементально: находка без вердикта из-за сбоя verifier не переносится — файл ревьюится заново (RFC 18)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-incr-vu-'));
+  const stateFile = join(dir, 'state.json');
+  const env = { REVIEW_INCREMENTAL: '1', REVIEW_INCREMENTAL_STATE: stateFile, REVIEW_VERIFIER: '1' };
+  try {
+    const first = await runPipeline({
+      diff: TWO_FILE_DIFF, reviews: [structuredClone(barCritical)], env,
+      verifyFindings: async () => { throw new Error('503'); },
+    });
+    assert.equal(first.code, 1, 'degraded-блок: verifier недоступен');
+
+    const reviewedPaths = [];
+    const second = await runPipeline({
+      diff: TWO_FILE_DIFF_V2, reviews: [structuredClone(barCritical)], env,
+      verifyFindings: async (c) => c.map((_, i) => ({ candidateIndex: i, decision: 'verified' })),
+      mutateDeps: (deps) => {
+        const inner = deps.engine.reviewAllModels;
+        deps.engine.reviewAllModels = async (chunks, ctx) => {
+          for (const c of chunks) reviewedPaths.push(...(c.paths || []));
+          return inner(chunks, ctx);
+        };
+      },
+    });
+    assert.ok(reviewedPaths.includes('bar.ts'),
+      'bar.ts не изменился, но его находка не прошла verifier — файл обязан уйти в LLM заново, а не в перенос');
+    assert.equal(second.code, 1);
+    assert.ok(second.calls.upsertSticky[0].includes('нужны правки'), 'теперь блокер подтверждён verifier\'ом');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Порог допуска advisory к verifier'у (P1, docs/review-quality.md §2.2)
 // ---------------------------------------------------------------------------
@@ -768,4 +842,69 @@ test('pipeline: runDetailed отдаёт артефакт с cli.headSha на fi
   } finally {
     await rm(tmp, { force: true });
   }
+});
+
+// RFC 18: сбой verifier'а — одно состояние «недоступен» вместо исхода, зависящего от вида сбоя.
+// Раньше: исключение → блок по слову агрегатора без строки verifier в sticky; пустой ответ →
+// critical молча понижен, merge проходит.
+const VU_ENV = { REVIEW_VERIFIER: '1' };
+// Пайплайн мутирует находки (verifier понижает severity) — каждому прогону свежая копия.
+const freshCritical = () => structuredClone(criticalReview);
+const verifierFailures = {
+  'исключение (сеть/5xx)': async () => { throw new Error('503'); },
+  'пустой ответ': async () => [],
+  'вердикты с чужими индексами': async () => [{ candidateIndex: 7, decision: 'verified' }],
+};
+for (const [label, verifyFindings] of Object.entries(verifierFailures)) {
+  test(`pipeline: verifier недоступен (${label}) → degraded-блок, critical не выдаётся за подтверждённый`, async () => {
+    const { code, calls } = await runPipeline({ diff: CODE_DIFF, reviews: [freshCritical()], verifyFindings, env: VU_ENV });
+    assert.equal(code, 1, 'REVIEW_LLM_REQUIRED=1 (дефолт): merge заблокирован до перезапуска');
+    const md = calls.upsertSticky[0];
+    assert.ok(md.includes('⛔ ревью не завершено'), md.slice(0, 300));
+    assert.ok(md.includes('Merge заблокирован: verifier недоступен'));
+    assert.ok(md.includes('🔴0'), 'непроверенный critical не считается блокером');
+    assert.ok(!md.includes('нужны правки'));
+  });
+}
+
+test('pipeline: verifier недоступен + REVIEW_LLM_REQUIRED=0 → fail-open с заметкой', async () => {
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF, reviews: [freshCritical()], env: { ...VU_ENV, REVIEW_LLM_REQUIRED: '0' },
+    verifyFindings: async () => { throw new Error('503'); },
+  });
+  assert.equal(code, 0);
+  const md = calls.upsertSticky[0];
+  assert.ok(md.includes('⚠️ **Verifier недоступен**'));
+  assert.ok(md.includes('merge не блокируется'));
+});
+
+test('pipeline: тайм-бюджет перед verifier → то же состояние «недоступен»', async () => {
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF, reviews: [freshCritical()], env: { ...VU_ENV, REVIEW_TIME_BUDGET_MIN: '1' },
+    verifyFindings: async (c) => c.map((_, i) => ({ candidateIndex: i, decision: 'verified' })),
+  });
+  assert.equal(code, 1);
+  assert.ok(calls.upsertSticky[0].includes('verifier недоступен** (time_budget)'));
+});
+
+test('pipeline: REVIEW_VERIFIER_STRICT=0 — сбой verifier ведёт себя как раньше (доверие агрегатору)', async () => {
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF, reviews: [freshCritical()], env: { ...VU_ENV, REVIEW_VERIFIER_STRICT: '0' },
+    verifyFindings: async () => { throw new Error('503'); },
+  });
+  assert.equal(code, 1, 'critical остаётся и блокирует');
+  const md = calls.upsertSticky[0];
+  assert.ok(md.includes('нужны правки'));
+  assert.ok(!md.includes('verifier недоступен'));
+});
+
+test('pipeline: verifier без кандидатов уровня блока — его сбой гейт не трогает', async () => {
+  const minorOnly = freshCritical();
+  minorOnly.findings[0].severity = 'minor';
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF, reviews: [minorOnly], env: VU_ENV,
+    verifyFindings: async () => { throw new Error('503'); },
+  });
+  assert.equal(code, 0);
+  assert.ok(!calls.upsertSticky[0].includes('verifier недоступен'));
 });

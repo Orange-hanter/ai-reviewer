@@ -404,6 +404,18 @@ const summaryMatrix = [
   }],
 ];
 
+// RFC 18: verifier недоступен — degraded-блок и fail-open, с блокером и без.
+for (const [vlabel, vu, clusters] of [
+  ['verifier unavailable blocked', { reason: 'error', unverified: 1, blocked: true }, []],
+  ['verifier unavailable fail-open', { reason: 'empty', unverified: 3, blocked: false }, []],
+  ['verifier unavailable + real blocker', { reason: 'time_budget', unverified: 2, blocked: true }, [[manyFindings[0]]]],
+]) {
+  summaryMatrix.push([vlabel, cfg, {
+    reviews: [], allFindings: [{ ...manyFindings[0], severity: 'minor', verifierStatus: 'unavailable' }], outside: [], blastBlocks: [],
+    files: sampleFiles, pr: { number: 1 }, headSha: 'newsha1', note: '', blockerClusters: clusters, verifierUnavailable: vu,
+  }]);
+}
+
 for (const [label, c, input] of summaryMatrix) {
   checkSummary(`buildSummary ${label}`, c, input);
 }

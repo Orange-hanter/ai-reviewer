@@ -1,0 +1,14 @@
+{
+  "id": "gate-neighbour-minor-not-blocker",
+  "description": "minor и major в одной 3-строчной корзине: блокирует major, minor причиной блока не становится (RFC 17, до — блокером шёл первый в кластере). consensusMin 1 — как в дефолтном режиме moa",
+  "gate": {
+    "consensusMin": 1
+  },
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "titles": [
+      "SQL-инъекция через конкатенацию id"
+    ]
+  }
+}

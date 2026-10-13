@@ -95,7 +95,9 @@ export) — от рабочего каталога через `profile.paths.*`,
 **Fail-open по умолчанию, fail-closed осознанно.** `bin/pr-review.mjs` ловит любое исключение
 и выходит с `0`: инфра-сбой не блокирует merge. Exit `1` — только осознанный, внутри
 `runReview`, на подтверждённых блокерах. Исключения: `REVIEW_LLM_REQUIRED=1` и
-`REVIEW_VERIFIER_STRICT=1`. Не превращай мягкий сбой в жёсткий без причины.
+`REVIEW_VERIFIER_STRICT=1`; сбой verifier'а при находках уровня блока — тоже через
+`REVIEW_LLM_REQUIRED` (RFC 18), а не «блок по слову агрегатора». Не превращай мягкий сбой
+в жёсткий без причины.
 
 **Два независимых судьи.** Агрегатор и verifier намеренно вне пула advisors. Блок требует
 refutation жюри + вердикта verifier + `confidence ≥ REVIEW_CONFIDENCE_MIN`. Blast-radius
@@ -157,7 +159,7 @@ dry-run MoA, `wait: false` + поллинг по `jobId`, RFC 08–12) и `curso
   сохраняй этот порядок.
 - **Eval fixture** = каталог `fixtures/<id>/` с `meta.json` (`expected`), `diff.patch`,
   `findings.json`, опц. `verifier.json`. Тест `eval harness: все fixtures green` сверяет
-  число seed-кейсов (16) — при добавлении поправь счётчик. Каталогов в `fixtures/` больше:
+  число seed-кейсов (20) — при добавлении поправь счётчик. Каталогов в `fixtures/` больше:
   `fixtures/structure/` — контрактные образцы схем, не eval-кейсы (нет `meta.json` → пропускаются).
 - **Gold** (`gold/<id>/`) — диффы для прогона с LLM; падающий кейс — сигнал, не мусор.
 - Шаблоны workflow в `examples/ci/` покрыты контрактными тестами в `test/pr-review.eval.test.mjs`.

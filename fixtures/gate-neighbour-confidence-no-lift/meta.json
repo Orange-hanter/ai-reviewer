@@ -1,0 +1,14 @@
+{
+  "id": "gate-neighbour-confidence-no-lift",
+  "description": "critical с confidence 0.5 рядом с уверенным major: шаткий critical не блокирует, блокер — major (RFC 17, до — max(conf) по кластеру). consensusMin 1 — как в дефолтном режиме moa",
+  "gate": {
+    "consensusMin": 1
+  },
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "titles": [
+      "SQL-инъекция через конкатенацию id"
+    ]
+  }
+}

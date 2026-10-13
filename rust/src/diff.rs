@@ -214,28 +214,51 @@ pub fn parse_diff(diff: &str) -> ParseDiffResult {
     let mut annotated_parts: Vec<String> = Vec::new();
     let mut changed_lines: Vec<String> = Vec::new();
     let mut cur_path: Option<String> = None;
+    let mut git_path: Option<String> = None;
+    let mut deleted_header = false;
+    let mut in_hunk = false;
     let mut new_line: u64 = 0;
 
     for raw in diff.split('\n') {
         if raw.starts_with("diff --git") {
             cur_path = None;
+            git_path = parse_diff_git_path(raw);
+            deleted_header = false;
+            in_hunk = false;
             annotated_parts.push(raw.to_string());
             continue;
         }
-        if raw.starts_with("+++ ") {
-            cur_path = parse_diff_new_path(raw);
+        if !in_hunk && raw.starts_with("deleted file mode ") {
+            deleted_header = true;
+        }
+        // Заголовки `---`/`+++` — только до первого хунка секции; внутри хунка это
+        // строки содержимого `-- …`/`++ …` (RFC 17).
+        if !in_hunk && raw.starts_with("+++ ") {
+            // Удалённый файл (`+++ /dev/null`) — путь из `diff --git` (RFC 17). Только в
+            // заголовке секции с `deleted file mode`: внутри хунка это добавленная строка.
+            cur_path = parse_diff_new_path(raw).or_else(|| {
+                if deleted_header
+                    && !in_hunk
+                    && raw.strip_suffix('\r').unwrap_or(raw) == "+++ /dev/null"
+                {
+                    git_path.clone()
+                } else {
+                    None
+                }
+            });
             if let Some(p) = &cur_path {
                 files.entry(p.clone()).or_default();
             }
             annotated_parts.push(raw.to_string());
             continue;
         }
-        if raw.starts_with("--- ") {
+        if !in_hunk && raw.starts_with("--- ") {
             annotated_parts.push(raw.to_string());
             continue;
         }
         if let Some(n) = parse_hunk_start(raw) {
             new_line = n;
+            in_hunk = true;
             annotated_parts.push(raw.to_string());
             continue;
         }
@@ -248,14 +271,14 @@ pub fn parse_diff(diff: &str) -> ParseDiffResult {
             continue;
         };
         let rec = files.get_mut(&path).expect("cur_path из files");
-        if raw.starts_with('+') && !raw.starts_with("+++") {
+        if raw.starts_with('+') && (in_hunk || !raw.starts_with("+++")) {
             rec.valid_lines.insert(new_line);
             rec.changed.push(raw[1..].to_string());
             rec.text.insert(new_line, raw[1..].to_string());
             changed_lines.push(raw[1..].to_string());
             annotated_parts.push(format!("{:>5}: {}", new_line, raw));
             new_line += 1;
-        } else if raw.starts_with('-') && !raw.starts_with("---") {
+        } else if raw.starts_with('-') && (in_hunk || !raw.starts_with("---")) {
             rec.changed.push(raw[1..].to_string());
             changed_lines.push(raw[1..].to_string());
             annotated_parts.push(format!("     : {}", raw));
@@ -671,6 +694,26 @@ mod tests {
         assert_eq!(rec["changed"].as_array().unwrap().len(), 3);
         assert!(res.annotated.lines().any(|l| l.starts_with("    1: ")));
         assert!(res.changed_text.contains("export function foo"));
+    }
+
+    #[test]
+    fn parse_diff_keeps_deleted_file() {
+        let diff = "diff --git a/auth/guard.ts b/auth/guard.ts\ndeleted file mode 100644\n--- a/auth/guard.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export function guard() { return check(); }\n-export const x = 1;";
+        let r = parse_diff(diff);
+        let keys: Vec<&String> = r.files.keys().collect();
+        assert_eq!(keys, vec!["auth/guard.ts"]);
+        assert!(r.changed_text.contains("export function guard()"), "удалённые строки — в changedText для blast-radius");
+        assert!(r.files["auth/guard.ts"]["validLines"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_diff_hunk_line_does_not_spoof_deleted_header() {
+        // добавленная строка `++ /dev/null` выглядит как `+++ /dev/null` — не заголовок
+        let diff = "diff --git a/s.ts b/s.ts\n--- a/s.ts\n+++ b/s.ts\n@@ -1 +1,3 @@\n a\n+/*\n+++ /dev/null\n+import x from 'raw';";
+        let r = parse_diff(diff);
+        let keys: Vec<&String> = r.files.keys().collect();
+        assert_eq!(keys, vec!["s.ts"]);
+        assert!(r.changed_text.contains("import x from 'raw'"), "строки после подделки не теряются");
     }
 
     #[test]

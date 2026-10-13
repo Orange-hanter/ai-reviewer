@@ -757,6 +757,8 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "enabled": verifier_enabled,
             "model": verifier_model,
             "maxCandidates": num_json(num_env(env, "REVIEW_VERIFIER_MAX", 12.0)),
+            // Блокеры сверх капа одного вызова — следующими батчами, а не молча в minor (RFC 17).
+            "maxBatches": num_json(num_env(env, "REVIEW_VERIFIER_BATCHES", 3.0)),
             "temperature": num_json(verifier_temp),
             // ±строк вокруг строки-кандидата в контексте verifier'а (lib/context-window.mjs):
             // второй проход смотрит 1–2 строки на файл, целый файл он не окупает.
