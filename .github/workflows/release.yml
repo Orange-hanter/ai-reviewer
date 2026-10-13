@@ -1,0 +1,215 @@
+# Релиз prebuilt-бинаря pr-review (RFC 16, решение 9, T32).
+#
+# Контракт артефактов — таблица «Контракт для T32» в proposals/16-standalone-rust-binary.md;
+# его же проверяет потребительский examples/ci/fetch-pr-review.sh:
+#   pr-review-<triple>.tar.gz — gzip-tar, в корне обычный исполняемый файл `pr-review`;
+#   SHA256SUMS — вывод `sha256sum` по архивам, имена без путей;
+#   пин потребителя — `<tag> sha256:<sha256 файла SHA256SUMS>`.
+#
+# workflow_dispatch — только сборка: архивы и SHA256SUMS остаются артефактами прогона.
+# push тега v* — то же плюс ЧЕРНОВИК релиза. Публикует его человек: потребители качают
+# только опубликованные релизы, поэтому сломанная сборка не уезжает к ним автоматически.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: never
+  MANIFEST: rust/Cargo.toml
+
+jobs:
+  versions:
+    name: Версии совпадают с тегом
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Тег = Cargo.toml = package.json
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cargo_ver=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$MANIFEST" | head -n 1)
+          pkg_ver=$(node -p 'require("./package.json").version')
+          echo "Cargo.toml: $cargo_ver, package.json: $pkg_ver"
+          [ "$cargo_ver" = "$pkg_ver" ] || { echo "::error::версии расходятся: Cargo.toml $cargo_ver, package.json $pkg_ver"; exit 1; }
+          if [ "$REF_TYPE" = tag ]; then
+            [ "$REF_NAME" = "v$cargo_ver" ] || { echo "::error::тег $REF_NAME не совпадает с версией v$cargo_ver"; exit 1; }
+          fi
+
+  build:
+    name: Сборка ${{ matrix.target }}
+    needs: versions
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            native: true
+          # Кросс-сборка на x86_64: ring/aws-lc собираются тем же кросс-компилятором C.
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+            native: false
+          - target: x86_64-apple-darwin
+            os: macos-14
+            native: false
+          - target: aarch64-apple-darwin
+            os: macos-14
+            native: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Тулчейн и таргет
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "$TARGET"
+
+      - name: Кросс-компилятор aarch64-linux
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          {
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc"
+            echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc"
+            echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++"
+            echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar"
+          } >> "$GITHUB_ENV"
+
+      - name: cargo build --release
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --manifest-path "$MANIFEST" --target "$TARGET" --bin pr-review
+
+      - name: Дымовой запуск
+        if: matrix.native
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          bin="rust/target/$TARGET/release/pr-review"
+          "$bin" --version
+          "$bin" --help >/dev/null
+          # Вшитые ассеты и eval без сети: 17 seed-кейсов пакета.
+          "$bin" eval --fixtures fixtures
+
+      - name: Тип бинаря
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: file "rust/target/$TARGET/release/pr-review"
+
+      - name: Упаковка
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Член архива — ровно `pr-review` в корне (контракт T32).
+          tar -czf "dist/pr-review-$TARGET.tar.gz" -C "rust/target/$TARGET/release" pr-review
+          tar -tzf "dist/pr-review-$TARGET.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr-review-${{ matrix.target }}
+          path: dist/pr-review-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  sums:
+    name: SHA256SUMS и строка пина
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pr-review-*
+          path: dist
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd dist
+          n=$(ls pr-review-*.tar.gz | wc -l)
+          [ "$n" -eq 4 ] || { echo "::error::ожидалось 4 архива, есть $n"; exit 1; }
+          sha256sum pr-review-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          sums=$(sha256sum SHA256SUMS | cut -d' ' -f1)
+          tag=$([ "$REF_TYPE" = tag ] && echo "$REF_NAME" || echo '<tag>')
+          {
+            echo '### Строка пина `ops/ai-reviewer-ref`'
+            echo
+            echo '```'
+            echo "$tag sha256:$sums"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  draft-release:
+    name: Черновик релиза
+    if: github.ref_type == 'tag'
+    needs: sums
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+
+      - name: gh release create --draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          sums=$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)
+          gh release create "$TAG" --repo "$REPO" --draft --verify-tag \
+            --title "$TAG" \
+            --notes "Пин потребителя (\`ops/ai-reviewer-ref\`): \`$TAG sha256:$sums\`" \
+            dist/pr-review-*.tar.gz dist/SHA256SUMS

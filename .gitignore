@@ -13,7 +13,6 @@ node_modules/
 
 # Rust build artifacts
 rust/target/
-rust/Cargo.lock
 
 # COD-DOC
 __pycache__/

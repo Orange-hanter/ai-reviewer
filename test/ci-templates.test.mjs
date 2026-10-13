@@ -749,3 +749,46 @@ test('kit Orakul: пин нового формата «<tag> sha256:<64 hex>»',
   const pin = (await readFile(resolve(REPO_ROOT, 'examples/consumers/orakul/ai-reviewer-ref'), 'utf8')).trim();
   assert.match(pin, /^v\d+\.\d+\.\d+ sha256:[0-9a-f]{64}$/);
 });
+
+// ---------------------------------------------------------------------------
+// release.yml — производитель контракта T32 (RFC 16, решение 9)
+// ---------------------------------------------------------------------------
+
+const RELEASE_YML = resolve(REPO_ROOT, '.github/workflows/release.yml');
+const RELEASE_TRIPLES = [
+  'x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'x86_64-apple-darwin', 'aarch64-apple-darwin',
+];
+
+test('release.yml: собирает ровно четыре triple контракта, член архива — pr-review в корне', async () => {
+  const yml = await readFile(RELEASE_YML, 'utf8');
+  const triples = [...yml.matchAll(/^\s*- target:\s*(\S+)\s*$/gm)].map((m) => m[1]).sort();
+  assert.deepEqual(triples, [...RELEASE_TRIPLES].sort());
+  assert.match(yml, /tar -czf "dist\/pr-review-\$TARGET\.tar\.gz" -C "rust\/target\/\$TARGET\/release" pr-review/);
+  assert.match(yml, /sha256sum pr-review-\*\.tar\.gz > SHA256SUMS/);
+  assert.match(yml, /cargo build --release --locked /, 'релиз собирается из закоммиченного Cargo.lock');
+});
+
+test('release.yml: пишет в релиз только по тегу и только черновиком; по умолчанию права read', async () => {
+  const yml = await readFile(RELEASE_YML, 'utf8');
+  assert.match(yml, /^permissions:\n  contents: read$/m);
+  const writes = [...yml.matchAll(/contents: write/g)];
+  assert.equal(writes.length, 1, 'contents: write — только у job черновика');
+  const draftJob = yml.slice(yml.indexOf('  draft-release:'));
+  assert.match(draftJob, /if: github\.ref_type == 'tag'/);
+  assert.match(draftJob, /gh release create "\$TAG" [^\n]*--draft/);
+  // Выражения ${{ }} не подставляются в run-текст напрямую — только через env.
+  for (const run of yml.matchAll(/^\s+run: \|\n((?:\s{10,}.*\n?)+)/gm)) {
+    assert.doesNotMatch(run[1], /\$\{\{/, run[1]);
+  }
+});
+
+test('release.yml ↔ fetch-pr-review.sh: каждый triple, который качает потребитель, собирается', async () => {
+  const script = await readFile(FETCH_SCRIPT, 'utf8');
+  const yml = await readFile(RELEASE_YML, 'utf8');
+  for (const arch of ['x86_64', 'aarch64']) {
+    for (const os of ['unknown-linux-gnu', 'apple-darwin']) {
+      assert.match(script, new RegExp(`\\$arch-${os}`));
+      assert.ok(yml.includes(`target: ${arch}-${os}`), `${arch}-${os} не собирается в release.yml`);
+    }
+  }
+});
