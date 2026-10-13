@@ -1621,7 +1621,7 @@ impl Inner {
     fn config_for(&self, args: &Map<String, Value>, diff_file: String) -> (Profile, Value) {
         let log = self.log();
         let profile = Profile::resolve(&self.env, &self.root, move |m| log(m))
-            .unwrap_or_else(|_| Profile::default_builtin(&crate::profile::package_root()));
+            .unwrap_or_else(|_| Profile::default_builtin_in(&crate::profile::package_root(), &self.root));
         let cli = CliArgs {
             dry_run: true,
             diff_file: Some(diff_file),

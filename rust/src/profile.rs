@@ -496,10 +496,18 @@ impl Profile {
     /// Встроенный нейтральный профиль (`DEFAULT_PROFILE` из lib/profile.mjs):
     /// маркеры `ai-review`, prescan видит любой TS/JS в корне, правил проекта нет.
     /// `pkg_root` — корень пакета ([`package_root`]), он же `base_dir`.
+    ///
+    /// Без каталога прогона: AGENTS.md ищется только в корне пакета. Для прогона
+    /// нужен [`Profile::default_builtin_in`] — так собирает дефолт [`Profile::resolve`].
     pub fn default_builtin(pkg_root: &Path) -> Self {
-        // cwd = pkg_root: у встроенного профиля нет «репозитория рядом», и чужой
-        // AGENTS.md из каталога запуска не должен подмешиваться в дефолт.
-        Self::normalize(&json!({}), pkg_root, "(default)", pkg_root)
+        Self::default_builtin_in(pkg_root, pkg_root)
+    }
+
+    /// `BUILT_IN_DEFAULT` в каталоге прогона: `readRepoRules` ищет AGENTS.md в
+    /// `baseDir` (корень пакета), затем в cwd прогона — правила репозитория без
+    /// `.ai-reviewer.json` попадают в промпт (docs/profiles.md, `repoRules`).
+    pub fn default_builtin_in(pkg_root: &Path, cwd: &Path) -> Self {
+        Self::normalize(&json!({}), pkg_root, "(default)", cwd)
     }
 
     /// Профиль из JSON-файла. Ошибка возвращается вызывающему — это он решает,
@@ -537,7 +545,7 @@ impl Profile {
                     log(&format!(
                         "profile: не удалось прочитать {named} ({e}) — работаем на дефолтном профиле"
                     ));
-                    Ok(Self::default_builtin(&package_root()))
+                    Ok(Self::default_builtin_in(&package_root(), cwd))
                 }
             };
         }
@@ -546,7 +554,7 @@ impl Profile {
                 return Ok(p);
             }
         }
-        Ok(Self::default_builtin(&package_root()))
+        Ok(Self::default_builtin_in(&package_root(), cwd))
     }
 
     pub fn markers(&self) -> &Markers {
@@ -748,6 +756,23 @@ mod tests {
     fn no_profile_means_no_repo_rules() {
         assert_eq!(builtin().repo_rules, "");
         assert_eq!(builtin().prompts().aggregator_extra, "");
+    }
+
+    #[test]
+    fn builtin_profile_reads_agents_md_from_run_cwd() {
+        // lib/profile.mjs: BUILT_IN_DEFAULT — normalizeProfile({}, {baseDir: pkgPath('.')}),
+        // readRepoRules ищет AGENTS.md в baseDir, затем в cwd прогона (docs/profiles.md).
+        let dir = tmp_dir("builtin-agents");
+        fs::write(dir.join("AGENTS.md"), "AGENTS_MARKER_RULE\n").unwrap();
+        let none = HashMap::new();
+        let p = Profile::resolve(&none, &dir, |_| {}).unwrap();
+        assert_eq!(p.source, "(default)");
+        assert_eq!(p.repo_rules, "AGENTS_MARKER_RULE");
+        // Нечитаемый REVIEW_PROFILE → тот же встроенный профиль с AGENTS.md (resetProfile).
+        let bad: HashMap<String, String> = [("REVIEW_PROFILE".to_string(), "no-such.json".to_string())].into();
+        let p = Profile::resolve(&bad, &dir, |_| {}).unwrap();
+        assert_eq!(p.repo_rules, "AGENTS_MARKER_RULE");
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
