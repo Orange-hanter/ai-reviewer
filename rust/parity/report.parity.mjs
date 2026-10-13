@@ -404,6 +404,18 @@ const summaryMatrix = [
   }],
 ];
 
+// RFC 19: части PR без ревью из-за сбоя модели — degraded-блок и fail-open.
+for (const [clabel, cg, vu] of [
+  ['coverage gap blocked', { failed: 2, total: 5, blocked: true }, null],
+  ['coverage gap fail-open', { failed: 1, total: 3, blocked: false }, null],
+  ['coverage gap + verifier unavailable', { failed: 1, total: 4, blocked: true }, { reason: 'error', unverified: 1, blocked: true }],
+]) {
+  summaryMatrix.push([clabel, cfg, {
+    reviews: [], allFindings: [], outside: [], blastBlocks: [], files: sampleFiles, pr: { number: 1 },
+    headSha: 'newsha1', note: '', blockerClusters: [], coverageGap: cg, ...(vu ? { verifierUnavailable: vu } : {}),
+  }]);
+}
+
 // RFC 18: verifier недоступен — degraded-блок и fail-open, с блокером и без.
 for (const [vlabel, vu, clusters] of [
   ['verifier unavailable blocked', { reason: 'error', unverified: 1, blocked: true }, []],
