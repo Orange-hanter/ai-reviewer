@@ -1016,7 +1016,7 @@ pub fn harvest_feedback(
         ts: &ts,
     });
 
-    let log_path = cwd.join(fb_str("logFile"));
+    let log_path = crate::util::js_resolve(cwd, &fb_str("logFile"));
     let existing = read_feedback_log(&log_path, log);
     let merged = dedupe_feedback_entries(&existing, &incoming);
     let new_entries: Vec<Value> = merged[existing.len()..].to_vec();
@@ -1037,12 +1037,12 @@ pub fn harvest_feedback(
         }
 
         if fb_on("writeCandidates") && write_errors.is_empty() {
-            let r = write_fixture_candidates(&cwd.join(fb_str("candidatesDir")), &new_entries, log)?;
+            let r = write_fixture_candidates(&crate::util::js_resolve(cwd, &fb_str("candidatesDir")), &new_entries, log)?;
             candidates_written = r.written;
         }
         if fb_on("appendMarkdown") && write_errors.is_empty() {
             let r = append_feedback_markdown(
-                &cwd.join(fb_str("mdPath")),
+                &crate::util::js_resolve(cwd, &fb_str("mdPath")),
                 &new_entries,
                 log,
                 &tpl(fb("candidatesDir")),
@@ -1549,6 +1549,22 @@ mod tests {
         assert!(r2.new_entries.is_empty());
         assert_eq!(r2.total_in_log, 3);
         assert!(format_harvest_report(&r2).contains("- (нет нового feedback)"));
+    }
+
+    #[test]
+    fn harvest_log_path_with_dotdot_resolves_lexically() {
+        // lib/feedback.mjs: resolve(process.cwd(), feedback.logFile) снимает `..` без ФС —
+        // журнал `nodir/../fp.jsonl` тот же `fp.jsonl`, старые записи видны dedupe.
+        let dir = tempfile::tempdir().unwrap();
+        let mut gh = FakeGithub::new();
+        gh.inline_comments = vec![bot_inline(1, "bug")];
+        gh.reactions = vec![json!({ "content": "-1", "user": { "login": "dev" } })];
+        let r = harvest_feedback(&harvest_cfg(true, "fp.jsonl"), &markers(), &gh, dir.path(), &nolog()).unwrap();
+        assert_eq!(r.persisted_entries, 1);
+        let r2 = harvest_feedback(&harvest_cfg(true, "nodir/../fp.jsonl"), &markers(), &gh, dir.path(), &nolog()).unwrap();
+        assert!(r2.new_entries.is_empty(), "запись уже в журнале");
+        assert_eq!(r2.total_in_log, 1);
+        assert!(!dir.path().join("nodir").exists(), "лишний каталог не создаётся");
     }
 
     #[test]

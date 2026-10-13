@@ -40,7 +40,9 @@ pub struct MigrateLogResult {
 
 /// `migrateFeedbackLog(path, { write })`.
 pub fn migrate_feedback_log(path: &Path, write: bool) -> Result<MigrateLogResult> {
-    let target = std::path::absolute(path)?;
+    // `resolve(path)`: `.`/`..` снимаются лексически, как в Node (std::path::absolute
+    // оставил бы `nodir/..` ОС, и при отсутствии `nodir` журнал читался бы пустым).
+    let target = crate::util::js_resolve(&std::env::current_dir()?, &path.to_string_lossy());
     let raw = match fs::read_to_string(&target) {
         Ok(s) => s,
         Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
@@ -95,5 +97,23 @@ pub fn run(args: Args) -> Result<i32> {
             eprintln!("[migrate-feedback] {e:#}");
             Ok(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn путь_с_dotdot_через_несуществующий_каталог_снимается_лексически() {
+        // feedback/migrate-feedback.mjs: `resolve(path)` снимает `..` без ФС, и
+        // `nodir/../fp.jsonl` — это `fp.jsonl`, даже когда `nodir` нет.
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("fp.jsonl"), "garbage\n").unwrap();
+        let p = dir.path().join("nodir/../fp.jsonl");
+        let r = migrate_feedback_log(&p, false).unwrap();
+        assert_eq!(r.path, dir.path().join("fp.jsonl"));
+        assert_eq!(r.stats.total, 1);
+        assert_eq!(r.stats.invalid, 1);
     }
 }
