@@ -589,7 +589,8 @@ pub fn enrich_affected_dep(
         }
     }
 
-    let seed_id = js_string_truthy(seed.get("id"));
+    // `String(seed.id)`: у seed из индекса id не null; falsy-id (число 0) — это '0'.
+    let seed_id = seed.get("id").map(js_string).unwrap_or_else(|| "undefined".to_string());
     let edges = index.inbound.get(&seed_id).cloned().unwrap_or_default();
     let file_norm = dep.file.clone();
     let label_norm = bare_label(&dep.label).to_lowercase();
@@ -1771,6 +1772,21 @@ mod tests {
         );
         assert_eq!(out.confidence.as_deref(), Some("EXTRACTED"));
         assert_eq!(out.confidence_score, None);
+    }
+
+    #[test]
+    fn enrich_affected_dep_находит_рёбра_seed_с_числовым_id_0() {
+        // lib/graphify.mjs: `index.inbound.get(String(seed.id))` — String(0) = '0',
+        // и рёбра индексируются по тому же '0'.
+        let index = build_graph_index(
+            &json!({
+                "nodes": [{ "id": 0, "label": "foo" }, { "id": "b", "label": "bar", "source_file": "b.ts" }],
+                "links": [{ "source": "b", "target": 0, "relation": "calls", "confidence": "INFERRED" }],
+            }),
+            None,
+        );
+        let out = enrich_affected_dep(&AffectedDep::raw("bar", "calls", "b.ts", 3.0), "foo", Some(&index));
+        assert_eq!(out.confidence.as_deref(), Some("INFERRED"));
     }
 
     #[test]
