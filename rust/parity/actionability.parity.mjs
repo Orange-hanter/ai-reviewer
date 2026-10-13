@@ -20,7 +20,7 @@
  *   4. createFindingsFormatter.classify/findingBlock (обёртка lib/findings.mjs →
  *      бинарь actionability): группировка, marker профиля, SEV-эмодзи, suggestion;
  *   5. профиль с layout.sensitive (profiles/orakul.json) — обе ветки под ним,
- *      в т.ч. регекс с lookahead (в Rust его берёт fancy-regex, RFC 16).
+ *      в т.ч. регекс с lookahead (в Rust его берёт fancy-regex, RFC 20).
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -322,7 +322,7 @@ try {
     { file: 'ops/pr-review/gate.sh', line: 1, severity: 'minor', title: 'gate', body: 'b', model: 'm', confidence: 0.9, consensus: true },
   ], null, {});
 
-  // Регекс с lookahead: Rust компилирует его fancy-regex (RFC 16, решение 4),
+  // Регекс с lookahead: Rust компилирует его fancy-regex (RFC 20, решение 4),
   // деградации на JS больше нет — обе ветки считают сигнал одинаково.
   setProfile({ name: 't', layout: { sensitive: 'ops/(?=pr)' } });
   checkScore('lookahead sensitive', { file: 'ops/pr/x.sh', line: 1, severity: 'major', model: 'm' }, {});

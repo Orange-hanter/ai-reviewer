@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-517fc028-perf-web-web-013-batch-stats-pagination",
+  "type": "tp",
+  "tags": [],
+  "description": " «perf(web): WEB-013 batch stats + pagination on /» — дефект, который потом исправил e8512e6b",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "517fc0284e5a39da1180c4fcba04b07cf90e2e02",
+    "base": "f8b007a0d3adb6e640c0b3234d91d872d0c7a442",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "e8512e6bce153422cc8c41101867180cf5413d28",
+        "ref": null,
+        "title": "fix(web): KPI cards on /p/{slug} read DB totals, not stale YAML"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 330 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/web/pages.py",
+        "lines": [
+          44,
+          54
+        ]
+      }
+    ]
+  }
+}

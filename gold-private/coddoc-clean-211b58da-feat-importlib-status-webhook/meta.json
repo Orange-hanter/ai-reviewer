@@ -1,0 +1,15 @@
+{
+  "id": "coddoc-clean-211b58da-feat-importlib-status-webhook",
+  "type": "clean",
+  "description": " «feat: шаблоны через importlib, логи, status, webhook, интеграционные тесты» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "211b58da32693680c99ef6b695adf8dea9155f75",
+    "base": "99963254d79d4cdeadd1d877af7f77646a16a6d5",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

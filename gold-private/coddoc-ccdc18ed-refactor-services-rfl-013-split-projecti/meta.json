@@ -1,0 +1,117 @@
+{
+  "id": "coddoc-ccdc18ed-refactor-services-rfl-013-split-projecti",
+  "type": "tp",
+  "tags": [],
+  "description": " «refactor(services): RFL-013 — split projection_service.py into a package» — дефект, который потом исправил 3c78f61e, 7a2ef968",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "ccdc18edbf30b1e71675d01a21db2c5a98a1aa08",
+    "base": "dda828b3d13d09c2265e3685f8f885eda586ad3e",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "3c78f61e2a6d628241329261f423ed3c2834e1cc",
+        "ref": null,
+        "title": "fix(projection): ADO-010 (F7) — doc export больше не портит документ"
+      },
+      {
+        "sha": "7a2ef968a7dcbbafb2c48f2ab2a6640d6b3eae33",
+        "ref": null,
+        "title": "fix(ADO-053): audience-экспорт пишется в <stem>.<audience>.md — канонический файл и projection_hash не трогаются"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 473 строк в 11 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/projection_service/_frontmatter.py",
+        "lines": [
+          17,
+          18
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/_frontmatter.py",
+        "lines": [
+          25,
+          31
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/_frontmatter.py",
+        "lines": [
+          34,
+          35
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/_frontmatter.py",
+        "lines": [
+          38,
+          38
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/_frontmatter.py",
+        "lines": [
+          42,
+          43
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/_safety.py",
+        "lines": [
+          10,
+          10
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/_types.py",
+        "lines": [
+          24,
+          24
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/export.py",
+        "lines": [
+          32,
+          37
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/render.py",
+        "lines": [
+          1,
+          1
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/render.py",
+        "lines": [
+          23,
+          23
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/render.py",
+        "lines": [
+          35,
+          38
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service/render.py",
+        "lines": [
+          41,
+          41
+        ]
+      }
+    ]
+  }
+}

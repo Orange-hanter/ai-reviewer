@@ -1,0 +1,15 @@
+{
+  "id": "orakul-clean-968d83e1-feat-m4-5-2-6-orderdetail-writeoffcontro",
+  "type": "clean",
+  "description": " «feat(m4): Волна 5.2 ч.6 — OrderDetail/WriteoffControlCard/IngredientPicker → .tsx» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "968d83e1958343437667113ae1e33312df60a403",
+    "base": "394d14bea30b9610a9af53761a757ec87a1d11bd",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

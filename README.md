@@ -11,7 +11,7 @@ last_updated: 2026-09-29
 <img src=".github/hero.png" alt="ai-reviewer — code review that has to prove itself: prescan, jury, verifier, merge gate, MCP" width="100%">
 
 [![CI](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Orange-hanter/ai-reviewer/actions/workflows/ci.yml)
-[![version](https://img.shields.io/badge/version-0.4.0-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.5.0-blue)](CHANGELOG.md)
 [![runtime](https://img.shields.io/badge/runtime-single%20binary-success)](docs/integration.md)
 [![dev](https://img.shields.io/badge/dev-node%20%E2%89%A522%20%2B%20cargo-brightgreen)](package.json)
 [![license](https://img.shields.io/badge/license-UNLICENSED-lightgrey)](#лицензия)
@@ -181,13 +181,13 @@ MCP-сервер `pr-review-structure-mcp` и его метод `structure_conte
 
 ## Установка
 
-Движок — единый бинарь `pr-review` с подкомандами ([RFC 16](proposals/16-standalone-rust-binary.md)).
+Движок — единый бинарь `pr-review` с подкомандами ([RFC 20](proposals/20-standalone-rust-binary.md)).
 
 **Prebuilt из релиза** (так его получает CI потребителя). Пин — тег и sha256 файла
 `SHA256SUMS`; скрипт сверяет цепочку пин → `SHA256SUMS` → архив и только потом распаковывает:
 
 ```bash
-echo "v0.5.0 sha256:<sha256 SHA256SUMS релиза>" > ops/ai-reviewer-ref
+echo "v0.6.0 sha256:<sha256 SHA256SUMS релиза>" > ops/ai-reviewer-ref
 bash examples/ci/fetch-pr-review.sh ops/ai-reviewer-ref ~/.local/ai-reviewer   # печатает путь к бинарю
 ```
 
@@ -286,13 +286,13 @@ Dev-тулы остаются JS-командами клона (их нет в �
 бы секреты прогона:
 
 ```
-ops/ai-reviewer-ref               # «v0.5.0 sha256:<хэш SHA256SUMS>» — читается из базовой ветки
+ops/ai-reviewer-ref               # «v0.6.0 sha256:<хэш SHA256SUMS>» — читается из базовой ветки
 ops/ai-review/fetch-pr-review.sh  # копия examples/ci/fetch-pr-review.sh: скачивание + сверка
 ops/ai-review/profile.json        # профиль проекта
 ```
 
 Недоступность сети или сервера релизов — fail-open (ревью пропускается, merge свободен);
-несовпадение sha256, отсутствие релиза по тегу пина (HTTP 404), битый пин — fail-closed. Старый пин (`v0.4.0`, чекаут + `node`) работает со старым
+несовпадение sha256, отсутствие релиза по тегу пина (HTTP 404), битый пин — fail-closed. Старый пин (`v0.5.0`, чекаут + `node`) работает со старым
 шаблоном до T33; переход — [integration.md §9](docs/integration.md#9-переход-со-старого-пина-чекаут--node).
 
 Готовые шаблоны workflow (ревью, сбор feedback, промоут паттернов, метрики) —

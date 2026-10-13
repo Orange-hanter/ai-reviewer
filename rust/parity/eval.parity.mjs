@@ -1,5 +1,5 @@
 /**
- * Parity-прогон T28 (RFC 16): `pr-review eval` ↔ `node bin/pr-review-eval.mjs`.
+ * Parity-прогон T28 (RFC 20): `pr-review eval` ↔ `node bin/pr-review-eval.mjs`.
  *
  * Запуск: node rust/parity/eval.parity.mjs   (требует cargo build)
  *

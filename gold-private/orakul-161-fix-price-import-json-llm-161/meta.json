@@ -1,0 +1,35 @@
+{
+  "id": "orakul-161-fix-price-import-json-llm-161",
+  "type": "tp",
+  "tags": [],
+  "description": "#161 «fix(price-import): ИИ-маппинг прайса — чинить «JSON не возвращается от LLM» (#161)» — дефект, который потом исправил #162",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "c0492174f0749c874bd437dcf91992128cb38df2",
+    "base": "0a69d0040c4505172f5409e8d86e49f654a8ec5b",
+    "ref": "#161",
+    "fixes": [
+      {
+        "sha": "c19be031e6578f819586552eba82e25b7ba7748d",
+        "ref": "#162",
+        "title": "fix(price-import): пережить cold-start ИИ-маппинга прайса (#162)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 157 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/server/priceAnalyze.ts",
+        "lines": [
+          164,
+          164
+        ]
+      }
+    ]
+  }
+}

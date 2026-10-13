@@ -1,5 +1,5 @@
 //! Подкоманда `pr-review feedback-promote` — порт feedback/promote-feedback.mjs,
-//! promote-candidate.mjs и promote-patterns.mjs (RFC 16, T30).
+//! promote-candidate.mjs и promote-patterns.mjs (RFC 20, T30).
 //!
 //! Два режима, как в JS:
 //!

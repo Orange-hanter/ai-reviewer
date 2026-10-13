@@ -1,0 +1,142 @@
+{
+  "version": 2,
+  "generatedAt": "2026-01-01T00:00:00.000Z",
+  "pr": {
+    "number": 1,
+    "title": "golden PR",
+    "url": "https://github.com/o/r/pull/1"
+  },
+  "headSha": "0123456789abcdef0123456789abcdef01234567",
+  "reviewMode": "consensus",
+  "router": {
+    "route": "full",
+    "reason": "server/shared/client или иной код"
+  },
+  "wouldBlock": true,
+  "verdict": {
+    "sha": "0123456",
+    "blocked": true,
+    "reproducibility": null
+  },
+  "counts": {
+    "critical": 1,
+    "major": 1,
+    "minor": 0,
+    "nit": 0
+  },
+  "total": 2,
+  "findings": [
+    {
+      "file": "server/orders.ts",
+      "line": 10,
+      "severity": "critical",
+      "title": "возможная утечка соединения",
+      "body": "не уверен",
+      "bodyTruncated": false,
+      "model": "m1",
+      "confidence": 0.5,
+      "consensusBlock": false,
+      "fp": "a5dbfb675b4e",
+      "actionabilityScore": 1
+    },
+    {
+      "file": "server/orders.ts",
+      "line": 11,
+      "severity": "major",
+      "title": "SQL-инъекция через конкатенацию id",
+      "body": "id без параметризации",
+      "bodyTruncated": false,
+      "model": "m1",
+      "confidence": 0.95,
+      "consensusBlock": true,
+      "fp": "0a7a07677bf3",
+      "actionabilityScore": 2
+    }
+  ],
+  "blockers": [
+    {
+      "file": "server/orders.ts",
+      "line": 11,
+      "severity": "major",
+      "title": "SQL-инъекция через конкатенацию id",
+      "body": "id без параметризации",
+      "bodyTruncated": false,
+      "model": "m1",
+      "confidence": 0.95,
+      "consensusBlock": true,
+      "fp": "0a7a07677bf3",
+      "actionabilityScore": 2
+    }
+  ],
+  "reasoning": [
+    {
+      "role": "model",
+      "model": "m1",
+      "excerpt": "ревью m1",
+      "truncated": false
+    }
+  ],
+  "blast": {
+    "symbols_total": 0,
+    "symbols_resolved": 0,
+    "affected_nonempty": 0,
+    "graph_status": "fresh",
+    "affected_files": [],
+    "confidence": {
+      "EXTRACTED": 0,
+      "INFERRED": 0,
+      "AMBIGUOUS": 0,
+      "unknown": 0
+    },
+    "cross_community": 0
+  },
+  "swarm": {
+    "version": 1,
+    "role": "external-verdict",
+    "generatedAt": "2026-01-01T00:00:00.000Z",
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "pr": {
+      "number": 1,
+      "title": "golden PR",
+      "url": "https://github.com/o/r/pull/1"
+    },
+    "wouldBlock": true,
+    "strong": false,
+    "blockers": [
+      {
+        "file": "server/orders.ts",
+        "line": 11,
+        "severity": "major",
+        "title": "SQL-инъекция через конкатенацию id",
+        "confidence": 0.95
+      }
+    ],
+    "strongBlockers": 0,
+    "blastScope": {
+      "affected_files": [],
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_status": "fresh",
+      "cross_community": 0
+    },
+    "suggestedScopeFiles": [],
+    "verdict": {
+      "sha": "0123456",
+      "blocked": true,
+      "reproducibility": null
+    },
+    "notes": [
+      "wouldBlock without full strong confirmation — treat as advisory for swarm",
+      "blast scope empty"
+    ]
+  },
+  "prescan": {
+    "findings": 0,
+    "scanned": 0,
+    "byTool": {
+      "eslint": 0,
+      "astgrep": 0
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "gateway-6-feat-saas-reverse-grpc-tunnel-dial-out-p",
+  "type": "tp",
+  "tags": [],
+  "description": "#6 «feat(saas): reverse gRPC tunnel dial-out — Phase 3 (B-049) (#6)» — дефект, который потом исправил #44",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "a69a51c19ddac57dd601cfb3a4358690e8843524",
+    "base": "a3b548461406d79e32b4c591445682397a63b90c",
+    "ref": "#6",
+    "fixes": [
+      {
+        "sha": "b5e54548bf239a0352d81cdab021f4d7fde04203",
+        "ref": "#44",
+        "title": "fix(saas): derive consumer identity from the verified peer cert, not a header (#44)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 524 строк в 9 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "internal/saas/tunnel.go",
+        "lines": [
+          32,
+          33
+        ]
+      }
+    ]
+  }
+}

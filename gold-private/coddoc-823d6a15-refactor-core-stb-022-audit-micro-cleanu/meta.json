@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-823d6a15-refactor-core-stb-022-audit-micro-cleanu",
+  "type": "tp",
+  "tags": [],
+  "description": " «refactor(core): STB-022 — audit micro-cleanups (typing, event_bus leak, skill loader)» — дефект, который потом исправил #90",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "823d6a1501b7a6c5c1461419e269f6b100b272dc",
+    "base": "72863f9a4e4915051ed35e268b891ddcf9205ad6",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "5fd623bdfee74f7e358f1d4d029e19593fcc4c1a",
+        "ref": "#90",
+        "title": "fix(api): ADO-194 — cod-doc serve не завершался при открытом WebSocket (#90)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 269 строк в 9 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/event_bus.py",
+        "lines": [
+          181,
+          184
+        ]
+      }
+    ]
+  }
+}

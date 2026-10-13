@@ -1,0 +1,54 @@
+{
+  "id": "restate-08fd8d66-feat-schema-dbm-017d-cleanup-stage-1-dro",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(schema): DBM-017d CLEANUP stage 1 — drop sync triggers + finish writes-switch» — дефект, который потом исправил f42c595c, !74",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "08fd8d661479ff4e9ae4c11043d209c6d06aec40",
+    "base": "be22252165d4a98baaee96658641c2bb027a7eef",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "f42c595cd9443c93b856e6faf7e5a4343db9982f",
+        "ref": null,
+        "title": "fix(e2e): resolve 33 failing tests — schema gaps, RBAC, enum casts, race conditions"
+      },
+      {
+        "sha": "85d61ccd2fba2d8f499b3f0ca285582857764a05",
+        "ref": "!74",
+        "title": "fix(auth,developer): /me 2FA fields + developer reg parity (#25 P2, #27 P1-P3)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 400 строк в 13 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/auth/services/registration.service.ts",
+        "lines": [
+          128,
+          128
+        ]
+      },
+      {
+        "file": "restate-api/src/auth/repositories/developer.repository.ts",
+        "lines": [
+          54,
+          54
+        ]
+      },
+      {
+        "file": "restate-api/src/auth/repositories/developer.repository.ts",
+        "lines": [
+          58,
+          58
+        ]
+      }
+    ]
+  }
+}

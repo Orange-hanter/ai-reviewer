@@ -35,7 +35,7 @@ Configure (**Customize → Plugins → Configure**) — опциональный
 (иначе Cursor держит loading + Authenticate). В `mcp.json` только плейсхолдеры `${…}`:
 
 - `AI_REVIEWER_ROOT` — клон пакета; пусто — `.engine-root`
-- `AI_REVIEWER_BIN` — prebuilt-бинарь `pr-review` (RFC 16); пусто — сборка клона, затем node
+- `AI_REVIEWER_BIN` — prebuilt-бинарь `pr-review` (RFC 20); пусто — сборка клона, затем node
 - `REVIEW_MCP_ROOT` — репозиторий ревью; пусто — тот же, что engine
 - `REVIEW_PROFILE` — опционально
 - `OLLAMA_API_KEY` — из Configure, в файлы плагина не кладётся; для `initialize` / дешёвых тулзов не нужен
@@ -47,7 +47,7 @@ Configure (**Customize → Plugins → Configure**) — опциональный
 
 ## Рантайм: бинарь `pr-review` или node
 
-Лаунчеры зовут подкоманды единого бинаря ([RFC 16](../proposals/16-standalone-rust-binary.md)):
+Лаунчеры зовут подкоманды единого бинаря ([RFC 20](../proposals/20-standalone-rust-binary.md)):
 `pr-review review-mcp` и `pr-review structure-mcp`. Порядок поиска бинаря:
 
 1. `AI_REVIEWER_BIN` — явный путь (например, распакованный из релиза). Клон движка тогда

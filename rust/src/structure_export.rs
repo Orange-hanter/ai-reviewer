@@ -719,7 +719,7 @@ mod tests {
         ));
         assert!(!outside.path().join("facts.json").exists());
         // Висячий symlink: canonicalize цели падает, ближайший существующий предок —
-        // root, а запись пошла бы по ссылке и создала файл снаружи (RFC 16 SEC).
+        // root, а запись пошла бы по ссылке и создала файл снаружи (RFC 20 SEC).
         std::os::unix::fs::symlink(outside.path().join("dangling.json"), root.join("dangling.json")).unwrap();
         escapes(with(
             |o, p| o.facts_path = Some(p),

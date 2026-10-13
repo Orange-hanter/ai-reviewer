@@ -1,9 +1,18 @@
 {
   "id": "fp-noise-no-real-blockers",
-  "type": "fp",
-  "description": "PR #477 post-fix: все major находки — ручным разбором подтверждённые FP (ESM-«синтаксис», shell whitespace, имена контейнеров) — merge не должен блокироваться",
+  "type": "tp",
+  "description": "PR #477 post-fix: major-находки, разобранные вручную, — FP (ESM-«синтаксис», shell whitespace, метрики/имена контейнеров); но выбор sticky по маркеру без проверки автора (ops/pr-review/lib/github.mjs:81, :91, :142) — верная находка, и merge по ней блокируется",
   "expect": {
-    "wouldBlock": false,
-    "note": "единственная реальная находка (mkdir в exporter) исправлена до генерации этого диффа"
+    "wouldBlock": true,
+    "mustFindLocations": [
+      { "file": "ops/pr-review/lib/github.mjs", "lines": [81, 91] }
+    ],
+    "mustNotFindTitles": [
+      "Синтаксическая ошибка ESM",
+      "leading whitespace",
+      "hermes-critical-container-down",
+      "hermes-container-restart-loop"
+    ],
+    "note": "Переразмечен 2026-10-09. До этого кейс ждал wouldBlock=false и в 8 из 9 прогонов «ложно» блокировался — по находке про sticky-автора, которую verifier подтверждал и которая была настоящей (исправлена в движке). Старые FP остаются precision-проверкой. «Утечка таймеров AbortController при повторах» — известный FP: clearTimeout стоит в finally внутри тела цикла. Symlink-обход readChangedFiles к этому диффу не относится — он из tp-real-bugs."
   }
 }

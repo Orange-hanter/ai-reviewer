@@ -1,0 +1,52 @@
+{
+  "id": "gateway-388f6a60-fix-wizard-auto-restore-topology-on-page",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(wizard): auto-restore topology on page load + auto-save on change» — дефект, который потом исправил 47169974, 811a1175, #72",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "388f6a6024a679cd2493efac77e38ec6b7403641",
+    "base": "7bcddc999f181a73138fe30a7cb48ba87a7cf853",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "471699743a1caf4e2930e4240efe6124a32a1f99",
+        "ref": null,
+        "title": "fix(audit): Transform node UI + backend hardening + bug fixes"
+      },
+      {
+        "sha": "811a11750a216fc0e4077da107f0a61d9fd87969",
+        "ref": null,
+        "title": "fix: reject illegal telemetry tags at submit instead of dropping data at ingest"
+      },
+      {
+        "sha": "a139133d79c770cd6ce334f51354966fa53403fa",
+        "ref": "#72",
+        "title": "fix(api): give the wizard topology a way back from a document nothing can render (#72)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 48 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "wizard/src/App.tsx",
+        "lines": [
+          129,
+          134
+        ]
+      },
+      {
+        "file": "wizard/src/App.tsx",
+        "lines": [
+          226,
+          232
+        ]
+      }
+    ]
+  }
+}

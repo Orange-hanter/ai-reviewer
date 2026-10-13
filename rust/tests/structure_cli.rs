@@ -1,4 +1,4 @@
-//! Чёрноящичные тесты `pr-review structure` (RFC 16, T22): артефакты подкоманды
+//! Чёрноящичные тесты `pr-review structure` (RFC 20, T22): артефакты подкоманды
 //! сверяются с эталонным JS bin/pr-review-structure.mjs на одной и той же фикстуре
 //! (`tests/fixtures/structure_cli/repo`: граф, отчёт графа, LCOV, obligations,
 //! mutation-отчёт, исходник теста, профиль `.ai-reviewer.json`).

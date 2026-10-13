@@ -1,0 +1,64 @@
+{
+  "id": "coddoc-2bdb1f9d-feat-ado-025-remove-dependency-service-m",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": " «feat(ADO-025): remove_dependency в service-слое, MCP и CLI» — дефект, который потом исправил #124, #141",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "2bdb1f9d041e6318d81eadb61863e85761d26643",
+    "base": "63c68d4f1dd81fc6b4d4b19f3e4edf9683dab43b",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "ea2b77601ef53b691bad9e970d0d251ad7b459d6",
+        "ref": "#124",
+        "title": "fix(tasks): ADO-200 — скоуп проекта у поиска задачи: _require_task, remove_dependency, blocked_by (#124)"
+      },
+      {
+        "sha": "324870eed60614a6f2241a8f0a9f5d128c4f107c",
+        "ref": "#141",
+        "title": "fix(mcp): ADO-226 — ответы мутаций задачи в форме task_get (#141)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 349 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: task_to_dict"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/cli/task.py",
+        "lines": [
+          420,
+          420
+        ]
+      },
+      {
+        "file": "cod_doc/mcp/tools/task_tools.py",
+        "lines": [
+          597,
+          597
+        ]
+      },
+      {
+        "file": "cod_doc/mcp/tools/task_tools.py",
+        "lines": [
+          609,
+          609
+        ]
+      },
+      {
+        "file": "cod_doc/services/task_service.py",
+        "lines": [
+          761,
+          762
+        ]
+      }
+    ]
+  }
+}

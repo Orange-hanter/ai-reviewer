@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-21-fix-infra-sto-027-init-project-hub-embed",
+  "type": "tp",
+  "tags": [],
+  "description": "#21 «fix(infra): STO-027 — init_project мигрирует hub-БД, а не embedded» — дефект, который потом исправил #23",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "b23e2bd82ccf7a2aff74580aba1a5c34cdd27ba4",
+    "base": "8210541f1ac18984547960d6d4f6fdba7120810d",
+    "ref": "#21",
+    "fixes": [
+      {
+        "sha": "956e93dce9bf2f2ffd6b21ddf7c33111486199bd",
+        "ref": "#23",
+        "title": "fix(storage): STO-009 + STO-026 — миграции по db_url, кэш движков, 503 на рассинхрон схемы"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 281 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/deps.py",
+        "lines": [
+          157,
+          157
+        ]
+      }
+    ]
+  }
+}

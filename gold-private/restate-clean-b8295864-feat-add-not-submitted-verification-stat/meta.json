@@ -1,0 +1,15 @@
+{
+  "id": "restate-clean-b8295864-feat-add-not-submitted-verification-stat",
+  "type": "clean",
+  "description": " «feat: add 'Not Submitted' verification status for agencies» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "b8295864238f744ae6c864dd8ab911b1b4de606f",
+    "base": "2329c8d946598325c3c9954f01f71cf987100a73",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

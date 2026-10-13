@@ -1,0 +1,35 @@
+{
+  "id": "restate-ec5fd123-feat-deploy-add-smoke-tests-for-s3-publi",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(deploy): add smoke tests for S3 public endpoint and presigned uploads» — дефект, который потом исправил 8ecd6ef6",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "ec5fd123c8713542cca67745f99c617ec4ac95c9",
+    "base": "8f18cc143007815146b75453b4772c54687c541f",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "8ecd6ef646357bd13432b25a112b8f78358d9fc9",
+        "ref": null,
+        "title": "fix(ci): use valid UUID in presign-upload smoke test"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 68 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "tools/ci/run-deploy-develop.sh",
+        "lines": [
+          186,
+          186
+        ]
+      }
+    ]
+  }
+}

@@ -19,9 +19,9 @@
     "reproducibility": null
   },
   "counts": {
-    "critical": 12,
+    "critical": 13,
     "major": 0,
-    "minor": 1,
+    "minor": 0,
     "nit": 0
   },
   "total": 13,
@@ -190,15 +190,15 @@
     {
       "file": "app/server/api.ts",
       "line": 13,
-      "severity": "minor",
+      "severity": "critical",
       "title": "баг 13",
       "body": "подробности находки",
       "bodyTruncated": false,
       "model": "m1",
       "confidence": 0.9,
-      "consensusBlock": false,
-      "verifierStatus": "overflow",
-      "actionabilityScore": 2
+      "consensusBlock": true,
+      "verifierStatus": "verified",
+      "actionabilityScore": 5
     }
   ],
   "blockers": [
@@ -255,6 +255,19 @@
       "consensusBlock": true,
       "verifierStatus": "verified",
       "actionabilityScore": 5
+    },
+    {
+      "file": "app/server/api.ts",
+      "line": 13,
+      "severity": "critical",
+      "title": "баг 13",
+      "body": "подробности находки",
+      "bodyTruncated": false,
+      "model": "m1",
+      "confidence": 0.9,
+      "consensusBlock": true,
+      "verifierStatus": "verified",
+      "actionabilityScore": 5
     }
   ],
   "reasoning": [
@@ -266,12 +279,12 @@
     }
   ],
   "verifier": {
-    "verified": 12,
+    "verified": 13,
     "rejected": 0,
     "downgraded": 0,
     "missing": 0,
     "unverified": 0,
-    "overflow": 1
+    "batches": 2
   },
   "blast": {
     "symbols_total": 0,
@@ -331,9 +344,17 @@
         "title": "баг 10",
         "verifierStatus": "verified",
         "confidence": 0.9
+      },
+      {
+        "file": "app/server/api.ts",
+        "line": 13,
+        "severity": "critical",
+        "title": "баг 13",
+        "verifierStatus": "verified",
+        "confidence": 0.9
       }
     ],
-    "strongBlockers": 4,
+    "strongBlockers": 5,
     "blastScope": {
       "affected_files": [],
       "symbols_total": 0,

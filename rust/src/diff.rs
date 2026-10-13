@@ -215,28 +215,51 @@ pub fn parse_diff(diff: &str) -> ParseDiffResult {
     let mut annotated_parts: Vec<String> = Vec::new();
     let mut changed_lines: Vec<String> = Vec::new();
     let mut cur_path: Option<String> = None;
+    let mut git_path: Option<String> = None;
+    let mut deleted_header = false;
+    let mut in_hunk = false;
     let mut new_line: u64 = 0;
 
     for raw in diff.split('\n') {
         if raw.starts_with("diff --git") {
             cur_path = None;
+            git_path = parse_diff_git_path(raw);
+            deleted_header = false;
+            in_hunk = false;
             annotated_parts.push(raw.to_string());
             continue;
         }
-        if raw.starts_with("+++ ") {
-            cur_path = parse_diff_new_path(raw);
+        if !in_hunk && raw.starts_with("deleted file mode ") {
+            deleted_header = true;
+        }
+        // Заголовки `---`/`+++` — только до первого хунка секции; внутри хунка это
+        // строки содержимого `-- …`/`++ …` (RFC 17).
+        if !in_hunk && raw.starts_with("+++ ") {
+            // Удалённый файл (`+++ /dev/null`) — путь из `diff --git` (RFC 17). Только в
+            // заголовке секции с `deleted file mode`: внутри хунка это добавленная строка.
+            cur_path = parse_diff_new_path(raw).or_else(|| {
+                if deleted_header
+                    && !in_hunk
+                    && raw.strip_suffix('\r').unwrap_or(raw) == "+++ /dev/null"
+                {
+                    git_path.clone()
+                } else {
+                    None
+                }
+            });
             if let Some(p) = &cur_path {
                 files.entry(p.clone()).or_default();
             }
             annotated_parts.push(raw.to_string());
             continue;
         }
-        if raw.starts_with("--- ") {
+        if !in_hunk && raw.starts_with("--- ") {
             annotated_parts.push(raw.to_string());
             continue;
         }
         if let Some(n) = parse_hunk_start(raw) {
             new_line = n;
+            in_hunk = true;
             annotated_parts.push(raw.to_string());
             continue;
         }
@@ -249,14 +272,14 @@ pub fn parse_diff(diff: &str) -> ParseDiffResult {
             continue;
         };
         let rec = files.get_mut(&path).expect("cur_path из files");
-        if raw.starts_with('+') && !raw.starts_with("+++") {
+        if raw.starts_with('+') && (in_hunk || !raw.starts_with("+++")) {
             rec.valid_lines.insert(new_line);
             rec.changed.push(raw[1..].to_string());
             rec.text.insert(new_line, raw[1..].to_string());
             changed_lines.push(raw[1..].to_string());
             annotated_parts.push(format!("{:>5}: {}", new_line, raw));
             new_line += 1;
-        } else if raw.starts_with('-') && !raw.starts_with("---") {
+        } else if raw.starts_with('-') && (in_hunk || !raw.starts_with("---")) {
             rec.changed.push(raw[1..].to_string());
             changed_lines.push(raw[1..].to_string());
             annotated_parts.push(format!("     : {}", raw));
@@ -296,6 +319,10 @@ fn symbol_patterns() -> &'static [regex::Regex] {
             r"(?-u:\b)export\s+const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:<[^>]*>\s*)?\(",
             r"(?-u:\b)export\s+const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:async\s*)?function",
             r"(?-u:\b)export\s*\{([^}]+)\}",
+            // Python: публичное определение верхнего уровня (колонка 0). Якорь `(?:^|\n)`
+            // вместо `(?m)` — у JS-флага `m` границы строк шире (`\r`, U+2028).
+            r"(?:^|\n)(?:async[ \t]+)?def[ \t]+([A-Za-z][A-Za-z0-9_]*)[ \t]*\(",
+            r"(?:^|\n)class[ \t]+([A-Za-z][A-Za-z0-9_]*)[ \t]*[(:]",
         ]
         .iter()
         .map(|src| regex::Regex::new(src).unwrap())
@@ -353,7 +380,7 @@ pub fn extract_changed_symbols(text: &str, max_symbols: usize) -> Vec<String> {
 }
 
 const CODE_EXTENSIONS: &[&str] = &[
-    ".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".js", ".jsx",
+    ".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".js", ".jsx", ".py", ".pyi",
 ];
 
 fn is_code_path(path: &str) -> bool {
@@ -362,7 +389,7 @@ fn is_code_path(path: &str) -> bool {
 }
 
 /// Символы для Graphify blast-radius: сначала из изменённых строк, затем добор
-/// экспортами из полных текстов затронутых `.ts`/`.js` файлов.
+/// экспортами из полных текстов затронутых `.ts`/`.js`/`.py` файлов.
 pub fn collect_blast_symbols(
     changed_text: &str,
     content_map: Option<&indexmap::IndexMap<String, String>>,
@@ -697,7 +724,7 @@ pub fn build_chunks(
 }
 
 // ---------------------------------------------------------------------------
-// readChangedFiles — чтение затронутых файлов для контекста модели (RFC 16 T35)
+// readChangedFiles — чтение затронутых файлов для контекста модели (RFC 20 T35)
 // ---------------------------------------------------------------------------
 
 /// Пути, чьё содержимое модели не нужно: lock-файлы, бинарные и медиа-форматы.
@@ -849,6 +876,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_diff_keeps_deleted_file() {
+        let diff = "diff --git a/auth/guard.ts b/auth/guard.ts\ndeleted file mode 100644\n--- a/auth/guard.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export function guard() { return check(); }\n-export const x = 1;";
+        let r = parse_diff(diff);
+        let keys: Vec<&String> = r.files.keys().collect();
+        assert_eq!(keys, vec!["auth/guard.ts"]);
+        assert!(r.changed_text.contains("export function guard()"), "удалённые строки — в changedText для blast-radius");
+        assert!(r.files["auth/guard.ts"]["validLines"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_diff_hunk_line_does_not_spoof_deleted_header() {
+        // добавленная строка `++ /dev/null` выглядит как `+++ /dev/null` — не заголовок
+        let diff = "diff --git a/s.ts b/s.ts\n--- a/s.ts\n+++ b/s.ts\n@@ -1 +1,3 @@\n a\n+/*\n+++ /dev/null\n+import x from 'raw';";
+        let r = parse_diff(diff);
+        let keys: Vec<&String> = r.files.keys().collect();
+        assert_eq!(keys, vec!["s.ts"]);
+        assert!(r.changed_text.contains("import x from 'raw'"), "строки после подделки не теряются");
+    }
+
+    #[test]
     fn parse_diff_quoted_path_with_spaces() {
         let d = "diff --git \"a/Price copy/f.ts\" \"b/Price copy/f.ts\"\n--- \"a/Price copy/f.ts\"\n+++ \"b/Price copy/f.ts\"\n@@ -1,1 +1,1 @@\n-old\n+new\n";
         let res = parse_diff(d);
@@ -918,6 +965,25 @@ mod tests {
         );
         let syms = collect_blast_symbols(changed, Some(&content_map), 25);
         assert!(syms.contains(&"makeDataStore".to_string()));
+    }
+
+    #[test]
+    fn extract_changed_symbols_python_public_top_level() {
+        let changed = "def row_id_for_slug(session, slug):\nasync def fetch_all(x):\nclass ProjectNotFoundError(LookupError):\nclass Plain:\ndef _private(x):\n    def method(self):\nclass _Hidden:\ndef ab(x):";
+        let syms = extract_changed_symbols(changed, 25);
+        assert_eq!(syms, vec!["row_id_for_slug", "fetch_all", "ProjectNotFoundError", "Plain"]);
+    }
+
+    #[test]
+    fn collect_blast_symbols_picks_python_defs_from_full_file() {
+        let changed = "    return session.scalar(stmt)\n";
+        let mut content_map = indexmap::IndexMap::new();
+        content_map.insert(
+            "cod_doc/services/project_service.py".to_string(),
+            "import x\n\n\ndef row_id_for_slug(session, slug):\n    return 1\n\n\ndef _helper():\n    pass\n".to_string(),
+        );
+        let syms = collect_blast_symbols(changed, Some(&content_map), 25);
+        assert_eq!(syms, vec!["row_id_for_slug"]);
     }
 
     #[test]
@@ -1061,7 +1127,7 @@ new file mode 100644
     }
 
     // -----------------------------------------------------------------------
-    // read_changed_files (RFC 16 T35)
+    // read_changed_files (RFC 20 T35)
     // -----------------------------------------------------------------------
 
     fn read_in(

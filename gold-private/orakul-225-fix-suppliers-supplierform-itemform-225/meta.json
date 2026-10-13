@@ -1,0 +1,35 @@
+{
+  "id": "orakul-225-fix-suppliers-supplierform-itemform-225",
+  "type": "tp",
+  "tags": [],
+  "description": "#225 «fix(suppliers): SupplierForm/ItemForm молча глотали ошибку сохранения (#225)» — дефект, который потом исправил #245",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "2527212716c802d5d0c0498e0e2c0e9b79a951bf",
+    "base": "c9cbb4c6bcfb4b4f362571c430a360136d2bcc14",
+    "ref": "#225",
+    "fixes": [
+      {
+        "sha": "dd1efecddd3fc4d2e3fdac39aa593f24855b1085",
+        "ref": "#245",
+        "title": "fix: удаление поставщика (#235) + сворачивание категорий в Техкартах (#234) (#245)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 71 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/suppliers/SupplierForm.tsx",
+        "lines": [
+          15,
+          15
+        ]
+      }
+    ]
+  }
+}

@@ -70,7 +70,8 @@
     "rejected": 0,
     "downgraded": 0,
     "missing": 0,
-    "unverified": 0
+    "unverified": 0,
+    "batches": 1
   },
   "blast": {
     "symbols_total": 0,

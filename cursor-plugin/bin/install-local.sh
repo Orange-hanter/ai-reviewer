@@ -7,7 +7,7 @@ set -eu
 
 engine=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 src=$engine/cursor-plugin
-# Клон пакета: JS-лаунчер (до T33) или Rust-ядро (RFC 16) — лаунчер выберет бинарь сам.
+# Клон пакета: JS-лаунчер (до T33) или Rust-ядро (RFC 20) — лаунчер выберет бинарь сам.
 if [ ! -f "$src/mcp.json" ] || { [ ! -f "$engine/bin/pr-review-mcp.mjs" ] && [ ! -f "$engine/rust/Cargo.toml" ]; }; then
   printf 'ai-reviewer MCP: install-local.sh запускайте из клона пакета (нужны %s и %s или %s).\n' \
     "$src/mcp.json" "$engine/bin/pr-review-mcp.mjs" "$engine/rust/Cargo.toml" >&2

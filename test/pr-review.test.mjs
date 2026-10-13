@@ -8,9 +8,9 @@ process.env.OLLAMA_MODELS = 'm1,m2';
 import './helpers/reference-profile.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile, rm, readFile, symlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { writeFile, rm, readFile, mkdtemp, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MARKERS, extractStickyFooterRaw } from '../lib/constants.mjs';
 
 const {
@@ -20,7 +20,7 @@ const {
   extractFileDiffSections, selectVerifierCandidates, applyVerifierVerdicts,
   parseJsonl, aggregateMetrics, formatMetricsReport,
   parseDiffNewPath, parseDiffGitPath, unescapeGitPath, buildSummary, filterStalePriorFindings,
-  filterFindingsFixedInDiff, findingFingerprint, createGraphifyClient, buildChangedFilesSection,
+  filterFindingsFixedInDiff, findingFingerprint, createGraphifyClient, blastUnavailableReason, buildChangedFilesSection,
   dedupeSameModelFindings, createCostTracker, formatCostStickyLine, scoreGoldCase, aggregateBenchmark,
   scoreFromRecord, locationMatches, DEFAULT_LOCATION_TOLERANCE,
   emitBlastRadiusFindings, resolveBlockers, normalizeFinding, setProfile, resetProfile,
@@ -96,6 +96,28 @@ test('collectBlastSymbols: добор экспортов из полного ф�
   assert.ok(syms.includes('makeDataStore'), 'export из файла попадает в blast даже без export в hunk');
 });
 
+test('extractChangedSymbols: Python — публичные def/async def/class верхнего уровня', () => {
+  const changed = [
+    'def row_id_for_slug(session, slug):',
+    'async def fetch_all(x):',
+    'class ProjectNotFoundError(LookupError):',
+    'class Plain:',
+    'def _private(x):',         // приватное — не экспорт
+    '    def method(self):',    // метод: имя в графе неоднозначно
+    'class _Hidden:',
+    'def ab(x):',               // короче 3
+  ].join('\n');
+  assert.deepEqual(extractChangedSymbols(changed), ['row_id_for_slug', 'fetch_all', 'ProjectNotFoundError', 'Plain']);
+});
+
+test('collectBlastSymbols: добор def из полного .py-файла, если hunk правит только тело', () => {
+  const changed = '    return session.scalar(stmt)\n';
+  const contentMap = new Map([
+    ['cod_doc/services/project_service.py', 'import x\n\n\ndef row_id_for_slug(session, slug):\n    return 1\n\n\ndef _helper():\n    pass\n'],
+  ]);
+  assert.deepEqual(collectBlastSymbols(changed, contentMap, 25), ['row_id_for_slug']);
+});
+
 test('Graphify: пустой blast-radius различает stale graph, неразрешимый символ и реальные зависимости', async () => {
   const calls = [];
   const cfg = {
@@ -164,6 +186,47 @@ test('Graphify: отсутствует graph.json → graph_missing, без вы
   assert.equal(metrics.skip_reasons.graph_missing, 1);
   assert.equal(metrics.symbols_resolved, 0);
   assert.equal(calls.length, 0, 'affected/git не вызываем без графа');
+});
+
+test('Graphify: blastUnavailableReason — инфра-сбой отличается от «зависимых нет»', async () => {
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const graphOk = async (path) => (String(path).endsWith('graph.json')
+    ? '{"nodes":[],"links":[]}'
+    : '# Graph Report\n- Built from commit: `abcdef12`\n');
+  const enoent = () => { const err = new Error('ENOENT'); err.code = 'ENOENT'; return err; };
+
+  const missing = await createGraphifyClient(cfg, {
+    execFileP: async () => ({ stdout: '' }), access: async () => { throw enoent(); },
+  }).buildBlastRadius(['foo']);
+  assert.equal(blastUnavailableReason(missing.metrics), 'graph_missing');
+
+  const noCli = await createGraphifyClient(cfg, {
+    execFileP: async (bin) => { if (bin === 'gf') throw enoent(); return { stdout: 'abcdef12' }; },
+    readFile: graphOk, access: async () => {},
+  }).buildBlastRadius(['foo', 'bar']);
+  assert.equal(blastUnavailableReason(noCli.metrics), 'graphify_unavailable');
+
+  const unreadable = await createGraphifyClient(cfg, {
+    execFileP: async () => ({ stdout: 'No affected nodes found' }),
+    readFile: async (path) => (String(path).endsWith('graph.json') ? '{broken' : graphOk(path)),
+    access: async () => {},
+  }).buildBlastRadius(['foo']);
+  assert.equal(blastUnavailableReason(unreadable.metrics), 'graph_unreadable');
+
+  const noDeps = await createGraphifyClient(cfg, {
+    execFileP: async (bin) => ({ stdout: bin === 'gf' ? 'No affected nodes found' : 'abcdef12' }),
+    readFile: graphOk, access: async () => {},
+  }).buildBlastRadius(['foo']);
+  assert.equal(blastUnavailableReason(noDeps.metrics), null, 'граф есть, зависимых нет — не сбой');
+
+  const noSymbols = await createGraphifyClient(cfg, {
+    execFileP: async () => ({ stdout: 'abcdef12' }), readFile: graphOk, access: async () => {},
+  }).buildBlastRadius([]);
+  assert.equal(blastUnavailableReason(noSymbols.metrics), null);
+  assert.equal(blastUnavailableReason({ skip_reason: 'client_did_not_report', graph_status: 'unknown' }), null);
 });
 
 test('Graphify: нет символов в диффе → честный skip no_symbols_in_diff', async () => {
@@ -578,6 +641,47 @@ test('readChangedFiles: symlink наружу из репо не читается
   } finally {
     await rm(link, { force: true });
     await rm(outside, { force: true });
+  }
+});
+
+test('readChangedFiles: symlink наружу репозитория не читается (realpath, не resolve)', async () => {
+  // Изменённый (не добавленный) путь — symlink, существующий в базе: его цель вне репо.
+  const outsideDir = await mkdtemp(join(tmpdir(), 'pr-review-outside-'));
+  const secret = join(outsideDir, 'secret.txt');
+  await writeFile(secret, 'TOP-SECRET-CONTENT\n');
+  const link = `.tmp-pr-review-link-${process.pid}`;
+  await symlink(secret, link);
+  try {
+    const logs = [];
+    const files = new Map([[link, { validLines: new Set([1]), changed: [] }]]);
+    const map = await readChangedFiles(files, { maxFileLines: 100 }, (m) => logs.push(m));
+    assert.equal(map.size, 0, 'содержимое цели вне репо не уходит в контекст модели');
+    assert.ok(logs.some((m) => m.includes(`пропуск файла вне репо: ${link}`)), logs.join('\n'));
+  } finally {
+    await rm(link, { force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test('readChangedFiles: symlink внутри репозитория читается, удалённый файл — тихий пропуск', async () => {
+  const target = `.tmp-pr-review-target-${process.pid}.ts`;
+  const link = `.tmp-pr-review-inlink-${process.pid}.ts`;
+  const gone = `.tmp-pr-review-gone-${process.pid}.ts`;
+  await writeFile(target, 'export const inside = 1;\n');
+  await symlink(target, link);
+  try {
+    const logs = [];
+    const files = new Map([
+      [link, { validLines: new Set([1]), changed: [] }],
+      [gone, { validLines: new Set([1]), changed: [] }],
+    ]);
+    const map = await readChangedFiles(files, { maxFileLines: 100 }, (m) => logs.push(m));
+    assert.match(map.get(link) || '', /export const inside = 1;/, 'легитимная ссылка внутри репо работает');
+    assert.ok(!map.has(gone));
+    assert.ok(!logs.some((m) => m.includes(gone)), 'удалённый в PR файл — не «вне репо»');
+  } finally {
+    await rm(link, { force: true });
+    await rm(target, { force: true });
   }
 });
 

@@ -1,0 +1,38 @@
+{
+  "id": "orakul-263-feat-staff-263",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": "#263 «feat(staff): табель-сетка по секциям-цехам + мобильная плотность (#263)» — дефект, который потом исправил #503",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "3dfa05bec059e49b5ef92a4339e4c8c3a1b4eba3",
+    "base": "ad30d9f9ba9320435961a69bc06ff940f5ea651b",
+    "ref": "#263",
+    "fixes": [
+      {
+        "sha": "8ad12d6520fb63db96a770efe6be4b8dc5763054",
+        "ref": "#503",
+        "title": "fix(staff): кривая сетка расписания — DndContext вне table (#194)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 176 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: isWeekendIso"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/tabs/StaffTab/ScheduleGridView.tsx",
+        "lines": [
+          301,
+          301
+        ]
+      }
+    ]
+  }
+}

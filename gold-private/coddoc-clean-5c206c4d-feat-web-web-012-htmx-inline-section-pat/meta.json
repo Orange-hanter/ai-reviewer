@@ -1,0 +1,15 @@
+{
+  "id": "coddoc-clean-5c206c4d-feat-web-web-012-htmx-inline-section-pat",
+  "type": "clean",
+  "description": " «feat(web): WEB-012 HTMX inline section patch + optimistic concurrency» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "5c206c4d650570e82f285de3639d7fc967e8591f",
+    "base": "36f6c493972d539052c37bd50c033ee3ea910974",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

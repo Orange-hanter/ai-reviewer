@@ -1,0 +1,42 @@
+{
+  "id": "restate-52-feat-listings-m3-v0-11-assignprimaryagen",
+  "type": "tp",
+  "tags": [],
+  "description": "!52 «feat(listings): M3 v0.11 — assignPrimaryAgent service (LST-020)» — дефект, который потом исправил !78",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "d75dae7cca961127f266d0ff1ed8fb05ebf60758",
+    "base": "0fb3b32fc0695ae676b61ad1cd0bd1fb7aab5f1d",
+    "ref": "!52",
+    "fixes": [
+      {
+        "sha": "13c9e58c79a98925baf4cb81e37daad54b142d61",
+        "ref": "!78",
+        "title": "fix(listings): M3 v0.17 — audit hotfixes (C1+C2+H1+M2 + FK migration)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 618 строк в 9 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/listings/services/listing-assignment.service.ts",
+        "lines": [
+          61,
+          65
+        ]
+      },
+      {
+        "file": "restate-api/src/listings/services/listing-assignment.service.ts",
+        "lines": [
+          68,
+          68
+        ]
+      }
+    ]
+  }
+}

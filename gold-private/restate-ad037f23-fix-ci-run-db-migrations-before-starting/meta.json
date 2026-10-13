@@ -1,0 +1,35 @@
+{
+  "id": "restate-ad037f23-fix-ci-run-db-migrations-before-starting",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(ci): run DB migrations before starting API in all Playwright jobs» — дефект, который потом исправил c34bee9e",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "ad037f2308d3518cbf889e1e68fa9a1a2a63c81f",
+    "base": "91eec992b4d51603fbc3ad8a4f68541afa03fae7",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "c34bee9ec445c10c7dcfcd98dfb6e11b6e67a77a",
+        "ref": null,
+        "title": "fix(api): track sql migrations and share test bootstrap"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 22 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/scripts/migrate.js",
+        "lines": [
+          16,
+          16
+        ]
+      }
+    ]
+  }
+}

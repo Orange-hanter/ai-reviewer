@@ -1,7 +1,7 @@
 # Миграция Orakul на пин ai-reviewer
 
 Движок подключается prebuilt-бинарём `pr-review` по пину с sha256
-([RFC 16](../../../proposals/16-standalone-rust-binary.md), решение 9;
+([RFC 20](../../../proposals/20-standalone-rust-binary.md), решение 9;
 [docs/integration.md](../../../docs/integration.md)).
 
 1. Скопировать в Orakul:
@@ -12,7 +12,7 @@
      релизе он заменяется настоящим (`curl -fsSL …/releases/download/<tag>/SHA256SUMS | sha256sum`).
      Скрипт сверки отвергает хэш из нулей (шаг красный, exit 1), а релиза по тегу до T32 нет
      (HTTP 404 — тоже exit 1) — копировать до релиза нельзя; до него
-     остаётся пин `v0.4.0` и прежний шаблон (чекаут + `node`).
+     остаётся пин `v0.5.0` и прежний шаблон (чекаут + `node`).
 2. В `.github/workflows/` заменить шаблоны на `examples/ci/*.yml`: шаги `Read pinned engine
    ref` и `Checkout pinned AI review engine` уходят, их место — `Fetch pinned pr-review
    binary`; запуск — `"$PR_REVIEW_BIN" review` с `REVIEW_PROFILE=ops/ai-review/profile.json`.

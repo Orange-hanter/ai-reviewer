@@ -1,0 +1,89 @@
+{
+  "loadDiff": {
+    "pr": {
+      "number": 1,
+      "title": "golden PR",
+      "html_url": "https://github.com/o/r/pull/1"
+    },
+    "headSha": "0123456789abcdef0123456789abcdef01234567",
+    "draft": false
+  },
+  "priorSticky": {
+    "findings": [],
+    "runs": [],
+    "sha": ""
+  },
+  "prescan": {
+    "findings": [
+      {
+        "file": "server/orders.ts",
+        "line": 10,
+        "severity": "major",
+        "confidence": 1,
+        "title": "eslint: no-unused-vars",
+        "body": "'sql' is assigned but never used",
+        "model": "eslint-prescan",
+        "prescan": true,
+        "ruleId": "no-unused-vars",
+        "prescanBlock": false
+      }
+    ],
+    "scanned": 0,
+    "truncated": false,
+    "lintableTotal": 0,
+    "byTool": {
+      "eslint": 1,
+      "astgrep": 0
+    },
+    "promptSection": ""
+  },
+  "blastRadius": {
+    "blocks": [],
+    "metrics": {
+      "symbols_total": 0,
+      "symbols_resolved": 0,
+      "affected_nonempty": 0,
+      "graph_fresh": true,
+      "graph_status": "fresh",
+      "skip_reason": "",
+      "skip_reasons": {},
+      "confidence": {
+        "EXTRACTED": 0,
+        "INFERRED": 0,
+        "AMBIGUOUS": 0,
+        "unknown": 0
+      }
+    }
+  },
+  "reviews": [
+    {
+      "model": "m1",
+      "summary": "ревью m1",
+      "verdict": "changes_requested",
+      "findings": [
+        {
+          "file": "server/orders.ts",
+          "line": 11,
+          "severity": "minor",
+          "confidence": 0.4,
+          "title": "лишняя переменная row",
+          "body": "можно вернуть сразу",
+          "model": "m1",
+          "carried": true
+        }
+      ]
+    }
+  ],
+  "verifier": {
+    "mode": "none"
+  },
+  "githubResults": {
+    "postReviewId": 555,
+    "deleteStaleInline": 0,
+    "upsertSticky": "created"
+  },
+  "telegram": {
+    "enabled": false
+  },
+  "repoFiles": null
+}

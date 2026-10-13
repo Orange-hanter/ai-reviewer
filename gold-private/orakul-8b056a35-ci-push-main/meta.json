@@ -1,0 +1,35 @@
+{
+  "id": "orakul-8b056a35-ci-push-main",
+  "type": "tp",
+  "tags": [],
+  "description": " «ci: автодеплой на push в main (фичи летят → облако обновляется само)» — дефект, который потом исправил 1e6a2358",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "8b056a350c166a35b07dd76e0e5e8ee9d40e1106",
+    "base": "df80b6542798abda9585c54999b8cff73d7335cf",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "1e6a23584295cae41fd42430285e86d717f78acb",
+        "ref": null,
+        "title": "fix(ops): deploy after CI via workflow_run, drop duplicate gate"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 12 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/deploy.yml",
+        "lines": [
+          3,
+          7
+        ]
+      }
+    ]
+  }
+}

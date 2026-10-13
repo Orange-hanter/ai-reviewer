@@ -1,0 +1,77 @@
+{
+  "id": "restate-dcfb5e70-fix-add-roster-filtering-by-membership-s",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix: add roster filtering by membership status (AGN-036)» — дефект, который потом исправил !37",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "dcfb5e70cb606fc0a42f8904480394743589a25d",
+    "base": "66a9cb77e3ab204357257a361ea8959fb935c7f3",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "8acdd06752e4ec120212b8693860b6ca2de3945e",
+        "ref": "!37",
+        "title": "fix(M10 Agencies): AGN-073 invite roster visibility + AGN-I12 KYB cross-surface E2E"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 105 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "Docs/api/paths/agencies_me_users.yaml",
+        "lines": [
+          3,
+          4
+        ]
+      },
+      {
+        "file": "Docs/api/paths/agencies_me_users.yaml",
+        "lines": [
+          8,
+          8
+        ]
+      },
+      {
+        "file": "Docs/openapi.yaml",
+        "lines": [
+          1554,
+          1554
+        ]
+      },
+      {
+        "file": "Docs/openapi.yaml",
+        "lines": [
+          1558,
+          1558
+        ]
+      },
+      {
+        "file": "restate-api/src/agency/agency.controller.ts",
+        "lines": [
+          113,
+          113
+        ]
+      },
+      {
+        "file": "restate-api/src/agency/services/agency.service.ts",
+        "lines": [
+          180,
+          182
+        ]
+      },
+      {
+        "file": "restate-api/src/agency/services/agency.service.ts",
+        "lines": [
+          194,
+          196
+        ]
+      }
+    ]
+  }
+}

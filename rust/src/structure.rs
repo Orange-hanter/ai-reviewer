@@ -1,7 +1,7 @@
-//! Порт `lib/structure.mjs` (RFC 16, T21): glue `analyze_structure` — собирает
+//! Порт `lib/structure.mjs` (RFC 20, T21): glue `analyze_structure` — собирает
 //! facts → assessment → drift → triage из провайдеров structure-контура.
 //!
-//! Граница (RFC 01, п. 1; RFC 16 «Чего не делаем»): модуль не импортирует
+//! Граница (RFC 01, п. 1; RFC 20 «Чего не делаем»): модуль не импортирует
 //! `pipeline`/`engine`/`github`/`llm` и ничего не блокирует — тест
 //! `boundary_*` ниже читает исходники как текст и держит это правило.
 //!

@@ -1,0 +1,63 @@
+{
+  "id": "coddoc-67-feat-deploy-ado-189-67",
+  "type": "tp",
+  "tags": [],
+  "description": "#67 «feat(deploy): ADO-189 — доставка ревизий в живые сервисы (#67)» — дефект, который потом исправил #70",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "f0993c1771cdd7cc86ae22687e3db6a6415f0b51",
+    "base": "88853950d93677fc3e6bc5971e94842c85dda9ec",
+    "ref": "#67",
+    "fixes": [
+      {
+        "sha": "ed9ce563893b238819eb02ce466b6b90a1ef4b9c",
+        "ref": "#70",
+        "title": "fix(deploy): ADO-191 — cod-doc-services.sh не переживал собственный свап (#70)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 652 строк в 14 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "deploy/launchd/cod-doc-services.sh",
+        "lines": [
+          134,
+          134
+        ]
+      },
+      {
+        "file": "deploy/launchd/cod-doc-services.sh",
+        "lines": [
+          150,
+          151
+        ]
+      },
+      {
+        "file": "deploy/launchd/cod-doc-services.sh",
+        "lines": [
+          212,
+          213
+        ]
+      },
+      {
+        "file": "deploy/launchd/cod-doc-services.sh",
+        "lines": [
+          220,
+          223
+        ]
+      },
+      {
+        "file": "deploy/launchd/cod-doc-services.sh",
+        "lines": [
+          278,
+          278
+        ]
+      }
+    ]
+  }
+}

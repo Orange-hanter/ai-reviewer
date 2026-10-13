@@ -66,13 +66,13 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .graphify/venv
-          key: gf-venv-${{ runner.os }}-py311-graphifyy-0.9.52-v1
+          key: gf-venv-${{ runner.os }}-py311-graphifyy-0.9.87-v1
 
       - name: Install graphify (pinned, from PyPI)
         run: |
           install_graphify() {
             python -m venv .graphify/venv
-            .graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.52
+            .graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.87
           }
           if [ -x .graphify/venv/bin/graphify ] && .graphify/venv/bin/graphify --version >/dev/null 2>&1; then
             echo "graphify venv OK: $(.graphify/venv/bin/graphify --version 2>&1 | head -1)"
@@ -85,7 +85,8 @@ jobs:
           fi
 
       # R6: eslint prescan + код-граф — независимы, гоняем параллельно (~15–40с экономии).
-      # continue-on-error на graphify: сбой графа не блокирует merge (пустой blast-radius).
+      # continue-on-error на шаге сборки: упавший граф ловит сам ревью — с REVIEW_BLAST_REQUIRED=1
+      # он блокирует merge с диагнозом в sticky, а не роняет job без объяснения.
       - name: Install app deps + build code graph (parallel)
         continue-on-error: true
         env:
@@ -176,6 +177,7 @@ jobs:
           # раньше GRAPH указывал в корень — blast-radius был мёртв, 0/20 symbols).
           GRAPH: app/.graphify/graphify-out/graph.json
           GRAPHIFY_REPORT: app/.graphify/graphify-out/GRAPH_REPORT.md
+          REVIEW_BLAST_REQUIRED: '1'       # нет графа / graphify недоступен → exit 1 до LLM (0 = fail-open)
           REVIEW_CONFIDENCE_MIN: '0.8'
           REVIEW_VERIFIER: '1'             # R3: второй проход verifier для critical/major (0 = выкл.)
           REVIEW_VERIFIER_MODEL: deepseek-v4-pro

@@ -1,0 +1,159 @@
+{
+  "id": "gateway-15-demo-saas-integration-one-pager-lean-sel",
+  "type": "tp",
+  "tags": [],
+  "description": "#15 «demo: SaaS integration one-pager + lean self-contained stack (#15)» — дефект, который потом исправил #16, #93",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "1ecdd21aad7276421b5433bf652867f27cdccb7d",
+    "base": "317f18fd5a7894c484a52d9b22163845449fa8c8",
+    "ref": "#15",
+    "fixes": [
+      {
+        "sha": "a36f7ecbb728966528a4b6b7adc3612f98290dfa",
+        "ref": "#16",
+        "title": "fix(demo): reuse a running Gateway, drop unneeded host ports, mint live JWT (#16)"
+      },
+      {
+        "sha": "7d00d93ff1c175b6c5d1eb90f083e8712f5acdfc",
+        "ref": "#93",
+        "title": "fix(infra): устранить дрейф образа TimescaleDB — 2.17.2-pg16 → 2.29.2-pg17 (B-146) (#93)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 791 строк в 11 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "demo/docker-compose.demo.yml",
+        "lines": [
+          17,
+          17
+        ]
+      },
+      {
+        "file": "demo/docker-compose.demo.yml",
+        "lines": [
+          23,
+          23
+        ]
+      },
+      {
+        "file": "demo/docker-compose.demo.yml",
+        "lines": [
+          35,
+          35
+        ]
+      },
+      {
+        "file": "demo/docker-compose.demo.yml",
+        "lines": [
+          87,
+          87
+        ]
+      },
+      {
+        "file": "demo/docker-compose.demo.yml",
+        "lines": [
+          94,
+          94
+        ]
+      },
+      {
+        "file": "demo/docker-compose.demo.yml",
+        "lines": [
+          126,
+          126
+        ]
+      },
+      {
+        "file": "demo/docker-compose.demo.yml",
+        "lines": [
+          146,
+          146
+        ]
+      },
+      {
+        "file": "demo/docker-compose.demo.yml",
+        "lines": [
+          150,
+          150
+        ]
+      },
+      {
+        "file": "demo/portal/app.js",
+        "lines": [
+          124,
+          124
+        ]
+      },
+      {
+        "file": "demo/portal/app.js",
+        "lines": [
+          179,
+          180
+        ]
+      },
+      {
+        "file": "demo/run.sh",
+        "lines": [
+          2,
+          3
+        ]
+      },
+      {
+        "file": "demo/run.sh",
+        "lines": [
+          8,
+          8
+        ]
+      },
+      {
+        "file": "demo/run.sh",
+        "lines": [
+          12,
+          22
+        ]
+      },
+      {
+        "file": "demo/run.sh",
+        "lines": [
+          25,
+          35
+        ]
+      },
+      {
+        "file": "demo/run.sh",
+        "lines": [
+          39,
+          41
+        ]
+      },
+      {
+        "file": "demo/run.sh",
+        "lines": [
+          52,
+          52
+        ]
+      },
+      {
+        "file": "demo/run.sh",
+        "lines": [
+          55,
+          64
+        ]
+      },
+      {
+        "file": "demo/stop.sh",
+        "lines": [
+          2,
+          2
+        ]
+      }
+    ]
+  }
+}

@@ -9,7 +9,7 @@ last_updated: 2026-10-12
 # Интеграция в репозиторий-потребитель
 
 Движок — prebuilt-бинарь `pr-review` из релизов отдельного репозитория
-`Orange-hanter/ai-reviewer` ([RFC 16](../proposals/16-standalone-rust-binary.md), решение 9).
+`Orange-hanter/ai-reviewer` ([RFC 20](../proposals/20-standalone-rust-binary.md), решение 9).
 Он **никогда не берётся из кода PR**: CI скачивает его по пину из базовой ветки и сверяет
 sha256 до запуска — так PR не подменит движок, а подменённый релизный артефакт не пройдёт
 сверку. Ни `node`, ни `npm install` движку не нужны. Код PR при этом в шаге ревью исполняется —
@@ -19,7 +19,7 @@ sha256 до запуска — так PR не подменит движок, а 
 Готовые шаблоны workflow — в [`examples/ci/`](../examples/ci/).
 
 > До первого релиза с бинарями (T32) шаблоны этого раздела запускать не на чем: оставайтесь
-> на пине старого формата (`v0.4.0`) и прежнем шаблоне (чекаут + `node`). Формат пина
+> на пине старого формата (`v0.5.0`) и прежнем шаблоне (чекаут + `node`). Формат пина
 > различим по второму полю, поэтому старый и новый способы живут параллельно.
 
 ## 1. Пин версии и скрипт сверки
@@ -32,14 +32,14 @@ ops/ai-review/fetch-pr-review.sh # копия examples/ci/fetch-pr-review.sh
 Пример пина:
 
 ```
-v0.5.0 sha256:3f1c…e9a0
+v0.6.0 sha256:3f1c…e9a0
 ```
 
 Тег говорит, что качать; хэш `SHA256SUMS` закрывает цепочку доверия: файл сумм сверяется с
 пином, архив бинаря — с файлом сумм, и только потом распаковывается. Хэш берётся из релиза:
 
 ```bash
-curl -fsSL https://github.com/Orange-hanter/ai-reviewer/releases/download/v0.5.0/SHA256SUMS | sha256sum
+curl -fsSL https://github.com/Orange-hanter/ai-reviewer/releases/download/v0.6.0/SHA256SUMS | sha256sum
 ```
 
 Обновление версии движка = правка одной строки в PR: видно в диффе, откатывается ревертом.
@@ -214,7 +214,7 @@ Breaking для потребителя ([CHANGELOG](../CHANGELOG.md), Unreleased
 1. Скопировать `examples/ci/fetch-pr-review.sh` → `ops/ai-review/fetch-pr-review.sh`.
 2. Заменить workflow на шаблоны из `examples/ci/` (шаги `Read pinned engine ref` и
    `Checkout pinned AI review engine` уходят, их место — `Fetch pinned pr-review binary`).
-3. `ops/ai-reviewer-ref`: `v0.4.0` → `vX.Y.Z sha256:<хэш SHA256SUMS>`.
+3. `ops/ai-reviewer-ref`: `v0.5.0` → `vX.Y.Z sha256:<хэш SHA256SUMS>`.
 
 Ревью самого этого PR пойдёт по базовой ветке: старый шаблон из base не участвует — workflow
 берётся из PR, а пин и скрипт сверки ещё отсутствуют в базе, поэтому новый шаблон штатно

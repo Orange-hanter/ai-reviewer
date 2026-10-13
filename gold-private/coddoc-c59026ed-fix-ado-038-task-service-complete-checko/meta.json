@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-c59026ed-fix-ado-038-task-service-complete-checko",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(ADO-038): task_service.complete() валидирует переход статус-машиной — checkout-нога для todo, отказ cancelled/backlog→done» — дефект, который потом исправил d58f4d00",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "c59026ed01445c2dd704e2b537b9276f966922d4",
+    "base": "f340fc3cfc154357f288487bb9706fbb55c83c27",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "d58f4d00505fc76afdfb49bc153a1dab046bb972",
+        "ref": null,
+        "title": "fix(services): ADO-166/ADO-190 — один словарь статусов задач + миграции 0035/0037 (#84, #68)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 94 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/task_service.py",
+        "lines": [
+          566,
+          566
+        ]
+      }
+    ]
+  }
+}

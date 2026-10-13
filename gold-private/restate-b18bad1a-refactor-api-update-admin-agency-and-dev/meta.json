@@ -1,0 +1,106 @@
+{
+  "id": "restate-b18bad1a-refactor-api-update-admin-agency-and-dev",
+  "type": "tp",
+  "tags": [],
+  "description": " «refactor(api): update admin, agency and developer controllers, ports and services» — дефект, который потом исправил ab59379c, c86164aa, 7ca0c8b6, !37",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "b18bad1a4e7e298c71c75d882954deda4c585ab9",
+    "base": "b6c313ae7cf3db9a51f28885bfba533961c240d3",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "ab59379c8b2248ed573bf501ba542058056e00ae",
+        "ref": null,
+        "title": "fix(api): small corrections to agency & developer controllers and application bootstrap"
+      },
+      {
+        "sha": "c86164aa6749034eb17906ce981e7212fe268e35",
+        "ref": null,
+        "title": "fix(lint): remove unnecessary async to satisfy require-await"
+      },
+      {
+        "sha": "7ca0c8b6b186f865df441d95a2f4434c9a9731de",
+        "ref": null,
+        "title": "fix(M2): close DVR admin path + repair docs/test drift (DEV-019 follow-up)"
+      },
+      {
+        "sha": "8acdd06752e4ec120212b8693860b6ca2de3945e",
+        "ref": "!37",
+        "title": "fix(M10 Agencies): AGN-073 invite roster visibility + AGN-I12 KYB cross-surface E2E"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 294 строк в 10 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/agency/agency.controller.ts",
+        "lines": [
+          53,
+          53
+        ]
+      },
+      {
+        "file": "restate-api/src/agency/agency.controller.ts",
+        "lines": [
+          89,
+          90
+        ]
+      },
+      {
+        "file": "restate-api/src/agency/agency.controller.ts",
+        "lines": [
+          104,
+          104
+        ]
+      },
+      {
+        "file": "restate-api/src/developer/developers.controller.ts",
+        "lines": [
+          64,
+          64
+        ]
+      },
+      {
+        "file": "restate-api/src/developer/developers.controller.ts",
+        "lines": [
+          98,
+          102
+        ]
+      },
+      {
+        "file": "restate-api/src/admin/services/admin.service.ts",
+        "lines": [
+          75,
+          76
+        ]
+      },
+      {
+        "file": "restate-api/src/agency/services/agency.service.ts",
+        "lines": [
+          37,
+          39
+        ]
+      },
+      {
+        "file": "restate-api/src/agency/services/agency.service.ts",
+        "lines": [
+          42,
+          42
+        ]
+      },
+      {
+        "file": "restate-api/src/agency/services/agency.service.ts",
+        "lines": [
+          47,
+          47
+        ]
+      }
+    ]
+  }
+}

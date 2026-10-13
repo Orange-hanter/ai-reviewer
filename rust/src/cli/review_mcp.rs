@@ -1,4 +1,4 @@
-//! Подкоманда `pr-review review-mcp` — порт `bin/pr-review-mcp.mjs` (RFC 16, T41):
+//! Подкоманда `pr-review review-mcp` — порт `bin/pr-review-mcp.mjs` (RFC 20, T41):
 //! stdio-сервер ревью-MCP поверх транспорта `mcp_stdio`.
 //!
 //! Слои как в JS:

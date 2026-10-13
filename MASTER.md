@@ -4,12 +4,12 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-10-09
+last_updated: 2026-10-13
 ---
 
 # 🧭 Project Navigator: ai-reviewer
 
-> 📊 Meta: `{"version": "0.4.0", "last_updated": "2026-10-09", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
+> 📊 Meta: `{"version": "0.5.0", "last_updated": "2026-10-13", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
 
 > L0 для агента. Истина по гейту — architecture. Журнал разработки — `docs/dev/journal.md`. RFC — `proposals/`.
 
@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:90c83166ed8c`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:61c634f763c6`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:92a147d57c54`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:5c075cb0d8eb`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -102,7 +102,7 @@ graph TD
 
 ### RFC 14 — Карточки символов
 - **Описание:** строка объявления того, что вызывает изменённый код, во входе модели; семейство FP 8 («символа нет» по графу); шаг 0 — замер до кода.
-- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:c54e501ab10e`
+- **Ссылка:** `📁 proposals/14-symbol-cards.md | 🗃️ doc:proposals_14-symbol-cards_md | 🔑 sha:77bd822e3e3f`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 15 — Наряды по косвенным признакам
@@ -112,7 +112,7 @@ graph TD
 
 ### Аудит RFC 14
 - **Описание:** независимый разбор карточек символов после включения по умолчанию: находки со статусами, методология решений, вектор развития.
-- **Ссылка:** `📁 docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md | 🗃️ doc:docs_dev_audit_2026-10-09-rfc-14-symbol-cards_md | 🔑 sha:7f218e9307a0`
+- **Ссылка:** `📁 docs/dev/audit/2026-10-09-rfc-14-symbol-cards.md | 🗃️ doc:docs_dev_audit_2026-10-09-rfc-14-symbol-cards_md | 🔑 sha:e10049bd72ee`
 - **Статус:** `🟢 VERIFIED`
 
 ### Замер косвенных признаков
@@ -137,17 +137,17 @@ graph TD
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:4b4b6daf3d33`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:6ef94ee71ec9`
 - **Статус:** `🟢 VERIFIED`
 
 ### README
 - **Описание:** точка входа потребителя: установка, CLI, подключение к CI.
-- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:a168dc34afcb`
+- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:534374df102f`
 - **Статус:** `🟢 VERIFIED`
 
 ### Индекс документации
 - **Описание:** все документы `docs/` и соседние README; сюда — всё, чего нет в этом реестре.
-- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:bdf7704c58f7`
+- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:cbf05b5c312c`
 - **Статус:** `🟢 VERIFIED`
 
 ### Бэклог

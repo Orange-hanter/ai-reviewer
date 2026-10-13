@@ -4,9 +4,9 @@ resolver = "2"
 
 [package]
 name = "ai-reviewer"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
-description = "AI-ревью для PR: бинарь pr-review с подкомандами (RFC 16) плюс временный мост из JSON-stdin бинарей, которые зовёт JS через execFile"
+description = "AI-ревью для PR: бинарь pr-review с подкомандами (RFC 20) плюс временный мост из JSON-stdin бинарей, которые зовёт JS через execFile"
 license = "UNLICENSED"
 publish = false
 # Явная секция [[bin]] ниже не отключает автообнаружение целей в edition 2021
@@ -15,7 +15,7 @@ publish = false
 # смена edition не выключила их молча.
 autobins = true
 
-# Единый бинарь потребителя (RFC 16, решение 1): pr-review <подкоманда>.
+# Единый бинарь потребителя (RFC 20, решение 1): pr-review <подкоманда>.
 # src/main.rs — только диспетчер clap, вся логика в ai_reviewer::cli::*.
 [[bin]]
 name = "pr-review"
@@ -45,7 +45,7 @@ base64 = "0.22"
 # astgrep.scopes). Код движка остаётся на crate regex ради линейного времени.
 fancy-regex = "0.14"
 # include_dir: ruleset ast-grep (sgconfig.yml + правила) вшивается в бинарь —
-# рядом с одиночным исполняемым файлом дерева пакета нет (RFC 16, решение 5).
+# рядом с одиночным исполняемым файлом дерева пакета нет (RFC 20, решение 5).
 include_dir = "0.7"
 # tempfile: вшитый ruleset распаковывается во временный каталог, потому что
 # читает его внешний процесс ast-grep, а не мы.
@@ -55,7 +55,7 @@ tempfile = "3"
 libc = "0.2"
 # rustls вместо native-tls (в reqwest 0.13 фича называется именно так, не
 # "rustls-tls"): кросс-сборка релизной матрицы с OpenSSL не воспроизводима
-# (RFC 16, решение 9). default-features = false отключает только неявный подбор;
+# (RFC 20, решение 9). default-features = false отключает только неявный подбор;
 # charset/http2/system-proxy перечислены явно, чтобы поведение HTTP-клиента
 # осталось тем же, что было на дефолтах.
 reqwest = { version = "0.13.4", default-features = false, features = [

@@ -1,0 +1,35 @@
+{
+  "id": "restate-169-feat-notifier-telegram",
+  "type": "tp",
+  "tags": [],
+  "description": "!169 «feat(notifier): одно сообщение и один пуш на пайплайн в Telegram» — дефект, который потом исправил !182",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "ca3b161ba1e514fea043d53d4bc30c0a1a027a65",
+    "base": "de51531141cc1760d35fd26310c4936cc7636571",
+    "ref": "!169",
+    "fixes": [
+      {
+        "sha": "cafada8e966adc4906785e5eb9f85e71d8837dd8",
+        "ref": "!182",
+        "title": "fix(ci): report the real change scope in the Telegram CI report"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 602 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "tools/telegram-notifier/deliver.mjs",
+        "lines": [
+          37,
+          37
+        ]
+      }
+    ]
+  }
+}

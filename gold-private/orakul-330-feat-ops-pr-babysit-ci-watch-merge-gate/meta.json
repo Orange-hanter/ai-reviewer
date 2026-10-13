@@ -1,0 +1,54 @@
+{
+  "id": "orakul-330-feat-ops-pr-babysit-ci-watch-merge-gate",
+  "type": "tp",
+  "tags": [],
+  "description": "#330 «feat(ops): PR babysit — ci-watch, merge gate, Cursor hooks (#330)» — дефект, который потом исправил #571, #576",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "457ae50959d0d7dfaa91339c1c485c6d896259ba",
+    "base": "6256bf30c01aa436a785fbeb7602cb55c22b227a",
+    "ref": "#330",
+    "fixes": [
+      {
+        "sha": "58842a9af7d629254ef34cc5078b896e45c73b06",
+        "ref": "#571",
+        "title": "fix(gate): pr-merge-ready видит ОТСУТСТВУЮЩИЙ required-чек"
+      },
+      {
+        "sha": "d6431b48b07a13cbea36d3ddc62b69cf9e767fbb",
+        "ref": "#576",
+        "title": "fix(gate): разбор gh pr checks — таб-разделители и три исхода вместо двух"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 475 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "ops/pr-merge-ready.sh",
+        "lines": [
+          68,
+          70
+        ]
+      },
+      {
+        "file": "ops/pr-merge-ready.sh",
+        "lines": [
+          83,
+          83
+        ]
+      },
+      {
+        "file": "ops/pr-merge-ready.sh",
+        "lines": [
+          86,
+          88
+        ]
+      }
+    ]
+  }
+}

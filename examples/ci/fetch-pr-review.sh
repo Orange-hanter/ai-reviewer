@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Скачивание и сверка prebuilt-бинаря pr-review по пину (RFC 16, решение 9).
+# Скачивание и сверка prebuilt-бинаря pr-review по пину (RFC 20, решение 9).
 #
 # ШАБЛОН для репозитория-потребителя: скопируйте в ops/ai-review/fetch-pr-review.sh.
 # Workflow читает ЭТОТ файл и пин ops/ai-reviewer-ref из БАЗОВОЙ ветки (git show
@@ -7,7 +7,7 @@
 #
 #   fetch-pr-review.sh <файл-пина> <каталог-назначения>
 #
-# Пин — одна строка из двух полей:   v0.5.0 sha256:<sha256 файла SHA256SUMS>
+# Пин — одна строка из двух полей:   v0.6.0 sha256:<sha256 файла SHA256SUMS>
 # Релиз <tag> обязан содержать:
 #   SHA256SUMS                         строки `<sha256-hex>  <имя-файла>` (формат sha256sum)
 #   pr-review-<target-triple>.tar.gz   в корне архива — исполняемый файл `pr-review`
@@ -79,7 +79,7 @@ pin_line=$(tr -d '\r' < "$pin_file" | awk 'NF { print; exit }')
 [ -n "$pin_line" ] || skip "пин $pin_file пуст (bootstrap-PR)"
 read -r tag sums_pin extra <<< "$pin_line" || true
 if [ -z "${sums_pin:-}" ]; then
-  die "пин старого формата («$tag» без хэша). Этот шаблон требует «<tag> sha256:<sha256 SHA256SUMS>» (RFC 16, решение 9); старый пин работает только со старым шаблоном (чекаут + node)"
+  die "пин старого формата («$tag» без хэша). Этот шаблон требует «<tag> sha256:<sha256 SHA256SUMS>» (RFC 20, решение 9); старый пин работает только со старым шаблоном (чекаут + node)"
 fi
 [ -z "${extra:-}" ] || die "в пине лишние поля: «$pin_line»"
 [[ "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "недопустимый тег в пине: «$tag»"

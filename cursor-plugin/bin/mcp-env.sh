@@ -1,6 +1,6 @@
 # Общие проверки лаунчеров MCP. Source из review-mcp.sh / structure-mcp.sh.
 # Только stderr: stdout зарезервирован под JSON-RPC.
-# Resolve корней — RFC 10. Бинарь pr-review вместо node — RFC 16 (T31): лаунчер
+# Resolve корней — RFC 10. Бинарь pr-review вместо node — RFC 20 (T31): лаунчер
 # предпочитает подкоманду бинаря и откатывается на node-путь, пока JS-ядро не удалено (T33).
 
 mcp_die() {

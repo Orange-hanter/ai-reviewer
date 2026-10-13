@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-d1ba0fab-feat-web-web-002-project-detail-page-sta",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(web): WEB-002 — project detail page (stats + MASTER preview + tabs)» — дефект, который потом исправил e8512e6b",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "d1ba0fab1e3e92278d8c8b01f76b66eb7f8d08b9",
+    "base": "044f7541fb4137c9a8ac8e55dbe7db48dfa1dcc0",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "e8512e6bce153422cc8c41101867180cf5413d28",
+        "ref": null,
+        "title": "fix(web): KPI cards on /p/{slug} read DB totals, not stale YAML"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 233 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/web/pages.py",
+        "lines": [
+          53,
+          53
+        ]
+      }
+    ]
+  }
+}

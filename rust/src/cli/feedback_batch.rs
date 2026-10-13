@@ -1,5 +1,5 @@
 //! Подкоманда `pr-review feedback-batch` — порт bin/pr-review-feedback-batch.mjs
-//! (RFC 16, T30).
+//! (RFC 20, T30).
 //!
 //! Плановый/ручной harvest по нескольким PR: явный `--pr`/`PR_NUMBER` — один PR,
 //! иначе дискавери `GET /repos/{repo}/pulls?state=all&sort=updated…` одной страницей

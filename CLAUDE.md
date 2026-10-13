@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Что это
 
 `ai-reviewer` — движок AI код-ревью для PR с правом блокировать merge. Потребитель получает
-его единым Rust-бинарём `pr-review` (10 подкоманд, [RFC 16](proposals/16-standalone-rust-binary.md))
+его единым Rust-бинарём `pr-review` (10 подкоманд, [RFC 20](proposals/20-standalone-rust-binary.md))
 из релиза по пину с sha256 — ни Node, ни `npm install` ему не нужны. В репозитории рядом живёт
 JS-ядро (чистый ESM `.mjs`, Node ≥ 22) — эталон порта и dev-тулы; **ядро удаляется в T33, не
 раньше** (после реального прогона релизной сборки T32). npm-зависимостей у JS-части нет, и
@@ -100,7 +100,10 @@ export) — от рабочего каталога через `profile.paths.*`,
 **Fail-open по умолчанию, fail-closed осознанно.** `bin/pr-review.mjs` ловит любое исключение
 и выходит с `0`: инфра-сбой не блокирует merge. Exit `1` — только осознанный, внутри
 `runReview`, на подтверждённых блокерах. Исключения: `REVIEW_LLM_REQUIRED=1` и
-`REVIEW_VERIFIER_STRICT=1`. Не превращай мягкий сбой в жёсткий без причины.
+`REVIEW_VERIFIER_STRICT=1`; сбой verifier'а при находках уровня блока (RFC 18) и часть PR,
+упавшая у всех моделей (RFC 19), — тоже через `REVIEW_LLM_REQUIRED`, а не «блок по слову
+агрегатора» и не «тихо отревьюено». Не превращай мягкий сбой
+в жёсткий без причины.
 
 **Два независимых судьи.** Агрегатор и verifier намеренно вне пула advisors. Блок требует
 refutation жюри + вердикта verifier + `confidence ≥ REVIEW_CONFIDENCE_MIN`. Blast-radius
@@ -171,7 +174,7 @@ dry-run MoA, `wait: false` + поллинг по `jobId`, RFC 08–12) и `curso
   сохраняй этот порядок.
 - **Eval fixture** = каталог `fixtures/<id>/` с `meta.json` (`expected`), `diff.patch`,
   `findings.json`, опц. `verifier.json`. Тест `eval harness: все fixtures green` сверяет
-  число seed-кейсов (16) — при добавлении поправь счётчик. Каталогов в `fixtures/` больше:
+  число seed-кейсов (20) — при добавлении поправь счётчик. Каталогов в `fixtures/` больше:
   `fixtures/structure/` — контрактные образцы схем, не eval-кейсы (нет `meta.json` → пропускаются).
 - **Gold** (`gold/<id>/`) — диффы для прогона с LLM; падающий кейс — сигнал, не мусор.
 - Шаблоны workflow в `examples/ci/` и `fetch-pr-review.sh` покрыты `test/ci-templates.test.mjs`
@@ -192,7 +195,7 @@ dry-run MoA, `wait: false` + поллинг по `jobId`, RFC 08–12) и `curso
 затем пин `<tag> sha256:<хэш SHA256SUMS>` в `examples/consumers/orakul/ai-reviewer-ref`.
 Потребитель подключает движок по пину `ops/ai-reviewer-ref`, читаемому из базовой ветки —
 код PR никогда не исполняется с секретами прогона. Формат пина и артефактов — контракт
-(RFC 16, решение 9; держит `test/ci-templates.test.mjs`). Breaking для потребителя: смена namespace
+(RFC 20, решение 9; держит `test/ci-templates.test.mjs`). Breaking для потребителя: смена namespace
 маркеров, формата футера sticky, контрактов `swarm`/`export`/`structure`, формата пина и
 имён релизных артефактов.
 

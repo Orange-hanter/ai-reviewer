@@ -41,6 +41,21 @@
       "id": "fixture-gate-critical-low-conf"
     },
     {
+      "description": "eslint-правило вне blockRules (major, conf 1) рядом с перенесённым minor: merge не блокируется (RFC 17, до — блокером становился minor). consensusMin 1 — как в дефолтном режиме moa",
+      "exitCode": 0,
+      "id": "fixture-gate-eslint-nonblock-via-neighbour"
+    },
+    {
+      "description": "critical с confidence 0.5 рядом с уверенным major: шаткий critical не блокирует, блокер — major (RFC 17, до — max(conf) по кластеру). consensusMin 1 — как в дефолтном режиме moa",
+      "exitCode": 1,
+      "id": "fixture-gate-neighbour-confidence-no-lift"
+    },
+    {
+      "description": "minor и major в одной 3-строчной корзине: блокирует major, minor причиной блока не становится (RFC 17, до — блокером шёл первый в кластере). consensusMin 1 — как в дефолтном режиме moa",
+      "exitCode": 1,
+      "id": "fixture-gate-neighbour-minor-not-blocker"
+    },
+    {
       "description": "major одна модель + низкий confidence → не блок (ни tier, ни conf)",
       "exitCode": 0,
       "id": "fixture-major-low-confidence-no-block"

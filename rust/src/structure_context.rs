@@ -1,4 +1,4 @@
-//! Порт lib/structure-context.mjs (RFC 16, T18): ограниченный structure context,
+//! Порт lib/structure-context.mjs (RFC 20, T18): ограниченный structure context,
 //! пиннутый к снимку facts.
 //!
 //! `build_structure_context(facts, assessment, &ContextRequest)` повторяет

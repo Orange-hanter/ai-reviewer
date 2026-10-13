@@ -1,4 +1,4 @@
-//! Подкоманда `pr-review feedback` — порт bin/pr-review-feedback.mjs (RFC 16, T30).
+//! Подкоманда `pr-review feedback` — порт bin/pr-review-feedback.mjs (RFC 20, T30).
 //!
 //! Тонкий CLI поверх [`crate::feedback::harvest_feedback`]: argv разбирается так же,
 //! как `parseCli` (`--dry-run`, `--repo`, `--pr`; `GITHUB_REPOSITORY`/`PR_NUMBER` —

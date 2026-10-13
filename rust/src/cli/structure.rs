@@ -1,4 +1,4 @@
-//! Подкоманда `pr-review structure` — порт bin/pr-review-structure.mjs (RFC 16, T22).
+//! Подкоманда `pr-review structure` — порт bin/pr-review-structure.mjs (RFC 20, T22).
 //!
 //! Поток как в JS: разбор argv → профиль (`REVIEW_PROFILE` → автопоиск в cwd →
 //! встроенный) и `structure`-часть конфига → пути входов от `--repo-root` →

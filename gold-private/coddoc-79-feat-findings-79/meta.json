@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-79-feat-findings-79",
+  "type": "tp",
+  "tags": [],
+  "description": "#79 «feat(findings): гистерезис автозакрытия — вердикт модели перестал мигать (#79)» — дефект, который потом исправил #82",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "e425d60a247ed4cd7cd038805088c94ef324b94f",
+    "base": "c8999cd36949aadd90f6b3512c0806e20691f526",
+    "ref": "#79",
+    "fixes": [
+      {
+        "sha": "50f0664d0ba52ffee3aed836285be900a0b33c79",
+        "ref": "#82",
+        "title": "fix(findings): молчание модели о разделе — не вердикт «вылечено» (#82)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 505 строк в 10 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/finding_service/queries.py",
+        "lines": [
+          238,
+          238
+        ]
+      }
+    ]
+  }
+}

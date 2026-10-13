@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-1d173291-feat-sym-006d-mcp-finding-ctx-standard-f",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(SYM-006D): MCP finding_*/ctx_* в профилях standard/full» — дефект, который потом исправил #102",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "1d173291b592f44a9a970b5bf3f3d4d5c80e57f9",
+    "base": "ad413bf4b3d34671ce94f0f8229b97aa36571e5a",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "45e6817a834b6b7733a589124e56788acdba4d99",
+        "ref": "#102",
+        "title": "fix(drift): ADO-216 — metadata_mismatch в JSON дрейфа, словарь отчёта собирается в одном месте (#102)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 481 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/mcp/tools/doc_tools.py",
+        "lines": [
+          438,
+          445
+        ]
+      }
+    ]
+  }
+}

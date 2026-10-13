@@ -101,7 +101,7 @@ flowchart TB
 `rust/parity/*.parity.mjs` (`npm run check:parity`). Оркестрация (`pipeline.mjs`,
 `chunk-routing`, `specialist-merge`, `incremental`) остаётся в JS.
 
-**Единый бинарь `pr-review` и поставка потребителю** ([RFC 16](../proposals/16-standalone-rust-binary.md)).
+**Единый бинарь `pr-review` и поставка потребителю** ([RFC 20](../proposals/20-standalone-rust-binary.md)).
 Порт свёл движок в один Rust-бинарь с десятью подкомандами (`review`, `eval`, `metrics`,
 `structure`, `structure-mcp`, `review-mcp`, `feedback`, `feedback-batch`, `feedback-migrate`,
 `feedback-promote`). Потребитель получает его prebuilt-архивом из релиза по пину
@@ -147,6 +147,10 @@ Sticky несёт скрытый машинный футер `<ns>-data:` с н�
 
 Маркер комментария — часть профиля. **Смена namespace на живом репозитории рвёт эту цепочку**:
 прошлые sticky/inline перестают быть «своими».
+
+«Свой» комментарий — маркер **и** автор из `REVIEW_TRUSTED_AUTHORS`. Маркер может написать
+любой, кто комментирует PR; без проверки автора поддельный футер попадал бы в промпт
+агрегатора как «прошлые находки» и в Δ-блок, а upsert перезаписывал бы чужой комментарий.
 
 ### Два независимых судьи перед блоком
 

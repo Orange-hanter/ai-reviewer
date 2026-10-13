@@ -1,5 +1,5 @@
 /**
- * Parity RFC 16 T38: rust/src/symbol_cards.rs ↔ эталон lib/symbol-cards.mjs.
+ * Parity RFC 20 T38: rust/src/symbol_cards.rs ↔ эталон lib/symbol-cards.mjs.
  *
  * Запуск: node rust/parity/symbol-cards.parity.mjs   (требует cargo build)
  *

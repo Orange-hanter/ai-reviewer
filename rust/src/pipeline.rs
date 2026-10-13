@@ -1,4 +1,4 @@
-//! Порт `pipeline.mjs` (RFC 16, задача T26): `createReviewPipeline` → [`ReviewPipeline`],
+//! Порт `pipeline.mjs` (RFC 20, задача T26): `createReviewPipeline` → [`ReviewPipeline`],
 //! `runDetailed` → [`ReviewPipeline::run_detailed`], `runGateResolution` →
 //! [`run_gate_resolution`].
 //!
@@ -143,7 +143,7 @@ pub struct ExportResult {
     pub sarif_results: usize,
 }
 
-/// Итог `runDetailed` — вместо `process.exit`/`die` (RFC 16, решение к T26).
+/// Итог `runDetailed` — вместо `process.exit`/`die` (RFC 20, решение к T26).
 ///
 /// `exit_code` — то, с чем выйдет `pr-review review`: `1` только на подтверждённых
 /// блокерах (или осознанном fail-closed `REVIEW_LLM_REQUIRED=1`), всё остальное — `0`.

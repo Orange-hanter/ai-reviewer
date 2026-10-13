@@ -42,9 +42,17 @@
       "title": "баг 10",
       "verifierStatus": "verified",
       "confidence": 0.9
+    },
+    {
+      "file": "app/server/api.ts",
+      "line": 13,
+      "severity": "critical",
+      "title": "баг 13",
+      "verifierStatus": "verified",
+      "confidence": 0.9
     }
   ],
-  "strongBlockers": 4,
+  "strongBlockers": 5,
   "blastScope": {
     "affected_files": [],
     "symbols_total": 0,

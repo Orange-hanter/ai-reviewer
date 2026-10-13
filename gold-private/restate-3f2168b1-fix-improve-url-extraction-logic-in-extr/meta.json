@@ -1,0 +1,35 @@
+{
+  "id": "restate-3f2168b1-fix-improve-url-extraction-logic-in-extr",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix: improve URL extraction logic in extractObjectKey function» — дефект, который потом исправил eea22102",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "3f2168b1e5af471e5966f96a409e8f87dfc71742",
+    "base": "8dd862611bd904db1b27bdf5d01710322d5a84fc",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "eea22102b4418925da122c296eb8a2384bee3c33",
+        "ref": null,
+        "title": "fix: refactor extractObjectKey function to simplify known root handling"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 12 строк в 1 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "admin-panel/src/views/agencies/AgencyDetailView.vue",
+        "lines": [
+          387,
+          388
+        ]
+      }
+    ]
+  }
+}

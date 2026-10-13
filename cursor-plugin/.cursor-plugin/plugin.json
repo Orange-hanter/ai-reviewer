@@ -14,7 +14,7 @@
       "AI_REVIEWER_BIN": {
         "type": "string",
         "title": "Бинарь pr-review",
-        "description": "Абсолютный путь к prebuilt-бинарю pr-review (RFC 16). Пусто — rust/target/{release,debug}/pr-review клона, затем node-путь (до удаления JS в T33)."
+        "description": "Абсолютный путь к prebuilt-бинарю pr-review (RFC 20). Пусто — rust/target/{release,debug}/pr-review клона, затем node-путь (до удаления JS в T33)."
       },
       "REVIEW_MCP_ROOT": {
         "type": "string",

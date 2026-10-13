@@ -1,0 +1,47 @@
+{
+  "id": "gateway-b9096e1e-add-adapter-runtime-config",
+  "type": "tp",
+  "tags": [],
+  "description": " «Add adapter runtime config» — дефект, который потом исправил fd42dbba, e9ac4d6e",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "b9096e1e86dd21e84d33ecbbbf24a4e56bd2f61e",
+    "base": "a26b09ca8f0a4819c794d3b9efeabd7160c3892b",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "fd42dbbaf79315d66362b105e9f5a6cbb85085e6",
+        "ref": null,
+        "title": "fix(adapter-runtime): report a broken current loop as BAD, not GOOD (B-102)"
+      },
+      {
+        "sha": "e9ac4d6e65410e72338531f1a1c33ff42bee66d8",
+        "ref": null,
+        "title": "fix(config): adapter-runtime and api-gateway both defaulted to :9093"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 197 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "python/adapter-runtime/src/adapter_runtime/config.py",
+        "lines": [
+          29,
+          29
+        ]
+      },
+      {
+        "file": "python/adapter-runtime/src/adapter_runtime/config.py",
+        "lines": [
+          108,
+          108
+        ]
+      }
+    ]
+  }
+}

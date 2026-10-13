@@ -1,5 +1,5 @@
 //! Подкоманда `pr-review structure-mcp` — порт bin/pr-review-structure-mcp.mjs
-//! (RFC 16, T23): stdio-сервер structure-MCP поверх транспорта `mcp_stdio`.
+//! (RFC 20, T23): stdio-сервер structure-MCP поверх транспорта `mcp_stdio`.
 //!
 //! Слои как в JS:
 //! 1. корень: `STRUCTURE_MCP_ROOT`, иначе `REVIEW_MCP_ROOT` (пустое значение и

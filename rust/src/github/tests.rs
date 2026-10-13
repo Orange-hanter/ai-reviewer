@@ -1245,8 +1245,47 @@ fn sec_пустой_allowlist_доверяет_всем() {
 
 #[test]
 fn sec_trusted_authors_читается_из_конфига() {
-    let cfg = GithubConfig::from_cfg(&json!({"feedback": {"trustedAuthors": "a[bot], b[bot]"}}));
+    // `cfg.github.trustedAuthors` — уже разобранный список (lib/config.mjs); feedback-строка
+    // клиентом не читается.
+    let cfg = GithubConfig::from_cfg(&json!({
+        "github": {"trustedAuthors": ["a[bot]", "b[bot]"]},
+        "feedback": {"trustedAuthors": "c[bot]"},
+    }));
     assert_eq!(cfg.trusted_authors, vec!["a[bot]".to_string(), "b[bot]".to_string()]);
+    // Пустой список — откат «доверять всем», а не дефолт.
+    let e = GithubConfig::from_cfg(&json!({"github": {"trustedAuthors": []}}));
+    assert!(e.trusted_authors.is_empty());
+    // Самодельный cfg без поля — дефолт, а не «доверять всем».
     let d = GithubConfig::from_cfg(&json!({}));
     assert_eq!(d.trusted_authors, vec!["github-actions[bot]".to_string()]);
+}
+
+#[test]
+fn sec_чужой_sticky_и_инлайн_с_маркером_сообщаются_в_лог() {
+    // `pickOwnSticky` / `isForeignInline` (lib/github.mjs): чужой комментарий с маркером
+    // не только пропускается, но и называется в логе — иначе подделку не заметить.
+    let forged = sticky_body(&json!({"findings": [], "runs": [], "sha": "forged"}));
+    let server = fake_server(move |_| {
+        Some(json_res(json!([
+            {"id": 2, "body": forged.clone(), "user": evil()},
+            {"id": 3, "body": forged.clone(), "user": evil()},
+            {"id": 4, "body": forged.clone(), "user": null},
+        ])))
+    });
+    let (c, logged) = client_with_log(&server.api);
+    assert_eq!(c.read_prior_sticky_data().unwrap().sha, "");
+    assert_eq!(logs(&logged), vec!["sticky-маркер в комментариях недоверенных авторов (evil, ?) — игнорирую"]);
+
+    let server = fake_server(|raw| {
+        if request_line(raw).starts_with("GET ") {
+            return Some(json_res(json!([
+                {"id": 20, "body": format!("{INLINE_MARKER}\nчеловек"), "pull_request_review_id": 3, "user": evil()},
+                {"id": 21, "body": "без маркера", "pull_request_review_id": 3, "user": evil()},
+            ])));
+        }
+        Some(json_res(json!({})))
+    });
+    let (c, logged) = client_with_log(&server.api);
+    assert_eq!(c.delete_stale_inline(&DeleteStaleOpts::default()).unwrap(), 0);
+    assert_eq!(logs(&logged), vec!["инлайнов с маркером от недоверенных авторов не тронуто: 1"]);
 }

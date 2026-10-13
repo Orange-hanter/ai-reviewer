@@ -1,0 +1,35 @@
+{
+  "id": "orakul-165-feat-price-import-165",
+  "type": "tp",
+  "tags": [],
+  "description": "#165 «feat(price-import): авто-поиск шапки + новые поля (код/страна/штрихкод/примечание) (#165)» — дефект, который потом исправил #166",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "fa45fcd96d5329a5e5ca2e96ad5d90cdfb12cc37",
+    "base": "c19be031e6578f819586552eba82e25b7ba7748d",
+    "ref": "#165",
+    "fixes": [
+      {
+        "sha": "87d9aec721872f17431f00e3ad70edb753859ff7",
+        "ref": "#166",
+        "title": "fix(price-import): корректная кодировка CSV (UTF-8 / cp1251) (#166)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 429 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/importPrice/index.tsx",
+        "lines": [
+          15,
+          15
+        ]
+      }
+    ]
+  }
+}

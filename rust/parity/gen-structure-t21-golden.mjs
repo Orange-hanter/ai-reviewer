@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Генератор эталонов T21 (RFC 16): прогоняет JS analyzeStructure (lib/structure.mjs)
+// Генератор эталонов T21 (RFC 20): прогоняет JS analyzeStructure (lib/structure.mjs)
 // на наборе кейсов с файлами в памяти и подменённым git, пишет вход + выход в
 // rust/parity/golden-structure/t21.json. Rust-тест structure:: сверяет с ним
 // результат analyze_structure посимвольно (после JSON).

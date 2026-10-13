@@ -1,0 +1,40 @@
+{
+  "id": "restate-a2eeb764-feat-m2-pricing-strict-reject-edge-case",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(M2): pricing strict-reject + edge case guards (DEV-060, DEV-061)» — дефект, который потом исправил !156, !158",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "a2eeb7641bb8b9ce0aca8092bd385daeecc41ec8",
+    "base": "540375d26e2e3eb4a119c44a0cc70399ade360ec",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "979bdc1941cedc2b14d6fcada2287afb66d0f82d",
+        "ref": "!156",
+        "title": "fix(developer): scope ownership-type routes to the calling developer"
+      },
+      {
+        "sha": "f56c96ba7057805f4a70ac41e949008a76957250",
+        "ref": "!158",
+        "title": "fix(developer): one handler per public project path (#68, #60)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 270 строк в 6 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/developer/projects-ownership.controller.ts",
+        "lines": [
+          82,
+          86
+        ]
+      }
+    ]
+  }
+}

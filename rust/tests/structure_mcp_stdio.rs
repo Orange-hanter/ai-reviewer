@@ -1,4 +1,4 @@
-//! Чёрноящичные тесты `pr-review structure-mcp` (RFC 16, T23) — зеркало
+//! Чёрноящичные тесты `pr-review structure-mcp` (RFC 20, T23) — зеркало
 //! test/structure.test.mjs (runMcpServer): Content-Length framing с частичными
 //! чтениями, batch, невалидные запросы, oversized-кадр 8 МБ, голый JSON, сигналы,
 //! tools/call против эталонного вывода JS (golden из bin/pr-review-structure-mcp.mjs

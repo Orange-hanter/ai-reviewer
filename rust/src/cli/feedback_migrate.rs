@@ -1,5 +1,5 @@
 //! Подкоманда `pr-review feedback-migrate` — порт feedback/migrate-feedback.mjs
-//! (RFC 16, T30).
+//! (RFC 20, T30).
 //!
 //! `[--file <path>] [--write]`: проверяет журнал `fp-feedback.jsonl` на схему v1
 //! ([`crate::feedback::migrate_feedback_text`]) и с `--write` переписывает его

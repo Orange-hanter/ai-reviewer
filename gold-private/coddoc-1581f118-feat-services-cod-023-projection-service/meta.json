@@ -1,0 +1,42 @@
+{
+  "id": "coddoc-1581f118-feat-services-cod-023-projection-service",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat(services): COD-023 — projection service (export / import / drift detection)» — дефект, который потом исправил ff7f92cc",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "1581f118adf529918a7194a7e0909e10d10ec729",
+    "base": "159021bea12a4249b7eca838721f6e1ce338abe6",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "ff7f92ccf53b1c36e092e9df78fae66afc5e24f8",
+        "ref": null,
+        "title": "fix(security): SD-100 — path traversal in document export"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 629 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/projection_service.py",
+        "lines": [
+          159,
+          159
+        ]
+      },
+      {
+        "file": "cod_doc/services/projection_service.py",
+        "lines": [
+          200,
+          200
+        ]
+      }
+    ]
+  }
+}

@@ -31,7 +31,7 @@ import { sanitizeFixtureId, resolveFixtureDir, matchPrFilePatch, promoteCandidat
 import { groupFpEntries, fpAggregateKey, inferPatternId } from '../feedback/promote-patterns.mjs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseDiff } from '../lib/diff.mjs';
+import { parseDiff, collectDeletedPaths } from '../lib/diff.mjs';
 import { createObservability, slimFindings, countBySeverity } from '../lib/observability.mjs';
 import {
   collectFeedbackEntries, parseReviewCommentFinding, parseReviewCommentFindings,
@@ -107,12 +107,12 @@ test('applyVerifierVerdicts: downgrade critical → minor, не блок', () =>
 
 test('eval harness: все fixtures green', async () => {
   const { ok, metrics, results } = await runEvalHarness();
-  assert.equal(metrics.total, 17, 'ожидаем 17 seed fixtures');
+  assert.equal(metrics.total, 20, 'ожидаем 20 seed fixtures');
   if (!ok) {
     const failed = results.filter((r) => !r.pass).map((r) => `${r.id}: ${r.errors.join('; ')}`);
     assert.fail(`eval fixtures failed:\n${failed.join('\n')}`);
   }
-  assert.equal(metrics.passed, 17);
+  assert.equal(metrics.passed, 20);
 });
 
 test('loadReviewConfig: REVIEW_VERIFIER off', () => {
@@ -353,6 +353,20 @@ test('dedupeAgainstPrescan R6: same bucket → LLM dropped', () => {
 test('dedupeAgainstPrescan R6: app/ prefix alias', () => {
   const prescan = [{ file: 'app/client/x.ts', line: 10, severity: 'critical', model: 'eslint-prescan' }];
   const llm = [{ file: 'client/x.ts', line: 11, severity: 'major', title: 'dup', model: 'm1' }];
+  assert.equal(dedupeAgainstPrescan(llm, prescan).length, 0);
+});
+
+test('dedupeAgainstPrescan: prescan ниже по severity не выбрасывает LLM-блокер', () => {
+  // max-len (nit) на соседней строке не покрывает critical про инъекцию: бакет — это
+  // три строки, а не тема (RFC 17)
+  const prescan = [{ file: 'a.ts', line: 42, severity: 'nit', title: 'eslint: max-len', model: 'eslint-prescan' }];
+  const llm = [{ file: 'a.ts', line: 41, severity: 'critical', title: 'SQL-инъекция', model: 'm1' }];
+  assert.deepEqual(dedupeAgainstPrescan(llm, prescan), llm);
+});
+
+test('dedupeAgainstPrescan: prescan той же severity — дубль снимается', () => {
+  const prescan = [{ file: 'a.ts', line: 10, severity: 'major', model: 'eslint-prescan' }];
+  const llm = [{ file: 'a.ts', line: 11, severity: 'major', title: 'dup', model: 'm1' }];
   assert.equal(dedupeAgainstPrescan(llm, prescan).length, 0);
 });
 
@@ -799,6 +813,66 @@ rename to app/shared/new.ts
 `;
   assert.equal(isRenameOnlySection(diff), true);
   assert.equal(routeDiff(['app/shared/new.ts'], diff).route, 'skip');
+});
+
+test('routeDiff: rename с правками логики → full, не skip (RFC 17)', () => {
+  const diff = `diff --git a/app/server/guard.ts b/app/server/auth-guard.ts
+similarity index 88%
+rename from app/server/guard.ts
+rename to app/server/auth-guard.ts
+--- a/app/server/guard.ts
++++ b/app/server/auth-guard.ts
+@@ -1,3 +1,3 @@
+ export function guard(user) {
+-  return check(user);
++  return true;
+ }
+`;
+  assert.equal(isRenameOnlySection(diff), false);
+  assert.equal(routeDiff(['app/server/auth-guard.ts'], diff).route, 'full');
+});
+
+test('parseDiff: удалённый файл попадает в changedPaths и роутер (RFC 17)', () => {
+  const diff = `diff --git a/app/server/guard.ts b/app/server/guard.ts
+deleted file mode 100644
+--- a/app/server/guard.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-export function guard(user) { return check(user); }
+-export const ROLE = 'admin';
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-old
++new
+`;
+  const { files, changedText } = parseDiff(diff);
+  assert.deepEqual([...files.keys()], ['app/server/guard.ts', 'README.md']);
+  assert.equal(files.get('app/server/guard.ts').validLines.size, 0);
+  assert.match(changedText, /export function guard/, 'удалённый экспорт — в changedText для blast-radius');
+  assert.deepEqual([...collectDeletedPaths(diff)], ['app/server/guard.ts']);
+  // без удалённого пути PR выглядел бы docs-only → light
+  assert.equal(routeDiff([...files.keys()], diff).route, 'full');
+});
+
+test('collectDeletedPaths: строка `++ /dev/null` в хунке не делает живой файл удалённым (RFC 17)', () => {
+  // в диффе добавленная строка `++ /dev/null` выглядит как `+++ /dev/null`; признай её
+  // заголовком — файл выпал бы из prescan, и blockRules (no-restricted-imports) не сработали бы
+  const diff = `diff --git a/server/auth.ts b/server/auth.ts
+--- a/server/auth.ts
++++ b/server/auth.ts
+@@ -1,2 +1,5 @@
+ const a = 1;
++/*
++++ /dev/null
++*/
++import { db } from '../../internal/raw-db';
+`;
+  assert.deepEqual([...collectDeletedPaths(diff)], []);
+  const { files, changedText } = parseDiff(diff);
+  assert.deepEqual([...files.keys()], ['server/auth.ts']);
+  assert.match(changedText, /raw-db/, 'строки после подделки остаются в changedText');
 });
 
 test('classifyFilePath: generated dist → skip', () => {

@@ -148,6 +148,30 @@
             "confidence": 0.9,
             "consensusBlock": true
           }
+        },
+        {
+          "ruleId": "orakul/critical",
+          "level": "error",
+          "message": {
+            "text": "баг 13"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app/server/api.ts"
+                },
+                "region": {
+                  "startLine": 13
+                }
+              }
+            }
+          ],
+          "properties": {
+            "model": "m1",
+            "confidence": 0.9,
+            "consensusBlock": true
+          }
         }
       ],
       "automationDetails": {

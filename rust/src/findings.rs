@@ -3,7 +3,7 @@
 //! в локации), инвалидация prior findings по содержимому.
 //!
 //! FP-regex-матчинг (matchesKnownFalsePositive/filterFalsePositiveFindings)
-//! портирован в задаче T07 (RFC 16): курируемые паттерны компилируются
+//! портирован в задаче T07 (RFC 20): курируемые паттерны компилируются
 //! `fancy-regex` (см. `crate::fp_patterns`), в том числе 2 паттерна с lookahead
 //! `(?=…)`, из-за которых эта часть раньше жила только в JS.
 //!
@@ -500,7 +500,6 @@ pub fn cluster_findings(findings: &[Value], gate: &Gate) -> ClusterOutcome {
         // Модели кластера: порядок первого появления (JS Set).
         let mut models: Vec<Value> = Vec::new();
         let mut model_seen: Vec<String> = Vec::new();
-        let mut single_models: Vec<String> = Vec::new();
         let mut consensus_models: Vec<String> = Vec::new();
         for &i in group {
             let f = &findings[i];
@@ -510,9 +509,6 @@ pub fn cluster_findings(findings: &[Value], gate: &Gate) -> ClusterOutcome {
                 models.push(f.get("model").unwrap_or(&Value::Null).clone());
             }
             let sev = f.get("severity");
-            if gate.in_block_single(sev) && !single_models.iter().any(|m| m == &model_key) {
-                single_models.push(model_key.clone());
-            }
             if gate.in_block_on(sev)
                 && !gate.in_block_single(sev)
                 && !consensus_models.iter().any(|m| m == &model_key)
@@ -520,43 +516,33 @@ pub fn cluster_findings(findings: &[Value], gate: &Gate) -> ClusterOutcome {
                 consensus_models.push(model_key);
             }
         }
-        let tier_block = !single_models.is_empty()
-            || match gate.consensus_min {
-                Some(min) => consensus_models.len() as f64 >= min,
-                None => false, // size >= undefined — всегда ложь в JS
-            };
-        let block_candidates: Vec<usize> = group
-            .iter()
-            .copied()
-            .filter(|&i| gate.in_block_on(findings[i].get("severity")))
-            .collect();
-        let max_conf = block_candidates
-            .iter()
-            .map(|&i| normalize_confidence(findings[i].get("confidence").unwrap_or(&Value::Null)))
-            .fold(f64::NEG_INFINITY, f64::max);
-        let confidence_block = block_candidates.is_empty() || max_conf >= gate.confidence_min;
-        let mut consensus_block = tier_block && confidence_block;
-        if gate.strict && consensus_block {
-            consensus_block = group.iter().any(|&i| {
-                let f = &findings[i];
-                gate.in_block_on(f.get("severity"))
-                    && (js_truthy(f.get("prescan").unwrap_or(&Value::Null))
-                        || f.get("verifierStatus").and_then(Value::as_str) == Some("verified"))
-            });
-        } else if consensus_block {
-            let block_tier: Vec<Value> = block_candidates
-                .iter()
-                .map(|&i| findings[i].clone())
-                .collect();
-            if let Some(soft) = soft_consensus_for_blast_cluster(&block_tier) {
-                consensus_block = soft;
-            }
-        }
+        let consensus_tier = match gate.consensus_min {
+            Some(min) => consensus_models.len() as f64 >= min,
+            None => false, // size >= undefined — всегда ложь в JS
+        };
         let consensus = models.len() >= 2;
+        // Решение — свойство находки, а не кластера (RFC 17): кластер даёт только счёт
+        // моделей для консенсуса, остальное находка набирает сама.
         for &i in group {
+            let f = &findings[i];
+            let sev = f.get("severity");
+            let confidence = normalize_confidence(f.get("confidence").unwrap_or(&Value::Null));
+            let in_block_on = gate.in_block_on(sev);
+            let tier_block = in_block_on && (gate.in_block_single(sev) || consensus_tier);
+            let confidence_block = !in_block_on || confidence >= gate.confidence_min;
+            let verified = f.get("verifierStatus").and_then(Value::as_str) == Some("verified");
+            let mut consensus_block = tier_block && confidence_block;
+            if consensus_block && gate.strict {
+                consensus_block = js_truthy(f.get("prescan").unwrap_or(&Value::Null)) || verified;
+            } else if consensus_block
+                && f.get("source").and_then(Value::as_str) == Some(BLAST_FINDING_SOURCE)
+            {
+                // blast-radius — soft: без подтверждения verifier'а не блокирует
+                consensus_block = verified;
+            }
             mutations.push(FindingMutation {
                 index: i,
-                confidence: normalize_confidence(findings[i].get("confidence").unwrap_or(&Value::Null)),
+                confidence,
                 consensus,
                 cluster_models: models.clone(),
                 confidence_block,
@@ -991,12 +977,14 @@ mod tests {
         let out = cluster_findings(&findings, &gate());
         assert!(out.mutations[0].consensus_block);
 
-        // смешанный кластер (не чистый blast) — soft-гейт не применяется
+        // смешанный кластер: LLM-находка блокирует сама, blast-находка рядом — по-прежнему
+        // только с verified (решение — свойство находки, RFC 17)
         let findings = vec![mk("unverified", BLAST_FINDING_SOURCE), json!({
             "file": "a.ts", "line": 1, "severity": "major", "confidence": 0.9, "model": "llm",
         })];
         let out = cluster_findings(&findings, &gate());
-        assert!(out.mutations.iter().all(|m| m.consensus_block), "LLM в кластере — обычный гейт");
+        assert!(!out.mutations[0].consensus_block, "blast без verified не блокирует и рядом с LLM");
+        assert!(out.mutations[1].consensus_block, "LLM-находка — обычный гейт");
     }
 
     #[test]
@@ -1033,16 +1021,39 @@ mod tests {
     }
 
     #[test]
-    fn resolve_blockers_picks_first_consensus_block_member() {
+    fn resolve_blockers_picks_the_blocking_finding_not_its_neighbour() {
         let findings = vec![
             json!({"file": "a.ts", "line": 1, "severity": "minor", "model": "m1", "confidence": 0.5}),
             json!({"file": "a.ts", "line": 1, "severity": "major", "model": "m2", "confidence": 0.95}),
         ];
         let out = resolve_blockers(&findings, &gate(), None);
         assert!(out.would_block);
-        // consensusBlock в JS ставится ВСЕМ членам кластера → блокер — первый элемент,
-        // даже если сама находка вне block-tier (minor с конф. 0.5).
-        assert_eq!(out.blockers, vec![0]);
+        // minor рядом с блокером сам merge не блокирует и причиной блока не становится
+        assert!(!out.mutations[0].consensus_block);
+        assert_eq!(out.blockers, vec![1]);
+    }
+
+    #[test]
+    fn neighbour_confidence_does_not_lift_a_shaky_critical() {
+        let findings = vec![
+            json!({"file": "a.ts", "line": 1, "severity": "critical", "model": "m", "confidence": 0.5}),
+            json!({"file": "a.ts", "line": 2, "severity": "major", "model": "m", "confidence": 0.95}),
+        ];
+        let out = resolve_blockers(&findings, &gate(), None);
+        assert!(!out.mutations[0].consensus_block, "critical c конф. 0.5 не блокирует");
+        assert_eq!(out.blockers, vec![1]);
+    }
+
+    #[test]
+    fn non_block_eslint_rule_does_not_block_through_a_neighbour() {
+        let findings = vec![
+            json!({"file": "a.ts", "line": 1, "severity": "major", "model": "eslint-prescan", "confidence": 1,
+                   "prescan": true, "prescanBlock": false}),
+            json!({"file": "a.ts", "line": 2, "severity": "minor", "model": "m", "confidence": 0.4, "carried": true}),
+        ];
+        let cfg = json!({"enabled": true, "blockEnabled": true});
+        let out = resolve_blockers(&findings, &gate(), Some(&cfg));
+        assert!(!out.would_block, "правило вне blockRules не блокирует ни само, ни через соседа");
     }
 
     fn sample_text() -> LineText {

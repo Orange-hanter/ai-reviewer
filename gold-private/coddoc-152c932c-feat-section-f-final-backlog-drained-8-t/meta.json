@@ -1,0 +1,66 @@
+{
+  "id": "coddoc-152c932c-feat-section-f-final-backlog-drained-8-t",
+  "type": "tp",
+  "tags": [],
+  "description": " «feat: Section F final — backlog drained (8 tasks, 61/61 done)» — дефект, который потом исправил 10a1a0c2, f18c8d21, 7e2b9ece",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "152c932cf6fbd1520699d9e90c98a84cbc7522f1",
+    "base": "1910dbd18ce14f7d7683dca0ad9e81bc5c4d9290",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "10a1a0c2ab826f76f4f596a5d554f8ad489946e4",
+        "ref": null,
+        "title": "fix: PCA-914 bootstrap idempotency — explicit existence check"
+      },
+      {
+        "sha": "f18c8d2169585e1a7e63bc15129f8e83e97c7e3d",
+        "ref": null,
+        "title": "fix(ADO-026): full-file sha256 в web bulk apply и scan_folder"
+      },
+      {
+        "sha": "7e2b9ece8ff2da84f0912791b80ff76a4f2f02d1",
+        "ref": null,
+        "title": "fix(ADO-054): routine on_finding='create_task' реализован — новая задача на finding, больше не молчаливый no-op"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 564 строк в 15 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/services/project_service.py",
+        "lines": [
+          64,
+          75
+        ]
+      },
+      {
+        "file": "cod_doc/api/web/pages/docs.py",
+        "lines": [
+          598,
+          599
+        ]
+      },
+      {
+        "file": "cod_doc/services/import_service.py",
+        "lines": [
+          449,
+          449
+        ]
+      },
+      {
+        "file": "cod_doc/services/routine_service.py",
+        "lines": [
+          626,
+          627
+        ]
+      }
+    ]
+  }
+}

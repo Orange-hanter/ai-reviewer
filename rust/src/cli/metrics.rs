@@ -1,4 +1,4 @@
-//! Подкоманда `pr-review metrics` — порт bin/pr-review-metrics.mjs (RFC 16, T29).
+//! Подкоманда `pr-review metrics` — порт bin/pr-review-metrics.mjs (RFC 20, T29).
 //!
 //! Поток как в JS: конфиг (`REVIEW_PROFILE` → автопоиск в cwd → встроенный профиль,
 //! поверх env) → путь лога = первый позиционный аргумент, а если его нет или он

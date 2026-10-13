@@ -1,0 +1,59 @@
+{
+  "id": "orakul-78-feat-data-28-csv",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": "#78 «feat(data): #28 человекочитаемые выгрузки для учёта (CSV)» — дефект, который потом исправил #105",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "5195741a71f2852fd428bb1461bfb43c8df5dca1",
+    "base": "8766b7779b947a64d59ba9ab61ccf58167011597",
+    "ref": "#78",
+    "fixes": [
+      {
+        "sha": "28c75fb2b7ffaf04d7528a60fc6ff3463040c3aa",
+        "ref": "#105",
+        "title": "fix(export): выгрузка CSV через Web Share на мобильных (#103) (#105)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 192 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: downloadCsv, toCsv"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/data/AuditExportCard.tsx",
+        "lines": [
+          52,
+          53
+        ]
+      },
+      {
+        "file": "app/client/src/components/data/AuditExportCard.tsx",
+        "lines": [
+          61,
+          61
+        ]
+      },
+      {
+        "file": "app/client/src/components/data/AuditExportCard.tsx",
+        "lines": [
+          75,
+          76
+        ]
+      },
+      {
+        "file": "app/client/src/utils/csv.ts",
+        "lines": [
+          18,
+          18
+        ]
+      }
+    ]
+  }
+}

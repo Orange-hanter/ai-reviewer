@@ -1,0 +1,49 @@
+{
+  "id": "gateway-bdefc287-fix-wizard-guided-device-list-is-a-page",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(wizard): guided device list is a page, not a collapsible expert drawer» — дефект, который потом исправил 0e19139c",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "bdefc28788d60424e42f10a1b33c0aca0d7cfb33",
+    "base": "598c803d8b506e581950a70fb97b1f2711c5b949",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "0e19139c529ac64bad7d361276148a6566f72557",
+        "ref": null,
+        "title": "fix(wizard): sonar sweep on find-device buttons while the dialog loads"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 381 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "wizard/src/components/DevicePanel.tsx",
+        "lines": [
+          52,
+          52
+        ]
+      },
+      {
+        "file": "wizard/src/components/DevicePanel.tsx",
+        "lines": [
+          92,
+          93
+        ]
+      },
+      {
+        "file": "wizard/src/components/DevicePanel.tsx",
+        "lines": [
+          98,
+          99
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "restate-clean-8c83177f-feat-schema-dbm-018c-cutover-drop-fks-to",
+  "type": "clean",
+  "description": " «feat(schema): DBM-018c CUTOVER — drop FKs to users(id) on all actor columns» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "8c83177f915066927bf680e669dc2ed151d47d68",
+    "base": "3c8152a067750573c7b77d6ce46a0ef945c2e713",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

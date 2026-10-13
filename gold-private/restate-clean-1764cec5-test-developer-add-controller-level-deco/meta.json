@@ -1,0 +1,15 @@
+{
+  "id": "restate-clean-1764cec5-test-developer-add-controller-level-deco",
+  "type": "clean",
+  "description": " «test(developer): add controller-level decorator/guard coverage (DEV-006)» — ни одна строка не затронута фиксами ≥ 45 дней",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "1764cec566b45373a968081fb7ae9b345c93490c",
+    "base": "9f3870fbe54a872d9b91e1fc2f30aeb1b531cb90",
+    "ref": null
+  },
+  "expect": {
+    "wouldBlock": false
+  }
+}

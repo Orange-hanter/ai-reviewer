@@ -1,4 +1,4 @@
-//! Общий stdio-транспорт MCP — порт lib/mcp-stdio.mjs (RFC 16, транспортная
+//! Общий stdio-транспорт MCP — порт lib/mcp-stdio.mjs (RFC 20, транспортная
 //! часть T40, понадобилась T23 раньше самой T40).
 //!
 //! Кадры Content-Length (LSP-стиль) и «голый» JSON (newline-delimited), частичные

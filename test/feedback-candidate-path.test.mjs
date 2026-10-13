@@ -1,6 +1,6 @@
 // suggestedId кандидата в fixtures собирается из полей находки и становится именем
 // файла: находка с line вида "/../../x" не должна писать за пределы candidatesDir
-// (RFC 16 SEC).
+// (RFC 20 SEC).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

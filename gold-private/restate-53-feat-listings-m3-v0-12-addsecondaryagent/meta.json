@@ -1,0 +1,35 @@
+{
+  "id": "restate-53-feat-listings-m3-v0-12-addsecondaryagent",
+  "type": "tp",
+  "tags": [],
+  "description": "!53 «feat(listings): M3 v0.12 — addSecondaryAgent + removeAgent (LST-021)» — дефект, который потом исправил !80",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "af87c79bc128be32047c07b22ce1277db0d9c95b",
+    "base": "d75dae7cca961127f266d0ff1ed8fb05ebf60758",
+    "ref": "!53",
+    "fixes": [
+      {
+        "sha": "880b61cb1ec7d193852325e75905aa10cdef7d99",
+        "ref": "!80",
+        "title": "fix(listings): v0.19 audit hotfixes — C-1 + H-1 + H-2 + H-4 + M-1"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 715 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/listings/services/listing-assignment.service.ts",
+        "lines": [
+          183,
+          185
+        ]
+      }
+    ]
+  }
+}

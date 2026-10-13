@@ -1,0 +1,109 @@
+{
+  "id": "orakul-58-docs-ops-tls-1-3",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": "#58 «docs(ops): фикс недоступности в РФ — отключение TLS 1.3 на проде» — дефект, который потом исправил #74, #125, e1a77218, #494",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "743ce20d5322b811a7a40cdde167b897c1fb920c",
+    "base": "10577175aef4f4073accb1f6cf6c8355764ebc7b",
+    "ref": "#58",
+    "fixes": [
+      {
+        "sha": "8766b7779b947a64d59ba9ab61ccf58167011597",
+        "ref": "#74",
+        "title": "feat(pilot): #42 клик по аномалии, #22 статус интеграций, #7 разбор аномалий"
+      },
+      {
+        "sha": "6657a9cd2361b8d9db9a5caaafc5b25c5060c9fe",
+        "ref": "#125",
+        "title": "fix(ui): кнопки заготовок, возврат к списку, desktop-hover на складе (#121, #113, #122) (#125)"
+      },
+      {
+        "sha": "e1a7721813885e53bdd14fd4aa71c54a65f84cc8",
+        "ref": null,
+        "title": "fix(rbac): полиш ролей — KPI-навигация в скрытые вкладки + правка заготовок у staff"
+      },
+      {
+        "sha": "5f77821887d477b6afb4693320cef7b11f9ce7d8",
+        "ref": "#494",
+        "title": "fix(stock): clarify product cards and category hierarchy (#17)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 252 строк в 14 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: nplural"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/Main.tsx",
+        "lines": [
+          96,
+          101
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/HomeTab.tsx",
+        "lines": [
+          61,
+          61
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/HomeTab.tsx",
+        "lines": [
+          319,
+          319
+        ]
+      },
+      {
+        "file": "app/client/src/components/SwipeableRow.tsx",
+        "lines": [
+          9,
+          13
+        ]
+      },
+      {
+        "file": "app/client/src/components/SwipeableRow.tsx",
+        "lines": [
+          37,
+          37
+        ]
+      },
+      {
+        "file": "app/client/src/components/SwipeableRow.tsx",
+        "lines": [
+          66,
+          74
+        ]
+      },
+      {
+        "file": "app/client/src/components/SwipeableRow.tsx",
+        "lines": [
+          78,
+          78
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/StockTab/index.tsx",
+        "lines": [
+          46,
+          48
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/StockTab/index.tsx",
+        "lines": [
+          51,
+          51
+        ]
+      }
+    ]
+  }
+}

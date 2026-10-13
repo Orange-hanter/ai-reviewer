@@ -1,4 +1,4 @@
-//! Чёрноящичные тесты подкоманд feedback-семейства (RFC 16, T30): `feedback`,
+//! Чёрноящичные тесты подкоманд feedback-семейства (RFC 20, T30): `feedback`,
 //! `feedback-batch`, `feedback-migrate`, `feedback-promote` — argv, коды возврата
 //! и файлы так, как их увидит workflow потребителя.
 //!

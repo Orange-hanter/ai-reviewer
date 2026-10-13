@@ -1,0 +1,35 @@
+{
+  "id": "gateway-985c65f5-fix-discovery-port-range-validation-stal",
+  "type": "tp",
+  "tags": [],
+  "description": " «fix(discovery): port-range validation + stale-closure in addCandidatesFromHosts» — дефект, который потом исправил 47169974",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "985c65f5e97a86304053252dbbd82e836f1957bb",
+    "base": "7dfe131ea14554bcc290c18c0d23c872aeff0b97",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "471699743a1caf4e2930e4240efe6124a32a1f99",
+        "ref": null,
+        "title": "fix(audit): Transform node UI + backend hardening + bug fixes"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 27 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "wizard/src/App.tsx",
+        "lines": [
+          347,
+          356
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "id": "orakul-178-feat-techcards-178",
+  "type": "tp",
+  "tags": [],
+  "description": "#178 «feat(techcards): группировка по категориям + только заполненные техкарты + раздел заготовок (#178)» — дефект, который потом исправил #245, #494",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "ab2433398bdf739c4d8d2022eade3ecb39fca422",
+    "base": "b1d984062a6800d44f530caaf002cb7b52d2ccf8",
+    "ref": "#178",
+    "fixes": [
+      {
+        "sha": "dd1efecddd3fc4d2e3fdac39aa593f24855b1085",
+        "ref": "#245",
+        "title": "fix: удаление поставщика (#235) + сворачивание категорий в Техкартах (#234) (#245)"
+      },
+      {
+        "sha": "5f77821887d477b6afb4693320cef7b11f9ce7d8",
+        "ref": "#494",
+        "title": "fix(stock): clarify product cards and category hierarchy (#17)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 457 строк в 5 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/tabs/TechCardsTab/index.tsx",
+        "lines": [
+          40,
+          40
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/TechCardsTab/index.tsx",
+        "lines": [
+          147,
+          160
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/TechCardsTab/index.tsx",
+        "lines": [
+          229,
+          230
+        ]
+      }
+    ]
+  }
+}

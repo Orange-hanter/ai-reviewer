@@ -1,4 +1,4 @@
-//! Фидбэк ревью (R8): порт `lib/feedback-schema.mjs` + `lib/feedback.mjs` (задача T17 RFC 16).
+//! Фидбэк ревью (R8): порт `lib/feedback-schema.mjs` + `lib/feedback.mjs` (задача T17 RFC 20).
 //!
 //! Две части в одном модуле, как и просит RFC:
 //!
@@ -1347,7 +1347,7 @@ mod tests {
     }
 
     /// Граница доверия журнала: Rust не принимает строки, которые JS отвергает, и
-    /// наоборот. Эталон снят с `normalizeFeedbackEntry` (RFC 16 SEC): расхождение
+    /// наоборот. Эталон снят с `normalizeFeedbackEntry` (RFC 20 SEC): расхождение
     /// было в `Number(string)` — `--5`, `-0x5`, `infinity` Rust понимал как числа,
     /// а `0b101`/`0o17` — нет.
     #[test]
@@ -1374,7 +1374,7 @@ mod tests {
     }
 
     /// suggestedId — имя файла кандидата: поля находки не проносят `/` и `..`
-    /// (RFC 16 SEC; эталон — `test/feedback-candidate-path.test.mjs`).
+    /// (RFC 20 SEC; эталон — `test/feedback-candidate-path.test.mjs`).
     #[test]
     fn fixture_candidate_id_is_safe_file_name() {
         let entry = |line: Value, title: &str| {

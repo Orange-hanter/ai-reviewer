@@ -1,4 +1,4 @@
-//! Порт lib/eval.mjs: eval-харнес golden-фикстур без LLM (RFC 16, T28).
+//! Порт lib/eval.mjs: eval-харнес golden-фикстур без LLM (RFC 20, T28).
 //!
 //! Каждая фикстура (`fixtures/<id>/`, загрузка — [`crate::fixtures`]) прогоняется через
 //! post-processing гейта ровно в порядке JS: FP-фильтр (с FP-семейством 7 по
@@ -32,7 +32,7 @@ use crate::verifier::{apply_verifier_verdicts, select_verifier_candidates};
 const EVAL_VERIFIER_MAX: usize = 12;
 
 /// `DEFAULT_FIXTURES_DIR`: `fixtures/` от корня пакета. Фикстуры dev-only и в бинарь
-/// не вшиваются (RFC 16, решение 5) — у prebuilt-бинаря каталог задают `--fixtures`.
+/// не вшиваются (RFC 20, решение 5) — у prebuilt-бинаря каталог задают `--fixtures`.
 pub fn default_fixtures_dir() -> PathBuf {
     package_root().join("fixtures")
 }
@@ -439,7 +439,7 @@ mod tests {
         assert!(failed.is_empty(), "упавшие фикстуры: {failed:?}");
         assert!(out.ok);
         // Счётчик seed-кейсов держит и JS-тест `eval harness: все fixtures green`.
-        assert_eq!(out.metrics["total"], json!(17));
+        assert_eq!(out.metrics["total"], json!(20));
         assert!(out.report.contains("✅ все fixtures passed"));
     }
 

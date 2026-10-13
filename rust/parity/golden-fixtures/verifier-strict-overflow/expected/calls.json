@@ -48,8 +48,8 @@
   "telegram": [],
   "upsertSticky": [
     {
-      "bytes": 3748
+      "bytes": 3700
     }
   ],
-  "verifierRuns": 1
+  "verifierRuns": 2
 }

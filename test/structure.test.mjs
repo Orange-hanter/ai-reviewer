@@ -741,7 +741,7 @@ test('writeStructureExports confines writes to the allowed root', async (t) => {
     rootDir: root,
   }), /escapes allowed root/);
   // висячий symlink: realpath цели падает, ближайший существующий предок — root,
-  // а writeFile пошёл бы по ссылке и создал файл снаружи (RFC 16 SEC)
+  // а writeFile пошёл бы по ссылке и создал файл снаружи (RFC 20 SEC)
   await symlink(join(outside, 'dangling.json'), join(root, 'dangling.json'));
   await assert.rejects(() => writeStructureExports(result, {
     factsPath: join(root, 'dangling.json'),

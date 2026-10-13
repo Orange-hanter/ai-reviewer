@@ -137,8 +137,8 @@ completion-токенами, значит `none` срежет выход жюр�
 
 ```bash
 python3 -m venv .graphify/venv
-.graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.52
-.graphify/venv/bin/graphify --version          # ожидаем graphify 0.9.52
+.graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.87
+.graphify/venv/bin/graphify --version          # ожидаем graphify 0.9.87
 
 GRAPHIFY_OUT=.graphify/graphify-out GRAPHIFY_NO_TIPS=1 \
   .graphify/venv/bin/graphify update . --force

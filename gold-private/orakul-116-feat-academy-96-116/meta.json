@@ -1,0 +1,38 @@
+{
+  "id": "orakul-116-feat-academy-96-116",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": "#116 «feat(academy): вкладка «Академия» для всех + возврат после тура + раскрытие аккордеонов (#96) (#116)» — дефект, который потом исправил #243",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "8f75a0edb3ae5acd686abe1ea7482b9b5549d1ba",
+    "base": "9b7ddded8d554e84617a5a22a6811b7275c8809b",
+    "ref": "#116",
+    "fixes": [
+      {
+        "sha": "c5819489755cd2cb8712d11f4e2648f9b03ffaf8",
+        "ref": "#243",
+        "title": "fix(client): консенсус-замечания авто-ревью PR #241 (4-й проход) (#243)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 170 строк в 9 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: useGuideTour"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/tabs/MenuTab/index.tsx",
+        "lines": [
+          138,
+          138
+        ]
+      }
+    ]
+  }
+}

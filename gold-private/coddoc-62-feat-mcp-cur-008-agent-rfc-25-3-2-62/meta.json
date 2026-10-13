@@ -1,0 +1,49 @@
+{
+  "id": "coddoc-62-feat-mcp-cur-008-agent-rfc-25-3-2-62",
+  "type": "tp",
+  "tags": [],
+  "description": "#62 «feat(mcp): CUR-008 — профиль agent пересобран под куратора (RFC 25 §3.2) (#62)» — дефект, который потом исправил #101",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "eed816450414dd0b240958f93c1d3fa88d3d5681",
+    "base": "ee2ddfc1f63f54494047dab822330ff65831f9e1",
+    "ref": "#62",
+    "fixes": [
+      {
+        "sha": "7b84235a5ca49fcc8017a9225539614c7c0bc8db",
+        "ref": "#101",
+        "title": "fix(mcp): AFT-004 — agent_capabilities: роль и запреты зависят от профиля (#101)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 227 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/mcp/tools/agent_tools.py",
+        "lines": [
+          45,
+          48
+        ]
+      },
+      {
+        "file": "cod_doc/mcp/tools/agent_tools.py",
+        "lines": [
+          55,
+          56
+        ]
+      },
+      {
+        "file": "cod_doc/mcp/tools/agent_tools.py",
+        "lines": [
+          123,
+          126
+        ]
+      }
+    ]
+  }
+}

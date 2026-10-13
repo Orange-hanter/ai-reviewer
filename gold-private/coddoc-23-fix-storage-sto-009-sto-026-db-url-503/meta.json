@@ -1,0 +1,35 @@
+{
+  "id": "coddoc-23-fix-storage-sto-009-sto-026-db-url-503",
+  "type": "tp",
+  "tags": [],
+  "description": "#23 «fix(storage): STO-009 + STO-026 — миграции по db_url, кэш движков, 503 на рассинхрон схемы» — дефект, который потом исправил #63",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "956e93dce9bf2f2ffd6b21ddf7c33111486199bd",
+    "base": "b23e2bd82ccf7a2aff74580aba1a5c34cdd27ba4",
+    "ref": "#23",
+    "fixes": [
+      {
+        "sha": "88853950d93677fc3e6bc5971e94842c85dda9ec",
+        "ref": "#63",
+        "title": "fix(web): ADO-188 — 500 на вкладках ADR и Stories (#63)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 621 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/deps.py",
+        "lines": [
+          236,
+          236
+        ]
+      }
+    ]
+  }
+}

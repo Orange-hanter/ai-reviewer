@@ -1,0 +1,35 @@
+{
+  "id": "orakul-343-feat-ops-moa-specialists-minimax-aggrega",
+  "type": "tp",
+  "tags": [],
+  "description": "#343 «feat(ops): MoA specialists, minimax aggregator, faster PR review chunks (#343)» — дефект, который потом исправил #589",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "a1806bc33fd366fdd910c74abe92b947c673ea68",
+    "base": "db80f37f2e7408dfedaa9a1078439d0671b4ab46",
+    "ref": "#343",
+    "fixes": [
+      {
+        "sha": "e89247ea5ca6cb8ae3c64a76cfc672cb8c268bc3",
+        "ref": "#589",
+        "title": "fix(ci): снятая провайдером deepseek-v4-flash → deepseek-v4.1-flash"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 205 строк в 8 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/pr-review.yml",
+        "lines": [
+          97,
+          97
+        ]
+      }
+    ]
+  }
+}

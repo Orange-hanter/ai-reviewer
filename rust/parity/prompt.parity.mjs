@@ -276,7 +276,7 @@ for (const [profileName, activate] of Object.entries(PROFILES)) {
   check(`${profileName}: changedFilesSection windowed empty array`, () => buildChangedFilesSection(
     ['a.ts'], { paths: ['a.ts'], partialPaths: [], windowedPaths: [] },
   ));
-  // RFC 04, решение 4: слитый промпт ролей на одной модели (RFC 16 T36).
+  // RFC 04, решение 4: слитый промпт ролей на одной модели (RFC 20 T36).
   check(`${profileName}: buildMergedSpecialistSystem three`, () => buildMergedSpecialistSystem(
     ['security', 'correctness', 'architecture'],
   ));

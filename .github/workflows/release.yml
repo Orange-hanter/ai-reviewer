@@ -1,6 +1,6 @@
-# Релиз prebuilt-бинаря pr-review (RFC 16, решение 9, T32).
+# Релиз prebuilt-бинаря pr-review (RFC 20, решение 9, T32).
 #
-# Контракт артефактов — таблица «Контракт для T32» в proposals/16-standalone-rust-binary.md;
+# Контракт артефактов — таблица «Контракт для T32» в proposals/20-standalone-rust-binary.md;
 # его же проверяет потребительский examples/ci/fetch-pr-review.sh:
 #   pr-review-<triple>.tar.gz — gzip-tar, в корне обычный исполняемый файл `pr-review`;
 #   SHA256SUMS — вывод `sha256sum` по архивам, имена без путей;

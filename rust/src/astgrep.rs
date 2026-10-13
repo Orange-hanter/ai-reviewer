@@ -1,7 +1,7 @@
-//! Порт `lib/astgrep.mjs` (задача T14 RFC 16): ast-grep prescan — AST-антипаттерны
+//! Порт `lib/astgrep.mjs` (задача T14 RFC 20): ast-grep prescan — AST-антипаттерны
 //! рядом с eslint.
 //!
-//! **Вшитый ruleset (RFC 16, решение 5).** Рядом с одиночным бинарём дерева пакета
+//! **Вшитый ruleset (RFC 20, решение 5).** Рядом с одиночным бинарём дерева пакета
 //! нет, поэтому `ast-grep/` (sgconfig.yml + правила) вшит через `include_dir!`.
 //! Читает его внешний процесс `ast-grep`, а не мы, — поэтому при первом
 //! обращении он распаковывается в `std::env::temp_dir()` ([`embedded_config_path`]).
@@ -21,7 +21,7 @@
 //! `REVIEW_ASTGREP_CONFIG` или `paths.astgrepConfig` профиля) имеет приоритет:
 //! эмбед — дефолт, а не запрет на подмену.
 //!
-//! **Fail-open (риск 3 RFC 16).** Нет конфига, не распаковался эмбед, нет бинаря,
+//! **Fail-open (риск 3 RFC 20).** Нет конфига, не распаковался эмбед, нет бинаря,
 //! бинарь упал, вывод не JSON — пустой результат с `skipped`/`error`, не `Err`.
 
 use std::collections::HashSet;
@@ -569,7 +569,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&got).unwrap(), want);
     }
 
-    /// Путь из диффа PR с ведущим дефисом не становится опцией ast-grep (RFC 16 SEC).
+    /// Путь из диффа PR с ведущим дефисом не становится опцией ast-grep (RFC 20 SEC).
     #[cfg(unix)]
     #[test]
     fn path_with_leading_dash_is_not_an_option() {
@@ -658,7 +658,7 @@ mod tests {
         assert_fixture_gate("prescan-astgrep-xff", &r.findings, &p);
     }
 
-    /// Интеграция с настоящим `ast-grep` (риск 3 RFC 16): вшитый ruleset после
+    /// Интеграция с настоящим `ast-grep` (риск 3 RFC 20): вшитый ruleset после
     /// распаковки читается внешним процессом, и фикстура `prescan-astgrep-xff`
     /// воспроизводится на реальном файле. Без бинаря в PATH — пропуск с причиной.
     #[test]

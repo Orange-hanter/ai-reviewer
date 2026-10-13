@@ -637,7 +637,7 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
 
     let mut out = Map::new();
     out.insert("reviewMode".into(), json!(review_mode));
-    // Раскладка сообщений под префиксный кэш (RFC 16, решение 5; lib/prompt-layout.mjs).
+    // Раскладка сообщений под префиксный кэш (RFC 20, решение 5; lib/prompt-layout.mjs).
     out.insert(
         "promptLayout".into(),
         json!(
@@ -652,11 +652,23 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
         ),
     );
     out.insert("httpRetries".into(), num_json(http_retries));
+    // Кто считается автором бота (sticky, inline, auto-triage). Пустая строка — значащее
+    // значение «доверять всем» (откат), поэтому различаем «не задано» и «пусто» (как JS
+    // `!== undefined`). REVIEW_FEEDBACK_TRUSTED_AUTHORS — алиас.
+    let trusted_authors_raw = env_str(env, "REVIEW_TRUSTED_AUTHORS")
+        .or_else(|| env_str(env, "REVIEW_FEEDBACK_TRUSTED_AUTHORS"))
+        .unwrap_or_else(|| "github-actions[bot]".to_string());
+    let trusted_authors: Vec<String> = trusted_authors_raw
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     out.insert(
         "github".into(),
         json!({
             "api": strip_trailing_slash(&or_env(env, "GITHUB_API_URL", "https://api.github.com")),
             "token": or_env(env, "GITHUB_TOKEN", ""),
+            "trustedAuthors": trusted_authors,
         }),
     );
     out.insert(
@@ -691,7 +703,7 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "references": moa_references,
             "aggregator": moa_aggregator,
             "label": moa_label,
-            // Страховка под лимит «не более 8 пунктов» из промпта (RFC 16, решение 3).
+            // Страховка под лимит «не более 8 пунктов» из промпта (RFC 20, решение 3).
             "refMaxTokens": num_json(num_env(env, "MOA_REFERENCE_MAX_TOKENS", 6_000.0)),
             "refTemp": num_json(moa_ref_temp),
             "aggTemp": num_json(moa_agg_temp),
@@ -715,6 +727,7 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "consensusMin": num_json(consensus_min),
             "confidenceMin": num_json(confidence_min),
             "llmRequired": env_flag(env, "REVIEW_LLM_REQUIRED", true),
+            "blastRequired": env_flag(env, "REVIEW_BLAST_REQUIRED", false),
             "strict": strict,
             "requireQuote": require_quote,
         }),
@@ -744,6 +757,8 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "enabled": verifier_enabled,
             "model": verifier_model,
             "maxCandidates": num_json(num_env(env, "REVIEW_VERIFIER_MAX", 12.0)),
+            // Блокеры сверх капа одного вызова — следующими батчами, а не молча в minor (RFC 17).
+            "maxBatches": num_json(num_env(env, "REVIEW_VERIFIER_BATCHES", 3.0)),
             "temperature": num_json(verifier_temp),
             // ±строк вокруг строки-кандидата в контексте verifier'а (lib/context-window.mjs):
             // второй проход смотрит 1–2 строки на файл, целый файл он не окупает.
@@ -759,7 +774,7 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
         json!({
             "enabled": specialists_enabled,
             "assignments": specialist_assignments,
-            // auto — слить роли в один вызов, когда модель у всех одна (RFC 16, решение 4);
+            // auto — слить роли в один вызов, когда модель у всех одна (RFC 20, решение 4);
             // always — сливать и при разных моделях; never — опрашивать по отдельности.
             "merge": match or_env(env, "REVIEW_SPECIALISTS_MERGE", "auto")
                 .trim()
@@ -831,7 +846,7 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "appendMarkdown": env_flag(env, "REVIEW_FEEDBACK_MD_APPEND", false),
             "writeCandidates": env_flag(env, "REVIEW_FEEDBACK_CANDIDATES", true),
             "write": env_flag(env, "REVIEW_FEEDBACK_WRITE", true),
-            "trustedAuthors": or_env(env, "REVIEW_FEEDBACK_TRUSTED_AUTHORS", "github-actions[bot]"),
+            "trustedAuthors": trusted_authors_raw,
             "reactionConcurrency": num_json(num_env(env, "REVIEW_FEEDBACK_CONCURRENCY", 6.0)),
             "patternsFile": or_env(env, "REVIEW_FP_PATTERNS", &ppath(paths, "fpPatterns")),
             "promoteMinFpCount": num_json(num_env(env, "REVIEW_FP_PROMOTE_MIN", 2.0)),
@@ -849,7 +864,7 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             // оплачивается каждой ролью на каждом чанке (см. lib/diff.mjs addedFileMarker).
             "skipAddedFileContext": env_flag(env, "REVIEW_SKIP_ADDED_FILE_CONTEXT", true),
             // Чанк без исполняемого кода обслуживает один агрегатор вместо жюри
-            // (RFC 16, lib/chunk-routing.mjs).
+            // (RFC 20, lib/chunk-routing.mjs).
             "chunkRouting": env_flag(env, "REVIEW_CHUNK_ROUTING", true),
             // Окна контекста для advisors и жюри (RFC 07, lib/context-window.mjs):
             // НОЛЬ — «окна выключены» (откат), поэтому non_neg_env, а не num_env.
@@ -905,6 +920,11 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
                 "unresolvedJoinRate": num_json(ratio_env(env, "REVIEW_STRUCTURE_MAX_UNRESOLVED_RATE", 0.1)),
             },
         }),
+    );
+    // Пиктограммы вместо эмодзи в PR-комментариях (lib/icons.mjs); пусто — эмодзи.
+    out.insert(
+        "render".into(),
+        json!({ "iconBaseUrl": or_env(env, "REVIEW_ICON_BASE_URL", "") }),
     );
     out.insert(
         "telegram".into(),
@@ -1078,6 +1098,28 @@ mod tests {
         assert_eq!(f["astgrep"]["allow"]["r1"], json!(["app/x.ts"]));
         assert_eq!(f["astgrep"]["allow"]["r2"], json!(["null"]), "JS String(null)");
         assert_eq!(f["strict"], Value::Bool(true));
+    }
+
+    #[test]
+    fn load_trusted_authors_env_alias_and_empty_rollback() {
+        let bits = profile_bits(&default_profile());
+        let parts = load_review_config_parts(&Map::new(), &bits);
+        assert_eq!(parts["github"]["trustedAuthors"], json!(["github-actions[bot]"]));
+        assert_eq!(parts["feedback"]["trustedAuthors"], "github-actions[bot]");
+
+        let mut e = Map::new();
+        e.insert("REVIEW_FEEDBACK_TRUSTED_AUTHORS".into(), json!("legacy-bot[bot]"));
+        let parts = load_review_config_parts(&e, &bits);
+        assert_eq!(parts["github"]["trustedAuthors"], json!(["legacy-bot[bot]"]), "алиас");
+
+        e.insert("REVIEW_TRUSTED_AUTHORS".into(), json!(" a[bot] , b[bot] ,"));
+        let parts = load_review_config_parts(&e, &bits);
+        assert_eq!(parts["github"]["trustedAuthors"], json!(["a[bot]", "b[bot]"]), "новое имя главнее алиаса");
+
+        e.insert("REVIEW_TRUSTED_AUTHORS".into(), json!(""));
+        let parts = load_review_config_parts(&e, &bits);
+        assert_eq!(parts["github"]["trustedAuthors"], json!([]), "пусто = доверять всем, не дефолт");
+        assert_eq!(parts["feedback"]["trustedAuthors"], "");
     }
 
     #[test]

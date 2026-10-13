@@ -21,7 +21,7 @@
  *   5. formatMetricsReport — ПОБАЙТОВО по отчёту: source/без source, тренд
  *      стабильности, Graph state, skip reasons по убыванию, модели по
  *      убыванию calls, avg toFixed(1), '—' на пустых долях;
- *   6. подкоманда `pr-review metrics` ↔ bin/pr-review-metrics.mjs (RFC 16, T29) —
+ *   6. подкоманда `pr-review metrics` ↔ bin/pr-review-metrics.mjs (RFC 20, T29) —
  *      stdout побайтово и код возврата: явный путь, путь по умолчанию из env
  *      и из профиля, пустой аргумент, отсутствующий файл (exit 1 + префикс stderr).
  */

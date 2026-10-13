@@ -18,7 +18,7 @@ default-off — `1`/`true`/`yes`/`on` как вкл. Пустое/незадан
 
 ## CLI
 
-Потребитель запускает единый бинарь `pr-review <подкоманда>` ([RFC 16](../proposals/16-standalone-rust-binary.md),
+Потребитель запускает единый бинарь `pr-review <подкоманда>` ([RFC 20](../proposals/20-standalone-rust-binary.md),
 поставка — [integration.md](integration.md)):
 
 ```bash
@@ -84,6 +84,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `GITHUB_REPOSITORY` | — | `owner/repo` |
 | `PR_NUMBER` | — | Номер PR |
 | `GITHUB_API_URL` | `https://api.github.com` | Enterprise API |
+| `REVIEW_TRUSTED_AUTHORS` | `github-actions[bot]` | Логины через запятую, от которых движок пишет sticky и inline. Свой комментарий = маркер **и** автор из списка (при наличии `user.type` — только `Bot`); комментарий с маркером от другого автора не читается как прошлый прогон, не перезаписывается и не удаляется. Если отчёты пишет GitHub App — укажите логин его бота (`name[bot]`). PAT проверку не проходит (`user.type = User`): sticky не найдётся и будет создаваться заново каждый прогон — для PAT нужен пустой allowlist. Абсолютный URL пагинации (`Link: rel="next"`) с чужим origin не запрашивается: токен уходит только на origin `GITHUB_API_URL` (SEC-T11). Пустое значение — доверять любому автору (прежнее поведение, откат). Алиас — `REVIEW_FEEDBACK_TRUSTED_AUTHORS` |
 | `GH_TOKEN` | — | Только gold-загрузчик ([`lib/gold-fetch.mjs`](../lib/gold-fetch.mjs)): после `GITHUB_TOKEN`, перед `gh auth token`; без токена — анонимно |
 
 ## Ollama / LLM
@@ -122,11 +123,11 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_BLOCK_ON` | `critical,major` | Severity → exit 1 |
 | `REVIEW_BLOCK_SINGLE` | `critical` | Severity, которой хватает одной модели |
-| `REVIEW_CONSENSUS` | `1` (moa) / `2` (consensus) | Мин. моделей для кластера-блокера. В `moa` всегда `1` (значение зажимается); в `consensus` — не больше числа моделей |
-| `REVIEW_CONFIDENCE_MIN` | `0.8` | Блок только при confidence ≥ порога |
-| `REVIEW_LLM_REQUIRED` | `1` | Полный аутедж LLM блокирует merge (fail-closed); `0` — старое fail-open |
+| `REVIEW_CONSENSUS` | `1` (moa) / `2` (consensus) | Мин. моделей с находкой уровня блока в кластере (корзина `file|floor((line-1)/3)`), чтобы major стал блокером; остальное находка набирает сама (RFC 17). В `moa` всегда `1` (значение зажимается); в `consensus` — не больше числа моделей |
+| `REVIEW_CONFIDENCE_MIN` | `0.8` | Блок только при собственной confidence находки ≥ порога (уверенность соседа по кластеру не засчитывается, RFC 17) |
+| `REVIEW_LLM_REQUIRED` | `1` | Полный аутедж LLM блокирует merge (fail-closed); `0` — старое fail-open. Тот же рычаг для сбоя verifier'а при находках уровня блока (RFC 18) и для частей PR, не отревьюенных ни одной моделью из-за сбоя (RFC 19): `1` — degraded-блок, `0` — merge проходит с заметкой. Пропуск частей по тайм-бюджету — только заметка |
 | `REVIEW_INLINE_ON` | `critical,major` | Severity, которым положен inline (см. actionability) |
-| `REVIEW_STRICT` | `0` (или `strict: true` профиля) | Строгий гейт: кластер блокирует, только если в нём есть находка уровня блока от prescan или с `verifierStatus: verified`; то же условие для inline блокер-severity; advisory в строку не поднимаются и к verifier'у по доказуемости не допускаются. Включается env **или** профилем: `0` в env профильный `strict` не выключает |
+| `REVIEW_STRICT` | `0` (или `strict: true` профиля) | Строгий гейт: находка уровня блока блокирует, только если она сама от prescan или с `verifierStatus: verified`; то же условие для inline блокер-severity; advisory в строку не поднимаются и к verifier'у по доказуемости не допускаются. Включается env **или** профилем: `0` в env профильный `strict` не выключает |
 | `REVIEW_REQUIRE_QUOTE` | = `REVIEW_STRICT` | critical/major без `quote` (цитаты кода) отбрасываются при нормализации ответа модели |
 
 ## Маршрут находки (actionability)
@@ -148,11 +149,12 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_VERIFIER` | `1` | Второй проход по кандидатам в блокеры |
 | `REVIEW_VERIFIER_MODEL` | `deepseek-v4-pro` | Модель-судья (вне пула advisors) |
-| `REVIEW_VERIFIER_MAX` | `12` | Максимум кандидатов на проверку |
+| `REVIEW_VERIFIER_MAX` | `12` | Максимум кандидатов в одном вызове verifier |
+| `REVIEW_VERIFIER_BATCHES` | `3` | Сколько вызовов verifier допустимо на прогон. Блокеры сверх `REVIEW_VERIFIER_MAX` идут следующими батчами; не влезшие в `MAX × BATCHES`, при `REVIEW_VERIFIER_STRICT=1` понижаются до minor (`verifierStatus: overflow`); не дошедшие из-за тайм-бюджета или сбоя хвостового батча — `verifierStatus: unavailable` (RFC 18) |
 | `REVIEW_VERIFIER_TEMPERATURE` | `0.2` | — |
 | `REVIEW_VERIFIER_CONTEXT_MARGIN` | `80` | ±строк вокруг каждой строки-кандидата в контексте verifier'а. Пересекающиеся окна сливаются, пропуски помечаются `… (строки N–M пропущены)` — реальные номера строк сохраняются. Файл, у которого хоть один кандидат без строки, отдаётся целиком. Второй проход смотрит одну-две строки на файл и делает это ДРУГОЙ моделью (кэш префикса advisor'ов не работает), поэтому целый файл до `REVIEW_MAX_FILE_LINES` строк он не окупает — см. [`lib/context-window.mjs`](../lib/context-window.mjs) |
 | `REVIEW_VERIFIER_SYMBOL_CARDS` | `0` | Карточки символов ([RFC 14](../proposals/14-symbol-cards.md), решение 4) во входе verifier'а: карточки файлов кандидатов, тем же отбором и с теми же лимитами, что у advisors и жюри. Без них верная находка «вызов не совпадает с сигнатурой» verifier'у недоказуема и не становится блокером; с ними verifier может подтвердить ложную интерпретацию сигнатуры — поэтому выключено до gold ×3. Включённый флаг входит в отпечаток конфигурации инкрементального прогона |
-| `REVIEW_VERIFIER_STRICT` | `1` | Нет вердикта → находка понижается до minor (fail-closed) |
+| `REVIEW_VERIFIER_STRICT` | `1` | Нет вердикта → находка понижается до minor. Сбой verifier'а (исключение, ни одного валидного вердикта, тайм-бюджет) — находки уровня блока получают `verifierStatus: unavailable`, исход прогона — по `REVIEW_LLM_REQUIRED` (RFC 18). `0` — находка без вердикта остаётся как есть, сбой verifier'а гейт не трогает |
 
 ## Инкрементальный прогон
 
@@ -185,7 +187,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_ROUTER` | `1` | `0` — всегда полный прогон |
 
-Классы: lockfile / generated / rename-only → **skip**; docs-only → **light**; ни одного
+Классы: lockfile / generated / rename-only (`similarity index 100%` или секция без строк `+`/`-`; rename с правками — обычный файл, RFC 17) → **skip**; удалённый файл классифицируется по своему пути; docs-only → **light**; ни одного
 файла-кода (только config `yml/yaml/json/toml/sh/sql`, docs, прочее) → **light**; хоть один
 файл-код → **full**. Список «кода» зашит в роутер (`LOGIC`/`CODE` в
 [`lib/router.mjs`](../lib/router.mjs), паритетно в `rust/src/router.rs`); `layout.logic`
@@ -224,8 +226,11 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `GRAPHIFY_REPORT` | `.graphify/graphify-out/GRAPH_REPORT.md` | Отчёт графа |
 | `REVIEW_GRAPHIFY_DEPTH` | `2` | `--depth` для `graphify affected` (clamp 1…5) |
 | `REVIEW_GRAPHIFY_DROP_AMBIGUOUS` | `1` | `0`/`false`/`no`/`off` — оставлять AMBIGUOUS-рёбра в blast |
+| `REVIEW_BLAST_REQUIRED` | `0` | `1` — blast-radius не посчитан (нет/не читается `graph.json`, все запросы `affected` упали) → exit 1 до LLM, sticky с причиной (fail-closed). Шаблон `examples/ci/pr-review.yml` ставит `1` |
 
-Нет графа → blast-radius пустой, ревью продолжается.
+Нет графа → blast-radius пустой, ревью продолжается (при `REVIEW_BLAST_REQUIRED=1` — блок).
+Устаревший граф (`graph_stale`), неразрешённые символы и «зависимых нет» сбоем не считаются.
+Маршруты router `skip`/`light` graph не требуют: blast-radius там не строится.
 
 Движок после `affected` обогащает ответ из `graph.json`: имя caller, confidence
 (`EXTRACTED`/`INFERRED`), community (cross-community сильнее layer-эвристик). В метриках —
@@ -382,20 +387,28 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_FEEDBACK_MD_APPEND` | `0` | Дописывать журнал автоматически |
 | `REVIEW_FEEDBACK_CANDIDATES` | `1` | Писать кандидатов |
 | `REVIEW_FEEDBACK_WRITE` | `1` | `0` — dry-run harvest |
-| `REVIEW_FEEDBACK_TRUSTED_AUTHORS` | `github-actions[bot]` | Чьи sticky и inline считаем своими: логин из списка И `user.type = Bot`. Действует на harvest, auto-triage и с SEC-T11 — на поиск sticky (prior findings, upsert) и чистку старых инлайнов: комментарий с маркером от другого автора движок не читает, не патчит и не удаляет. Свой GitHub App — впишите логин его бота (`name[bot]`). PAT проверку не проходит (`user.type = User`): sticky не найдётся и будет создаваться заново каждый прогон; отключить проверку можно значением из одного пробела (пустой allowlist) |
+| `REVIEW_FEEDBACK_TRUSTED_AUTHORS` | `github-actions[bot]` | Алиас `REVIEW_TRUSTED_AUTHORS` (см. [GitHub](#github)); при обоих заданных побеждает `REVIEW_TRUSTED_AUTHORS` |
 | `REVIEW_FEEDBACK_CONCURRENCY` | `6` | Параллельных запросов реакций |
 | `REVIEW_FEEDBACK_SINCE_DAYS` | `14` | `pr-review-feedback-batch`: PR, обновлённые за последние N дней |
 | `REVIEW_FEEDBACK_PR_LIMIT` | `30` | `pr-review-feedback-batch`: максимум PR за прогон (из последних 100 по `updated`) |
 | `REVIEW_FP_PROMOTE_MIN` | `2` | Сколько одинаковых FP → новый паттерн |
 | `REVIEW_FIXTURES_DIR` | fixtures пакета | Куда промоутить fixtures |
 | `REVIEW_GOLD_DIR` | gold пакета | Набор для shadow-прогона с LLM (`gold-public` — публичный набор) |
-| `REVIEW_GOLD_CACHE` | `.ai-review/gold-public` | Кэш диффов публичных кейсов, скачанных по пину `source.sha` |
+| `REVIEW_GOLD_CACHE` | `.ai-review/gold-public` | Кэш диффов публичных кейсов, скачанных по пину `source.sha`; для кейсов `source.local` — ещё и деревья проекта (`trees/`) |
+| `REVIEW_GOLD_REPOS` | — | Локальные клоны для кейсов `gold-private/`: `orakul=/path/Orakul,restate=/path/Restate`; имя — `source.local` кейса |
+| `REVIEW_GOLD_CHECKOUT` | `1` | `0` — кейс `source.local` гоняется без дерева проекта на `source.sha` (без окон контекста и карточек) |
 
 ## Auto-triage
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `REVIEW_AUTO_TRIAGE` | `1` | Авто-ответ и resolve на своих тредах с известным FP |
+
+## Оформление комментариев
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_ICON_BASE_URL` | — | База URL пиктограмм: задана — sticky, шапка review-сводки и inline показывают SVG вместо эмодзи (🤖 ⛔ ✅ 🔴 🟠 🟡 🔵 🔄 🔎 ⚖️ 🔧), эмодзи остаётся в `alt`. Пусто — эмодзи, как раньше. Набор — публичный [Orange-hanter/ai-reviewer-icons](https://github.com/Orange-hanter/ai-reviewer-icons); база с пином на тег: `https://raw.githubusercontent.com/Orange-hanter/ai-reviewer-icons/v1.0.0/icons`. HTML-комментарии (футер), код и ответы auto-triage не меняются; логи, dry-run и Telegram — с эмодзи |
 
 ## Уведомления
 

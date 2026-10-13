@@ -1,4 +1,4 @@
-//! JSON-контракт порта lib/symbol-cards.mjs (RFC 16, T38) — только для parity.
+//! JSON-контракт порта lib/symbol-cards.mjs (RFC 20, T38) — только для parity.
 //!
 //! JS-обёртки у модуля нет (его зовёт pipeline, который портирует T26); бинарь нужен
 //! `rust/parity/symbol-cards.parity.mjs`, чтобы сверить линейные разборы с JS-регулярками

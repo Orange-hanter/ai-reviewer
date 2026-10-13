@@ -1,0 +1,88 @@
+{
+  "id": "orakul-326-feat-ops-ai-review-r9-export-fp-eval-fix",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": "#326 «feat(ops): AI review R9 export + FP eval fixtures (#326)» — дефект, который потом исправил #337, #482, #491, #531",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "c29e08abd02cbadc8873f1e14f4a33fe80be1b47",
+    "base": "d50b03c26ffc27a74c49afbca6ec1850ddeb1300",
+    "ref": "#326",
+    "fixes": [
+      {
+        "sha": "b0d62a15528ef296fe4932d65842dfebddcfebd8",
+        "ref": "#337",
+        "title": "fix(ci): valid SARIF guid + upload-sarif v4"
+      },
+      {
+        "sha": "01a6ef8d9930128ce270f7a42c3f50fbd22c1ef1",
+        "ref": "#482",
+        "title": "fix(ci): мелкие инфра-фиксы — GRAPH path, promote REST, SARIF-шаг"
+      },
+      {
+        "sha": "f54105c1a63eef3d8578c4fae07aa76a9eef4d50",
+        "ref": "#491",
+        "title": "feat(ci): AI review gate — fail-closed при полном LLM-аутедже"
+      },
+      {
+        "sha": "0406e749fe8c8f58dabf95372b60d83972e029b7",
+        "ref": "#531",
+        "title": "fix(pr-review): carry-over решается по коду, а не по номеру строки"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 788 строк в 15 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: filterFalsePositiveFindings, resolveBlockers, applyRefutation"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/pr-review.yml",
+        "lines": [
+          25,
+          25
+        ]
+      },
+      {
+        "file": ".github/workflows/pr-review.yml",
+        "lines": [
+          150,
+          156
+        ]
+      },
+      {
+        "file": "ops/pr-review/index.mjs",
+        "lines": [
+          32,
+          35
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/export.mjs",
+        "lines": [
+          209,
+          209
+        ]
+      },
+      {
+        "file": "ops/pr-review/pipeline.mjs",
+        "lines": [
+          134,
+          136
+        ]
+      },
+      {
+        "file": "ops/pr-review/lib/report.mjs",
+        "lines": [
+          206,
+          206
+        ]
+      }
+    ]
+  }
+}

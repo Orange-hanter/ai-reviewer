@@ -1,0 +1,42 @@
+{
+  "id": "restate-156-fix-developer-scope-ownership-type-route",
+  "type": "tp",
+  "tags": [],
+  "description": "!156 «fix(developer): scope ownership-type routes to the calling developer» — дефект, который потом исправил !158",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "979bdc1941cedc2b14d6fcada2287afb66d0f82d",
+    "base": "200bec42e2ce120f4b46c9493394561d33b01209",
+    "ref": "!156",
+    "fixes": [
+      {
+        "sha": "f56c96ba7057805f4a70ac41e949008a76957250",
+        "ref": "!158",
+        "title": "fix(developer): one handler per public project path (#68, #60)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 370 строк в 8 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/developer/projects-ownership.controller.ts",
+        "lines": [
+          39,
+          41
+        ]
+      },
+      {
+        "file": "restate-api/src/developer/projects-ownership.controller.ts",
+        "lines": [
+          100,
+          100
+        ]
+      }
+    ]
+  }
+}

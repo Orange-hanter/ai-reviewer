@@ -1,0 +1,62 @@
+{
+  "id": "orakul-a248ba40-refactor-types-stocktab-2",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": " «refactor(types): доменная типизация StockTab (образец, ч.2)» — дефект, который потом исправил #74, #139, #494",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "a248ba40bb34f31dc0aa7a44875277bff425da25",
+    "base": "4e864d2654e8341e63dc502d5c80a798c7b8df68",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "8766b7779b947a64d59ba9ab61ccf58167011597",
+        "ref": "#74",
+        "title": "feat(pilot): #42 клик по аномалии, #22 статус интеграций, #7 разбор аномалий"
+      },
+      {
+        "sha": "9e0b720063f852981ff237d0f07bf3b2827447b5",
+        "ref": "#139",
+        "title": "fix(stock): поиск по имени/штрихкоду/меткам, не по категории (#137) (#139)"
+      },
+      {
+        "sha": "5f77821887d477b6afb4693320cef7b11f9ce7d8",
+        "ref": "#494",
+        "title": "fix(stock): clarify product cards and category hierarchy (#17)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 106 строк в 4 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: productHasLabel"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/client/src/components/tabs/StockTab/index.tsx",
+        "lines": [
+          15,
+          15
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/StockTab/useStockData.ts",
+        "lines": [
+          51,
+          51
+        ]
+      },
+      {
+        "file": "app/client/src/components/tabs/StockTab/useStockData.ts",
+        "lines": [
+          58,
+          58
+        ]
+      }
+    ]
+  }
+}

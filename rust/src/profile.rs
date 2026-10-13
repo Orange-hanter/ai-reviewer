@@ -1,4 +1,4 @@
-//! Порт lib/profile.mjs — RFC 16, решение 3: **явный `Profile` вместо singleton**.
+//! Порт lib/profile.mjs — RFC 20, решение 3: **явный `Profile` вместо singleton**.
 //!
 //! В JS профиль — process-wide синглтон (`getProfile`/`setProfile`/`resetProfile`),
 //! потому что `MARKERS` в lib/constants.mjs — живые getters, а модули импортируются
@@ -946,7 +946,7 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// Главная проверка решения 3 RFC 16: singleton'а больше нет.
+    /// Главная проверка решения 3 RFC 20: singleton'а больше нет.
     #[test]
     fn two_resolves_in_one_process_are_independent() {
         let dir = tmp_dir("isolation");

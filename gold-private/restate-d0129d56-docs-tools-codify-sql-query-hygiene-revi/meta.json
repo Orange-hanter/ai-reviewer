@@ -1,0 +1,35 @@
+{
+  "id": "restate-d0129d56-docs-tools-codify-sql-query-hygiene-revi",
+  "type": "tp",
+  "tags": [],
+  "description": " «docs(tools): codify SQL query hygiene review rules» — дефект, который потом исправил f42c595c",
+  "source": {
+    "local": "restate",
+    "branch": "origin/develop",
+    "sha": "d0129d56f9f7912cb2dbc88500f5927c7eb56e9e",
+    "base": "c34bee9ec445c10c7dcfcd98dfb6e11b6e67a77a",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "f42c595cd9443c93b856e6faf7e5a4343db9982f",
+        "ref": null,
+        "title": "fix(e2e): resolve 33 failing tests — schema gaps, RBAC, enum casts, race conditions"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 170 строк в 12 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "restate-api/src/auth/repositories/agency.repository.ts",
+        "lines": [
+          63,
+          63
+        ]
+      }
+    ]
+  }
+}

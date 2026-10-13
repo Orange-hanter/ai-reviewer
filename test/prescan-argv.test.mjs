@@ -1,5 +1,5 @@
 // Пути изменённых файлов приходят из диффа PR и уходят в argv eslint/ast-grep.
-// Файл `app/--config=evil.ts` не должен стать опцией линтера (RFC 16 SEC).
+// Файл `app/--config=evil.ts` не должен стать опцией линтера (RFC 20 SEC).
 
 import './helpers/reference-profile.mjs';
 import { test } from 'node:test';

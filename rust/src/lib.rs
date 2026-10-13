@@ -8,11 +8,11 @@
 //! findings.json из fixtures/). Логика сравнения появится в Фазе 1
 //! после порта diff/findings из lib/*.mjs.
 
-// RFC 16 T34: FP-семейство 7 (`findings` зависит от него — без модуля не собрать).
+// RFC 20 T34: FP-семейство 7 (`findings` зависит от него — без модуля не собрать).
 pub mod absent_path;
 pub mod actionability;
 pub mod config;
-// RFC 16 T35: окна контекста (lib/context-window.mjs); в замороженном блоке T03 модуля нет.
+// RFC 20 T35: окна контекста (lib/context-window.mjs); в замороженном блоке T03 модуля нет.
 pub mod context_window;
 pub mod diff;
 pub mod engine;
@@ -21,7 +21,7 @@ pub mod fixtures;
 pub mod findings;
 pub mod github;
 pub mod json_repair;
-// RFC 16 T23: общий stdio-транспорт MCP (транспортная часть T40).
+// RFC 20 T23: общий stdio-транспорт MCP (транспортная часть T40).
 pub mod mcp_stdio;
 pub mod llm;
 pub mod metrics;
@@ -42,7 +42,7 @@ pub mod structure_tests;
 pub mod triage;
 pub mod verifier;
 
-// RFC 16: модули единого бинаря.
+// RFC 20: модули единого бинаря.
 // Список пре-сеян в задаче T03 и заморожен: каждая последующая задача наполняет
 // свои файлы, но не правит этот блок (см. proposals/04-standalone-rust-binary.md).
 pub mod astgrep;
@@ -71,7 +71,7 @@ pub mod testutil;
 pub mod traits;
 pub mod util;
 
-// RFC 16 T36: чистые порты RFC 04 (маршрутизация чанков, слияние ролей, раскладка промпта).
+// RFC 20 T36: чистые порты RFC 04 (маршрутизация чанков, слияние ролей, раскладка промпта).
 pub mod chunk_routing;
 pub mod prompt_layout;
 pub mod specialist_merge;

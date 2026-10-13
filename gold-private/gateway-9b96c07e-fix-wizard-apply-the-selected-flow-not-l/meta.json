@@ -1,0 +1,38 @@
+{
+  "id": "gateway-9b96c07e-fix-wizard-apply-the-selected-flow-not-l",
+  "type": "tp",
+  "tags": [
+    "contract"
+  ],
+  "description": " «fix(wizard): apply the selected flow, not leftover empty sources» — дефект, который потом исправил #54",
+  "source": {
+    "local": "gateway",
+    "branch": "origin/main",
+    "sha": "9b96c07e6313734145378ac7e97951b7ea67016f",
+    "base": "c063e70ccb11bafe80dcdd1d28b4393380b1a389",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "4ad76ea7674318dce4f5e5769219b4005ba72b6d",
+        "ref": "#54",
+        "title": "fix(wizard): the commissioning session's bugs, and the loop that hid them (#54)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 62 строк в 3 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею",
+      "фикс поменял вызов функций из другого файла: createCanvasNode, classifyError"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "wizard/src/App.tsx",
+        "lines": [
+          1000,
+          1000
+        ]
+      }
+    ]
+  }
+}

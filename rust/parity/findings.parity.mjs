@@ -18,10 +18,10 @@
  *   3. fingerprint/attachFingerprints/filterStalePriorFindings на text-картах
  *      из parseDiff (тот же дифф, что в тестах) + ручные карты с коллизиями;
  *   4. сравнение log-сообщений для дедупа, carry-over и FP-фильтра;
- *   5. FP-фильтр (RFC 16, T07): matchesKnownFalsePositive/filterFalsePositiveFindings
+ *   5. FP-фильтр (RFC 20, T07): matchesKnownFalsePositive/filterFalsePositiveFindings
  *      на всех находках fixtures/ с changedPaths из diff.patch кейса + литеральные
  *      кейсы паттернов + свой набор (opts.patterns) и пустой набор;
- *   6. FP-семейство 7 (RFC 16, T34): filterFalsePositiveFindings с repoIndex —
+ *   6. FP-семейство 7 (RFC 20, T34): filterFalsePositiveFindings с repoIndex —
  *      фикстуры с repo-files.txt, кейсы test/absent-path.test.mjs и комбинаторный набор
  *      формулировок × путей × границ (Unicode, суррогаты у среза 40, \s JS vs Rust).
  *
@@ -332,6 +332,32 @@ checkResolveBlockers('prescan block off advisory', [{
   model: 'eslint-prescan', prescan: true, prescanBlock: true,
 }], ['a.ts'], { blockOn: ['critical'], blockSingle: ['critical'], consensusMin: 1, confidenceMin: 0.8 },
 { skipFpFilter: true, prescan: { enabled: true, blockEnabled: false, blockRules: ['no-restricted-imports'] } });
+
+// RFC 17: решение блокировки — свойство находки, а не кластера
+checkResolveBlockers('rfc17 neighbour minor not blocker', [
+  { file: 'a.ts', line: 10, severity: 'minor', confidence: 0.3, title: 'нейминг', model: 'm1' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.9, title: 'инъекция', model: 'm1' },
+], ['a.ts'], GATES.default, { skipFpFilter: true });
+checkResolveBlockers('rfc17 neighbour confidence no lift', [
+  { file: 'a.ts', line: 10, severity: 'critical', confidence: 0.5, title: 'шаткий', model: 'm1' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.95, title: 'уверенный', model: 'm1' },
+], ['a.ts'], GATES.default, { skipFpFilter: true });
+checkResolveBlockers('rfc17 eslint non-block via neighbour', [
+  { file: 'a.ts', line: 10, severity: 'major', confidence: 1, title: 'eslint: no-unused-vars', model: 'eslint-prescan', prescan: true, prescanBlock: false },
+  { file: 'a.ts', line: 11, severity: 'minor', confidence: 0.4, title: 'перенесённый', model: 'm1', carried: true },
+], ['a.ts'], GATES.default, { skipFpFilter: true, prescan: { enabled: true, blockEnabled: true, blockRules: ['no-restricted-imports'] } });
+checkResolveBlockers('rfc17 strict per finding', [
+  { file: 'a.ts', line: 10, severity: 'major', confidence: 0.9, title: 'не проверен', model: 'm1' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.9, title: 'проверен', model: 'm1', verifierStatus: 'verified' },
+], ['a.ts'], GATES.strict, { skipFpFilter: true });
+checkResolveBlockers('rfc17 blast beside llm', [
+  { file: 'a.ts', line: 10, severity: 'major', confidence: 0.9, title: 'caller', model: 'blast', source: 'blast-radius' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.9, title: 'llm', model: 'm1' },
+], ['a.ts'], GATES.default, { skipFpFilter: true });
+checkResolveBlockers('rfc17 consensus2 neighbours', [
+  { file: 'a.ts', line: 10, severity: 'major', confidence: 0.9, title: 'x', model: 'm1' },
+  { file: 'a.ts', line: 11, severity: 'major', confidence: 0.7, title: 'x', model: 'm2' },
+], ['a.ts'], GATES.consensus2, { skipFpFilter: true });
 
 // ---------------------------------------------------------------------------
 // Корпус 3: fingerprint / attachFingerprints / filterStalePriorFindings

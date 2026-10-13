@@ -1,0 +1,35 @@
+{
+  "id": "orakul-217-refactor-server-ai-makeauditentry-217",
+  "type": "tp",
+  "tags": [],
+  "description": "#217 «refactor(server): общие хелперы AI-запроса + makeAuditEntry (дедуп без новых абстракций-протечек) (#217)» — дефект, который потом исправил #245",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "7c2a22ef01d79e906f886a9441fe5886ccfdb8fd",
+    "base": "4cb13f3700a035435afdd2aa8abf8741da4c649f",
+    "ref": "#217",
+    "fixes": [
+      {
+        "sha": "dd1efecddd3fc4d2e3fdac39aa593f24855b1085",
+        "ref": "#245",
+        "title": "fix: удаление поставщика (#235) + сворачивание категорий в Техкартах (#234) (#245)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 118 строк в 7 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/server/records.ts",
+        "lines": [
+          379,
+          379
+        ]
+      }
+    ]
+  }
+}

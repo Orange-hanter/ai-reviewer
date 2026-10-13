@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "file": "server/orders.ts",
+      "line": 10,
+      "severity": "minor",
+      "confidence": 0.3,
+      "title": "имя переменной sql слишком общее",
+      "body": "nit по неймингу",
+      "model": "m1"
+    },
+    {
+      "file": "server/orders.ts",
+      "line": 11,
+      "severity": "major",
+      "confidence": 0.9,
+      "title": "SQL-инъекция через конкатенацию id",
+      "body": "id без параметризации",
+      "model": "m1"
+    }
+  ]
+}

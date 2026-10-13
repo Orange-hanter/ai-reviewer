@@ -380,9 +380,9 @@ pub struct GithubConfig {
     /// `cfg.httpRetries` (`REVIEW_HTTP_RETRIES`, дефолт 3). `0` — валидное значение
     /// «без ретраев», поэтому дефолт подставляется только при отсутствии поля.
     pub http_retries: u32,
-    /// `cfg.feedback.trustedAuthors` (`REVIEW_FEEDBACK_TRUSTED_AUTHORS`): чьи
-    /// комментарии с маркером движок считает своими. Пустой список — доверять всем
-    /// (тот же явный отказ, что у harvest и auto-triage).
+    /// `cfg.github.trustedAuthors` (`REVIEW_TRUSTED_AUTHORS`, алиас
+    /// `REVIEW_FEEDBACK_TRUSTED_AUTHORS`): чьи комментарии с маркером движок считает
+    /// своими. Пустой список — доверять всем (явный откат `REVIEW_TRUSTED_AUTHORS=`).
     pub trusted_authors: Vec<String>,
 }
 
@@ -434,7 +434,12 @@ impl GithubConfig {
                 .and_then(Value::as_u64)
                 .map(|n| n as u32)
                 .unwrap_or(d.http_retries),
-            trusted_authors: parse_trusted_authors(cfg.pointer("/feedback/trustedAuthors")),
+            // `ghCfg.trustedAuthors ?? parseTrustedAuthors()`: самодельный cfg без поля
+            // получает дефолт, а не «доверять всем».
+            trusted_authors: match cfg.pointer("/github/trustedAuthors").and_then(Value::as_array) {
+                Some(arr) => arr.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+                None => parse_trusted_authors(None),
+            },
         }
     }
 }
@@ -550,7 +555,7 @@ impl RealGithubClient {
     }
 
 /// Комментарий наш: тело начинается с маркера И автор доверенный
-    /// (`isOwnComment` в lib/github.mjs).
+    /// (`isOwnBotComment` в lib/github.mjs).
     ///
     /// SEC-T11: маркер — публичная строка, и любой участник PR может начать с неё
     /// свой комментарий. Без проверки автора поддельный футер уезжал в prior
@@ -568,9 +573,32 @@ impl RealGithubClient {
         is_trusted_review_author(login, &self.cfg.trusted_authors, user)
     }
 
-    /// `[...comments].reverse().find((c) => isOwnComment(c, MARKERS.review))`.
+    /// `pickOwnSticky` (lib/github.mjs): последний свой sticky; комментарии с маркером
+    /// от чужих авторов — в лог и мимо.
     fn find_sticky<'a>(&self, comments: &'a [Value]) -> Option<&'a Value> {
-        comments.iter().rev().find(|c| self.is_own(c, &self.markers.review))
+        let body_of = |c: &Value| c.get("body").and_then(Value::as_str).unwrap_or("").to_string();
+        let marked: Vec<&Value> =
+            comments.iter().filter(|c| has_marker(&body_of(c), &self.markers.review)).collect();
+        let own = marked.iter().rev().find(|c| self.is_own(c, &self.markers.review)).copied();
+        let mut who: Vec<String> = Vec::new();
+        for c in marked.iter().filter(|c| !self.is_own(c, &self.markers.review)) {
+            let login = c
+                .pointer("/user/login")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("?")
+                .to_string();
+            if !who.contains(&login) {
+                who.push(login);
+            }
+        }
+        if !who.is_empty() {
+            self.log(&format!(
+                "sticky-маркер в комментариях недоверенных авторов ({}) — игнорирую",
+                who.join(", ")
+            ));
+        }
+        own
     }
 
     /// Лента issue-комментариев PR — общий источник sticky для трёх методов.
@@ -728,6 +756,7 @@ impl GithubApi for RealGithubClient {
     fn delete_stale_inline(&self, opts: &DeleteStaleOpts) -> Result<usize> {
         let mut removed = 0usize;
         let mut kept = 0usize;
+        let mut foreign = 0usize;
         // Весь блок под одним «catch»: чистка не критична (`lib/github.mjs:178`).
         let outcome = (|| -> Result<()> {
             let comments = self.gh_list_call(&format!(
@@ -739,7 +768,13 @@ impl GithubApi for RealGithubClient {
                 .filter_map(|c| c.get("in_reply_to_id").and_then(Value::as_u64))
                 .collect();
             for c in &comments {
+                let body = c.get("body").and_then(Value::as_str).unwrap_or("");
+                if !has_marker(body, &self.markers.inline) {
+                    continue;
+                }
+                // `isForeignInline`: маркер есть, автор чужой — не удаляем и сообщаем.
                 if !self.is_own(c, &self.markers.inline) {
+                    foreign += 1;
                     continue;
                 }
                 // Только что запощенный review (post-then-delete: при сбое постинга
@@ -770,6 +805,9 @@ impl GithubApi for RealGithubClient {
         }
         if kept > 0 {
             self.log(&format!("старых инлайн-тредов с ответами оставлено: {kept}"));
+        }
+        if foreign > 0 {
+            self.log(&format!("инлайнов с маркером от недоверенных авторов не тронуто: {foreign}"));
         }
         Ok(removed)
     }

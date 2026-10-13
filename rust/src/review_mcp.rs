@@ -1,5 +1,5 @@
 //! Ревью-MCP — порт `lib/review-mcp.mjs`, `lib/review-mcp-handshake.mjs` и
-//! `lib/review-mcp-tools.mjs` (RFC 16, задача T41; RFC 08–12).
+//! `lib/review-mcp-tools.mjs` (RFC 20, задача T41; RFC 08–12).
 //!
 //! Превью для агента, не merge-гейт: GitHub не трогается (немой клиент вместо
 //! настоящего), exit по блокерам не бывает, structure не импортируется.

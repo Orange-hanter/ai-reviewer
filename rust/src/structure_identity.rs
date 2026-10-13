@@ -1,4 +1,4 @@
-//! Порт lib/structure-identity.mjs (RFC 16, T18): сверка идентичности сущностей
+//! Порт lib/structure-identity.mjs (RFC 20, T18): сверка идентичности сущностей
 //! между прошлым и текущим structure_facts-снимком.
 //!
 //! `reconcile_identity(current, previous)` → `{entities, events}`:

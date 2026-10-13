@@ -1,0 +1,35 @@
+{
+  "id": "orakul-242-ci-pr-review-242",
+  "type": "tp",
+  "tags": [],
+  "description": "#242 «ci(pr-review): меньшие чанки + параллелизм + асимметричный гейт (#242)» — дефект, который потом исправил #491",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "412c559e9bbb03bf0f64b4fb0aa52fc1bdf513a4",
+    "base": "04d736009ff8b88887bbead10c2aab146505ef90",
+    "ref": "#242",
+    "fixes": [
+      {
+        "sha": "f54105c1a63eef3d8578c4fae07aa76a9eef4d50",
+        "ref": "#491",
+        "title": "feat(ci): AI review gate — fail-closed при полном LLM-аутедже"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 175 строк в 2 файл(ах)",
+      "локации: строки, удалённые фиксом, найдены git blame на родителе фикса в этой единице и сопоставлены по тексту с добавленными ею"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": ".github/workflows/pr-review.yml",
+        "lines": [
+          6,
+          6
+        ]
+      }
+    ]
+  }
+}

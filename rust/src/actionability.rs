@@ -14,7 +14,7 @@
 //!   его исходник приходит аргументом (как MARKERS в findings), компилируется
 //!   с `(?i)` (профиль собирает `new RegExp(raw, 'i')`). Поле профиля пишет
 //!   потребитель в диалекте JS RegExp, поэтому оно компилируется `fancy-regex`
-//!   (RFC 16, решение 4): lookahead и прочий backtracking-синтаксис поддержаны,
+//!   (RFC 20, решение 4): lookahead и прочий backtracking-синтаксис поддержаны,
 //!   «мягкой» деградации на JS больше нет. Базовый регекс движка остаётся на
 //!   крейте `regex` — он наш, линейный и в backtracking не нуждается.
 //!   Отличия семантики fancy-regex от JS RegExp разобраны в `crate::fp_patterns`.
@@ -726,7 +726,7 @@ mod tests {
 
     #[test]
     fn sensitive_source_supports_lookahead() {
-        // RFC 16, решение 4: layout.sensitive — данные потребителя, компилируется
+        // RFC 20, решение 4: layout.sensitive — данные потребителя, компилируется
         // fancy-regex, поэтому JS-синтаксис с lookahead больше не роняет бинарь
         // (раньше это включало «мягкую» деградацию обёртки на чистый JS).
         let ctx = ScoreCtxArg {

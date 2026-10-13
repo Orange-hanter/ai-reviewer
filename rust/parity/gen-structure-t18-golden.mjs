@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Генератор эталонов T18 (RFC 16): прогоняет JS reconcileIdentity и
+// Генератор эталонов T18 (RFC 20): прогоняет JS reconcileIdentity и
 // buildStructureContext на пейлоадах из fixtures/structure/ (обогащённых
 // сущностями/рёбрами/сценариями) и пишет вход + выход в
 // rust/parity/golden-structure/t18.json. Rust-тесты structure_identity:: и
