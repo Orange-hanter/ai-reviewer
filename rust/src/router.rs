@@ -234,6 +234,21 @@ pub fn format_route_log(route: &RouteResult) -> String {
 mod tests {
     use super::*;
 
+    // Строки — только по `\n`: `\r`, U+2028/2029 внутри строки кода автора PR не начинают
+    // новую строку (в JS с флагом `/m` начинали, и правка уходила в skip как rename-only).
+    fn sep_section(path: &str, body: &str) -> String {
+        format!("diff --git a/{path} b/{path}\nindex 1..2 100644\n--- a/{path}\n+++ b/{path}\n@@ -1,1 +1,2 @@\n ctx\n{body}\n")
+    }
+
+    #[test]
+    fn similarity_за_разделителем_в_строке_кода_не_делает_rename_only() {
+        for sep in ["\r", "\u{2028}", "\u{2029}"] {
+            let diff = sep_section("app/server/auth.ts", &format!("-  return check(user);\n+  return true; //{sep}similarity index 100%"));
+            let r = route_diff(&["app/server/auth.ts".to_string()], &diff, true);
+            assert_eq!(r.route, "full", "{sep:?}: {}", r.reason);
+        }
+    }
+
     #[test]
     fn classify_file_path_classes() {
         assert_eq!(classify_file_path("package-lock.json"), "skip");

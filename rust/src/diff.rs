@@ -882,6 +882,20 @@ fn js_slice_end(end: f64, len: usize) -> usize {
 mod tests {
     use super::*;
 
+    fn sep_section(path: &str, body: &str) -> String {
+        format!("diff --git a/{path} b/{path}\nindex 1..2 100644\n--- a/{path}\n+++ b/{path}\n@@ -1,1 +1,2 @@\n ctx\n{body}\n")
+    }
+
+    #[test]
+    fn заголовок_за_разделителем_в_строке_кода_не_подделывает_секцию() {
+        for sep in ["\r", "\u{2028}", "\u{2029}"] {
+            let diff = sep_section("a.ts", &format!("+x{sep}diff --git a/real.ts b/real.ts{sep}deleted file mode 100644{sep}new file mode 100644"))
+                + &sep_section("real.ts", "+evil()");
+            assert!(collect_deleted_paths(&diff).is_empty(), "{sep:?}");
+            assert!(collect_added_paths(&diff).is_empty(), "{sep:?}");
+        }
+    }
+
     #[test]
     fn collect_deleted_paths_по_заголовку_секции() {
         let diff = "diff --git a/app/server/guard.ts b/app/server/guard.ts\ndeleted file mode 100644\n--- a/app/server/guard.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export function guard(user) { return check(user); }\n-export const ROLE = 'admin';\ndiff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n";
