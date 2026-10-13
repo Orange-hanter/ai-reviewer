@@ -1392,6 +1392,42 @@ fn empty_blast(
     }
 }
 
+/// Причины сбоя запроса `graphify affected` (`QUERY_FAILURE_REASONS`, `lib/graphify.mjs:299`).
+/// Порядок значим: при сплошном сбое возвращается первая по этому списку.
+const QUERY_FAILURE_REASONS: [&str; 3] = ["graphify_unavailable", "graphify_timeout", "graphify_error"];
+
+/// `blastUnavailableReason` (`lib/graphify.mjs:301-321`, RFC 16): причина, по которой
+/// blast-radius НЕ посчитан (инфра-сбой), или `None`.
+///
+/// Для `REVIEW_BLAST_REQUIRED=1` отличает «граф есть, зависимых нет» от «графа нет».
+/// Устаревший граф и неразрешённые символы — не сбой: blast посчитан, хоть и неполно.
+/// Клиент старого API (`client_did_not_report`) метрик не даёт — судить не о чем.
+pub fn blast_unavailable_reason(metrics: Option<&BlastMetrics>) -> Option<&'static str> {
+    let m = metrics?;
+    if m.skip_reason == "client_did_not_report" {
+        return None;
+    }
+    if m.graph_status == "missing" {
+        return Some("graph_missing");
+    }
+    let count = |r: &str| m.skip_reasons.get(r).copied().unwrap_or(0);
+    if count("graph_enrichment_unavailable") > 0 {
+        return Some("graph_unreadable");
+    }
+    let total = m.symbols_total as u64;
+    let failed: u64 = QUERY_FAILURE_REASONS.iter().map(|r| count(r)).sum();
+    if total > 0 && failed >= total {
+        return Some(
+            QUERY_FAILURE_REASONS
+                .iter()
+                .copied()
+                .find(|r| count(r) > 0)
+                .unwrap_or("graphify_error"),
+        );
+    }
+    None
+}
+
 /// `readFile(path, 'utf8')`: битые байты заменяются, как в Node, а не ломают чтение.
 fn read_text(path: &str) -> Option<String> {
     std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
@@ -2426,5 +2462,62 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(overflow, ExecError::Killed { .. }), "{overflow:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // blast_unavailable_reason (RFC 16)
+    // -----------------------------------------------------------------------
+
+    fn metrics_with(total: usize, status: &str, reasons: &[(&str, u64)]) -> BlastMetrics {
+        let skip_reasons: IndexMap<String, u64> =
+            reasons.iter().map(|(k, v)| (k.to_string(), *v)).collect();
+        BlastMetrics {
+            symbols_total: total,
+            symbols_resolved: Some(0),
+            graph_status: status.to_string(),
+            skip_reason: skip_reason_of(&skip_reasons),
+            skip_reasons,
+            ..BlastMetrics::default()
+        }
+    }
+
+    #[test]
+    fn blast_unavailable_reason_инфра_сбой_отличается_от_зависимых_нет() {
+        // Порт JS-теста «Graphify: blastUnavailableReason — инфра-сбой отличается от
+        // «зависимых нет»» (test/pr-review.test.mjs:191).
+        assert_eq!(blast_unavailable_reason(None), None);
+        let missing = metrics_with(1, "missing", &[("graph_missing", 1)]);
+        assert_eq!(blast_unavailable_reason(Some(&missing)), Some("graph_missing"));
+        let no_cli = metrics_with(2, "fresh", &[("graphify_unavailable", 2)]);
+        assert_eq!(blast_unavailable_reason(Some(&no_cli)), Some("graphify_unavailable"));
+        let unreadable = metrics_with(1, "fresh", &[("graph_enrichment_unavailable", 1)]);
+        assert_eq!(blast_unavailable_reason(Some(&unreadable)), Some("graph_unreadable"));
+        let no_deps = metrics_with(1, "fresh", &[]);
+        assert_eq!(blast_unavailable_reason(Some(&no_deps)), None, "граф есть, зависимых нет — не сбой");
+        let no_symbols = metrics_with(0, "fresh", &[]);
+        assert_eq!(blast_unavailable_reason(Some(&no_symbols)), None);
+        let old_client = BlastMetrics {
+            skip_reason: "client_did_not_report".into(),
+            graph_status: "unknown".into(),
+            symbols_resolved: None,
+            ..BlastMetrics::default()
+        };
+        assert_eq!(blast_unavailable_reason(Some(&old_client)), None);
+    }
+
+    #[test]
+    fn blast_unavailable_reason_частичный_сбой_и_порядок_причин() {
+        // Сбоем кончились не все символы — blast посчитан частично, не сбой.
+        let partial = metrics_with(3, "fresh", &[("graphify_timeout", 2)]);
+        assert_eq!(blast_unavailable_reason(Some(&partial)), None);
+        // Сплошной сбой из разных причин: первая по QUERY_FAILURE_REASONS, а не по вставке.
+        let mixed = metrics_with(2, "fresh", &[("graphify_error", 1), ("graphify_timeout", 1)]);
+        assert_eq!(blast_unavailable_reason(Some(&mixed)), Some("graphify_timeout"));
+        // Устаревший граф сбоем не считается.
+        let stale = metrics_with(1, "stale", &[("graph_stale", 1)]);
+        assert_eq!(blast_unavailable_reason(Some(&stale)), None);
+        // Нечитаемый граф важнее сбоев запросов.
+        let both = metrics_with(1, "fresh", &[("graphify_error", 1), ("graph_enrichment_unavailable", 1)]);
+        assert_eq!(blast_unavailable_reason(Some(&both)), Some("graph_unreadable"));
     }
 }
