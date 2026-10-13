@@ -638,19 +638,42 @@ fn location_key_aliases(f: &Value, layout: &Layout) -> Vec<String> {
     keys
 }
 
+/// `SEVERITY_RANK[s] ?? 9` (`lib/prescan.mjs`): critical 0 … nit 3, неизвестная — 9.
+fn severity_rank(f: &Value) -> u8 {
+    match f.get("severity").and_then(Value::as_str) {
+        Some("critical") => 0,
+        Some("major") => 1,
+        Some("minor") => 2,
+        Some("nit") => 3,
+        _ => 9,
+    }
+}
+
 /// Убирает LLM-находки в тех же `file|line-bucket`, что уже покрыты prescan
-/// (`dedupeAgainstPrescan`, `lib/prescan.mjs:111-124`).
+/// (`dedupeAgainstPrescan`, `lib/prescan.mjs`).
+///
+/// Покрытие — только prescan-находкой НЕ НИЖЕ по severity (RFC 17): бакет — три строки, а
+/// не тема, и `max-len` рядом ничего не говорит о critical «SQL-инъекция».
 pub fn dedupe_against_prescan(llm_findings: &[Value], prescan_findings: &[Value], layout: &Layout) -> Vec<Value> {
     if prescan_findings.is_empty() {
         return llm_findings.to_vec();
     }
-    let covered: HashSet<String> = prescan_findings
-        .iter()
-        .flat_map(|f| location_key_aliases(f, layout))
-        .collect();
+    let mut covered: HashMap<String, u8> = HashMap::new();
+    for f in prescan_findings {
+        let rank = severity_rank(f);
+        for k in location_key_aliases(f, layout) {
+            let e = covered.entry(k).or_insert(rank);
+            if rank < *e {
+                *e = rank;
+            }
+        }
+    }
     llm_findings
         .iter()
-        .filter(|f| !location_key_aliases(f, layout).iter().any(|k| covered.contains(k)))
+        .filter(|f| {
+            let rank = severity_rank(f);
+            !location_key_aliases(f, layout).iter().any(|k| covered.get(k).is_some_and(|&c| c <= rank))
+        })
         .cloned()
         .collect()
 }
@@ -1059,6 +1082,26 @@ pub(crate) mod tests {
         let llm = vec![json!({"file": "client/x.ts", "line": 11, "severity": "major", "title": "dup", "model": "m1"})];
         assert!(dedupe_against_prescan(&llm, &pre, o.layout()).is_empty());
         assert_eq!(finding_location_key(&json!({"file": "a.ts"})), "a.ts|out");
+    }
+
+    /// RFC 17: prescan-находка ниже по severity не покрывает бакет — critical рядом с
+    /// `max-len` остаётся; равная или выше — покрывает.
+    #[test]
+    fn dedupe_against_prescan_только_не_ниже_по_severity() {
+        let n = neutral();
+        let pre = vec![json!({"file": "a.ts", "line": 10, "severity": "nit", "model": "eslint-prescan"})];
+        let crit = vec![json!({"file": "a.ts", "line": 11, "severity": "critical", "title": "sqli", "model": "m1"})];
+        assert_eq!(dedupe_against_prescan(&crit, &pre, n.layout()).len(), 1);
+        let nit = vec![json!({"file": "a.ts", "line": 11, "severity": "nit", "title": "len", "model": "m1"})];
+        assert!(dedupe_against_prescan(&nit, &pre, n.layout()).is_empty());
+        // в бакете несколько prescan-находок: решает самая высокая
+        let pre2 = vec![
+            json!({"file": "a.ts", "line": 10, "severity": "nit", "model": "eslint-prescan"}),
+            json!({"file": "a.ts", "line": 11, "severity": "major", "model": "ast-grep-prescan"}),
+        ];
+        let major = vec![json!({"file": "a.ts", "line": 11, "severity": "major", "model": "m1"})];
+        assert!(dedupe_against_prescan(&major, &pre2, n.layout()).is_empty());
+        assert_eq!(dedupe_against_prescan(&crit, &pre2, n.layout()).len(), 1);
     }
 
     #[test]

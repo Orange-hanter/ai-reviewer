@@ -596,6 +596,33 @@ pub fn collect_added_paths(diff: &str) -> Vec<String> {
     out
 }
 
+/// `collectDeletedPaths` (`lib/diff.mjs`, RFC 17): пути, удалённые этим PR. Ключ — b-путь из
+/// `diff --git`, под которым `parse_diff` кладёт файл в `files`. Читатель — prescan: линтеру
+/// нечего проверять в файле, которого в рабочем дереве уже нет.
+///
+/// Признак — только `deleted file mode` в ЗАГОЛОВКЕ секции (до первого `@@ `): добавленная
+/// строка `++ /dev/null` в хунке выглядит как `+++ /dev/null`, и живой файл выпал бы из
+/// prescan — обход blockRules.
+pub fn collect_deleted_paths(diff: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for seg in split_file_segments(diff) {
+        let deleted = seg
+            .split('\n')
+            .take_while(|l| !l.starts_with("@@ "))
+            .any(|l| l.starts_with("deleted file mode "));
+        if !deleted {
+            continue;
+        }
+        let path = first_line_starting_with(&seg, "diff --git ").and_then(parse_diff_git_path).filter(|p| !p.is_empty());
+        if let Some(p) = path {
+            if !out.contains(&p) {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
 /// Собрать чанки для LLM: разрез аннотированного диффа по бюджету с картой видимости файлов.
 #[allow(unused_assignments)] // финальный flush в конце цикла «зря» обнуляет состояние — как в JS
 pub fn build_chunks(
@@ -854,6 +881,16 @@ fn js_slice_end(end: f64, len: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collect_deleted_paths_по_заголовку_секции() {
+        let diff = "diff --git a/app/server/guard.ts b/app/server/guard.ts\ndeleted file mode 100644\n--- a/app/server/guard.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export function guard(user) { return check(user); }\n-export const ROLE = 'admin';\ndiff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n";
+        assert_eq!(collect_deleted_paths(diff), vec!["app/server/guard.ts"]);
+        // `++ /dev/null` и даже `deleted file mode` внутри хунка — содержимое, не заголовок
+        let forged = "diff --git a/server/auth.ts b/server/auth.ts\n--- a/server/auth.ts\n+++ b/server/auth.ts\n@@ -1,2 +1,5 @@\n const a = 1;\n+/*\n+++ /dev/null\n+*/\ndeleted file mode 100644\n";
+        assert!(collect_deleted_paths(forged).is_empty());
+        assert!(collect_deleted_paths("").is_empty());
+    }
 
     const SAMPLE_DIFF: &str = "diff --git a/foo.ts b/foo.ts\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1,2 +1,3 @@\n const a = 1;\n-const b = 2;\n+const b = 3;\n+export function foo() { return a; }\n";
 
