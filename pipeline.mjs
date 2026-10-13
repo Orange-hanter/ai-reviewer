@@ -856,6 +856,25 @@ export function createReviewPipeline(cfg, deps = {}) {
         ? `⏱ Тайм-бюджет исчерпан: ${skippedChunks} из ${chunks.length} частей не ревьюились — охват частичный, перезапустите ревью.`
         : ''].filter(Boolean).join(' ');
       const ok = reviews.filter((r) => !r.error);
+      // Покрытие по чанкам (RFC 19). Чанк покрыт, если его отревьюила хоть одна модель.
+      // Агрегат собирается из успешных чанков, поэтому без этого счёта «7 из 10 частей»
+      // выглядело как полный прогон, а файлы упавших частей попадали в инкрементальный state
+      // как просмотренные — и не ревьюились больше никогда, пока не изменятся.
+      const chunkCovered = (ci) => ok.some((r) => !(r.failedChunks || []).includes(ci)
+        && !(r.skippedChunkIndexes || []).includes(ci));
+      const uncoveredChunks = ok.length ? chunks.map((_, ci) => ci).filter((ci) => !chunkCovered(ci)) : [];
+      // Сбой, а не тайм-бюджет: хоть одна модель упала на этом чанке. Перезапуск лечит —
+      // поэтому это degraded по REVIEW_LLM_REQUIRED; пропуск по тайм-бюджету — заметка (см. note).
+      const failedUncovered = uncoveredChunks.filter((ci) => ok.some((r) => (r.failedChunks || []).includes(ci)));
+      const uncoveredPaths = new Set(uncoveredChunks.flatMap((ci) => chunks[ci]?.paths || []));
+      if (failedUncovered.length) {
+        log(`покрытие: ${failedUncovered.length} из ${chunks.length} частей не отревьюены из-за сбоя модели`, [...new Set(failedUncovered.flatMap((ci) => chunks[ci]?.paths || []))]);
+        obs.logEvent('coverage_gap', {
+          failed: failedUncovered.length,
+          total: chunks.length,
+          paths: [...new Set(failedUncovered.flatMap((ci) => chunks[ci]?.paths || []))].slice(0, 20),
+        });
+      }
       const llmFindings = ok.flatMap((r) => r.findings);
       let allFindings = [
         ...prescanResult.findings,
@@ -1043,7 +1062,15 @@ export function createReviewPipeline(cfg, deps = {}) {
       const verifierUnavailable = gateResolution.verifierUnavailable
         ? { ...gateResolution.verifierUnavailable, blocked: Boolean(gate.llmRequired) }
         : null;
-      const degradedBlock = Boolean(verifierUnavailable?.blocked);
+      // Части PR, не отревьюенные из-за сбоя модели (RFC 19), — тот же рычаг.
+      const coverageGap = failedUncovered.length
+        ? { failed: failedUncovered.length, total: chunks.length, blocked: Boolean(gate.llmRequired) }
+        : null;
+      const degradedBlock = Boolean(verifierUnavailable?.blocked || coverageGap?.blocked);
+      const degradedWhy = [
+        verifierUnavailable ? `verifier недоступен (${verifierUnavailable.reason}), не проверено ${verifierUnavailable.unverified}` : '',
+        coverageGap ? `не отревьюено ${coverageGap.failed} из ${coverageGap.total} частей PR (сбой модели)` : '',
+      ].filter(Boolean).join('; ');
       const wouldBlock = blockers.length > 0 || degradedBlock;
       if (fpRemoved.length) {
         log(`ложных находок отфильтровано: ${fpRemoved.length}`);
@@ -1054,6 +1081,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         wouldBlock,
         blockers: blockers.length,
         ...(verifierUnavailable ? { verifierUnavailable } : {}),
+        ...(coverageGap ? { coverageGap } : {}),
         sample: slimFindings(blockers),
       });
       logFindingsStage(obs, 'after_gate', allFindings);
@@ -1072,7 +1100,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       });
       const { md, counts, total, delta, verdict } = buildSummary(cfg, {
         reviews, ok, allFindings, outside, blastBlocks, blastMetrics, files, pr, headSha, note, blockerClusters,
-        verifierStats, refutationStats, prescanResult, fpRemoved, verifierUnavailable,
+        verifierStats, refutationStats, prescanResult, fpRemoved, verifierUnavailable, coverageGap,
         // Δ считаем против ПОЛНОГО набора прошлого прогона, а не против отфильтрованного
         // carry-over: «закрыто» — это то, что ушло из отчёта, включая снятое инвалидацией.
         priorFindings: priorSticky.findings, priorRuns: priorSticky.runs, priorSha: priorSticky.sha,
@@ -1104,9 +1132,14 @@ export function createReviewPipeline(cfg, deps = {}) {
         // а её файл не получает хэш: перенос считает находку прошедшей verifier и заново её не
         // проверяет. Иначе «перезапустите ревью» после degraded-блока переносил бы непроверенный
         // critical как minor без LLM и без verifier — и merge проходил бы.
-        const unverifiedPaths = new Set(allFindings
-          .filter((f) => f.verifierStatus === 'unavailable' || f.verifierStatus === 'overflow')
-          .map((f) => f.file));
+        // То же для файлов частей PR, которые не отревьюила ни одна модель (сбой или тайм-бюджет,
+        // RFC 19): без хэша следующий прогон ревьюит их, а не считает просмотренными.
+        const unverifiedPaths = new Set([
+          ...allFindings
+            .filter((f) => f.verifierStatus === 'unavailable' || f.verifierStatus === 'overflow')
+            .map((f) => f.file),
+          ...uncoveredPaths,
+        ]);
         const carryable = allFindings.filter((f) => !f.prescan && f.source !== BLAST_FINDING_SOURCE
           && !unverifiedPaths.has(f.file));
         if (unverifiedPaths.size) log(`инкрементальность: ${unverifiedPaths.size} файл(ов) с непроверенными verifier'ом находками — в следующем прогоне ревьюятся заново`);
@@ -1132,7 +1165,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         log(blockers.length
           ? `⛔ WOULD BLOCK merge: ${blockers.length} кластер(ов) × ${gate.blockOn.join('/')}`
           : degradedBlock
-            ? `⛔ WOULD BLOCK merge: verifier недоступен (${verifierUnavailable.reason}), не проверено ${verifierUnavailable.unverified}`
+            ? `⛔ WOULD BLOCK merge (degraded): ${degradedWhy}`
             : `✅ не блокирует (${reviewMode === 'moa' ? 'MoA-aggregator' : `консенсус ≥${gate.consensusMin}`})`);
         log('\n--- INLINE COMMENTS ---');
         for (const c of inline) log(`${c.path}:${c.line}\n  ${c.body.split('\n').slice(0, 2).join(' / ')}`);
@@ -1142,7 +1175,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           exitCode, dryRun: true, wouldBlock, blockers: blockers.length, total, counts, inline: inline.length,
           ...(degradedBlock ? { degraded: true } : {}),
         };
-        return detailedResult(exitCode, { wouldBlock, ...(degradedBlock ? { degraded: true, reason: 'verifier unavailable' } : {}) });
+        return detailedResult(exitCode, { wouldBlock, ...(degradedBlock ? { degraded: true, reason: degradedWhy } : {}) });
       }
 
       const pub = await publishReview(github, { inline, md, headSha, maxInline: limits.maxInline }, log);
@@ -1176,9 +1209,9 @@ export function createReviewPipeline(cfg, deps = {}) {
         return detailedResult(1, { wouldBlock: true });
       }
       if (degradedBlock) {
-        log(`⛔ merge ЗАБЛОКИРОВАН (degraded): verifier недоступен (${verifierUnavailable.reason}), не проверено ${verifierUnavailable.unverified} — перезапустите ревью`);
+        log(`⛔ merge ЗАБЛОКИРОВАН (degraded): ${degradedWhy} — перезапустите ревью`);
         finalObs = { exitCode: 1, wouldBlock: true, degraded: true, blockers: 0, total, counts, inline: inline.length };
-        return detailedResult(1, { wouldBlock: true, degraded: true, reason: 'verifier unavailable' });
+        return detailedResult(1, { wouldBlock: true, degraded: true, reason: degradedWhy });
       }
       log(`готово — блокеров нет (${reviewMode}).`);
       finalObs = { exitCode: 0, wouldBlock: false, blockers: 0, total, counts, inline: inline.length };
