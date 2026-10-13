@@ -13,6 +13,12 @@ audience: [next-session-agent, maintainers]
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
 
+## 2026-10-13 — 0.5.1
+
+**Сделано:** релиз `v0.5.1` — версия в `package.json`, бейдж и пример пина в README, пин `examples/consumers/orakul/ai-reviewer-ref`, секция CHANGELOG, тег и GitHub-релиз. Главное — исправление безопасности (PR #45): строка кода автора PR с `\r`/U+2028/U+2029 выдавала правку за rename-only и уводила PR в `skip`. Плюс blast-radius на Python и пути с `_`.
+
+**Почему 0.5.1, а не только 0.5.0:** тег `v0.5.0` так и не был создан, а пин в kit Orakul уже указывал на него — потребитель с таким пином получал несуществующий ref. `v0.5.1` — первый опубликованный тег после `v0.4.0`. Контракты сверены по диффу от `v0.4.0`: `EXPORT_VERSION` = 2, `schemas/` и `lib/constants.mjs` не тронуты.
+
 ## 2026-10-13 — 0.5.0
 
 **Сделано:** релиз `v0.5.0` — версия в `package.json`, бейдж и пример пина в README, пин `examples/consumers/orakul/ai-reviewer-ref`, секция CHANGELOG. Для потребителя: `REVIEW_TRUSTED_AUTHORS` (sticky от PAT/GitHub App — задать логин), шаблон CI ставит `REVIEW_BLAST_REQUIRED=1` и `graphifyy==0.9.87` (без сборки графа — флаг убрать). Формат футера и контракты `swarm` / `export` / `structure` сверены по диффу от `v0.4.0` — без изменений (`EXPORT_VERSION`, маркеры, `-data:` футер не тронуты).
