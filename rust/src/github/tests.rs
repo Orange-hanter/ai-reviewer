@@ -1307,3 +1307,31 @@ fn sec_чужой_sticky_и_инлайн_с_маркером_сообщаютс�
     assert_eq!(c.delete_stale_inline(&DeleteStaleOpts::default()).unwrap(), 0);
     assert_eq!(logs(&logged), vec!["инлайнов с маркером от недоверенных авторов не тронуто: 1"]);
 }
+
+#[test]
+fn обрыв_тела_на_2xx_это_сетевой_сбой_с_ретраем() {
+    // lib/github.mjs ghRaw: `await res.text()` внутри try — обрыв тела даёт
+    // `terminated`, это networky → повтор, а после httpRetries — throw. Пустая
+    // строка вместо ошибки превращала бы обрыв в «комментариев нет» (дубль sticky).
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hits2 = Arc::clone(&hits);
+    std::thread::spawn(move || {
+        for conn in listener.incoming() {
+            let Ok(mut conn) = conn else { break };
+            let mut buf = [0u8; 8192];
+            let _ = conn.read(&mut buf);
+            hits2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200\r\nConnection: close\r\n\r\n[{\"id\":1");
+            let _ = conn.flush();
+            drop(conn);
+        }
+    });
+    let mut req = base_req(&format!("http://{addr}"), "/x");
+    req.http_retries = 1;
+    let err = gh_list(&req).unwrap_err();
+    assert!(err.networky, "{}", err.error);
+    assert_eq!(err.status, None);
+    assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 2, "один повтор");
+}

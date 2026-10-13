@@ -247,7 +247,30 @@ pub fn gh_raw_with(
             .and_then(|h| h.to_str().ok())
             .unwrap_or("")
             .to_string();
-        let text = res.text().unwrap_or_default();
+        // `await res.text()` в JS стоит внутри try: обрыв тела (в т.ч. таймаут на
+        // чтении) — `terminated`/`aborted`, сетевой сбой с тем же ретраем, что у send.
+        // Пустая строка вместо ошибки выдавала бы обрыв за пустую ленту/пустой дифф.
+        let text = match res.text() {
+            Ok(t) => t,
+            Err(e) => {
+                if attempt < req.http_retries {
+                    let wait = backoff_ms(attempt, None);
+                    say(format!(
+                        "GitHub {} {} сетевой сбой ({}) → повтор через {}мс ({}/{})",
+                        req.method,
+                        req.path,
+                        e,
+                        wait,
+                        attempt + 1,
+                        req.http_retries
+                    ));
+                    std::thread::sleep(Duration::from_secs_f64(wait / 1000.0));
+                    attempt += 1;
+                    continue;
+                }
+                return Err(gh_error(e.to_string(), None, true));
+            }
+        };
         if !(200..=299).contains(&status) {
             if is_transient(status) && attempt < req.http_retries {
                 let wait = backoff_ms(attempt, retry_after.as_deref());
