@@ -41,7 +41,7 @@ use crate::config::load_review_config_parts;
 use crate::context_window::{build_verifier_file_contents, window_chunk_file_contents};
 use crate::cost::{efficiency_metrics, CostTracker};
 use crate::diff::{
-    build_chunks, collect_added_paths, collect_blast_symbols, parse_diff, read_changed_files_in, u16_len, Chunk,
+    build_chunks, collect_added_paths, collect_blast_symbols, collect_deleted_paths, parse_diff, read_changed_files_in, u16_len, Chunk,
     ChunkLimits,
 };
 use crate::engine::{prompt_ctx_from_profile, ChunkRouting};
@@ -55,7 +55,7 @@ use crate::fp_patterns::{default_fp_patterns, load_fp_patterns, FpPattern};
 use crate::incremental::{
     build_next_state, config_fingerprint, file_input_hashes, format_incremental_note, plan_incremental,
     read_incremental_state, reuse_prior_cards_input, write_incremental_state, CarryOver, IncrementalPlan,
-    NextStateInput, PlanInput,
+    unverified_paths, NextStateInput, PlanInput,
 };
 use crate::metrics::{count_by_severity, slim_findings};
 use crate::observability::{iso_from_epoch_ms, Observability, ObservabilityConfig, PR_TITLE_LOG_MAX};
@@ -72,7 +72,7 @@ use crate::symbol_cards::{
     LineReader, ReadLines, SymbolCards,
 };
 use crate::traits::{
-    DeleteStaleOpts, InlineComment, ModelReview, PipelineDeps, PostReviewParams, PrescanResult, PullRequestRef,
+    BlastMetrics, DeleteStaleOpts, InlineComment, ModelReview, PipelineDeps, PostReviewParams, PrescanResult, PullRequestRef,
     ReviewContext, StickyData, VerifyContext,
 };
 use crate::triage::{build_triage_context, parse_trusted_authors, run_auto_triage};
@@ -258,6 +258,8 @@ pub struct BeforeResolved {
     pub findings: Vec<Value>,
     pub refutation_stats: Option<Value>,
     pub verifier_stats: Option<Value>,
+    /// `{reason, unverified}` — verifier недоступен (RFC 18).
+    pub verifier_unavailable: Option<Value>,
 }
 
 /// Результат `runGateResolution`. Кластеры и блокеры — индексы в `findings`.
@@ -273,6 +275,7 @@ pub struct GateResolution {
     pub after_fp_count: usize,
     pub refutation_stats: Option<Value>,
     pub verifier_stats: Option<Value>,
+    pub verifier_unavailable: Option<Value>,
 }
 
 /// Хук между FP-фильтром и гейтом: refutation, verifier, перенос (`beforeResolve`).
@@ -355,6 +358,7 @@ pub fn run_gate_resolution(input: GateInput<'_>, before_resolve: Option<&mut Bef
         after_fp_count,
         refutation_stats: intermediate.refutation_stats,
         verifier_stats: intermediate.verifier_stats,
+        verifier_unavailable: intermediate.verifier_unavailable,
     })
 }
 
@@ -514,6 +518,56 @@ struct VerifierStageCtx<'s> {
     prior_keys: &'s HashSet<String>,
     prescan_keys: &'s HashSet<String>,
     symbol_cards: Option<&'s SymbolCards>,
+}
+
+/// Сбои запроса к графу (`QUERY_FAILURE_REASONS`, `lib/graphify.mjs`).
+const QUERY_FAILURE_REASONS: [&str; 3] = ["graphify_unavailable", "graphify_timeout", "graphify_error"];
+
+/// `blastUnavailableReason` (`lib/graphify.mjs`, RFC 16): причина, по которой blast-radius
+/// НЕ посчитан (инфра-сбой), или `None`. Пустой радиус при живом графе — не сбой.
+fn blast_unavailable_reason(m: &BlastMetrics) -> Option<&'static str> {
+    if m.skip_reason == "client_did_not_report" {
+        return None;
+    }
+    if m.graph_status == "missing" {
+        return Some("graph_missing");
+    }
+    let r = |k: &str| m.skip_reasons.get(k).copied().unwrap_or(0);
+    if r("graph_enrichment_unavailable") > 0 {
+        return Some("graph_unreadable");
+    }
+    let failed: u64 = QUERY_FAILURE_REASONS.iter().map(|k| r(k)).sum();
+    if m.symbols_total > 0 && failed >= m.symbols_total as u64 {
+        return Some(QUERY_FAILURE_REASONS.iter().copied().find(|k| r(k) > 0).unwrap_or("graphify_error"));
+    }
+    None
+}
+
+/// `buildBlastUnavailableSummary`: sticky при `REVIEW_BLAST_REQUIRED=1` и непосчитанном
+/// blast-radius (LLM не вызывался).
+fn build_blast_unavailable_summary(review_marker: &str, reason: &str) -> String {
+    format!(
+        "{review_marker}\n## 🤖 Авто код-ревью\n\n⛔ Blast-radius недоступен (`{reason}`): code graph Graphify не построен или не читается.\n\n\
+         <sub>Без графа гейт не видит callers вне диффа — merge заблокирован до LLM-ревью \
+         (fail-closed, `REVIEW_BLAST_REQUIRED=1`). Проверьте шаг сборки графа (`graphify update`), \
+         `GRAPH` и `GRAPHIFY_BIN`; осознанное ослабление — `REVIEW_BLAST_REQUIRED=0`. Детали — в логе CI job.</sub>"
+    )
+}
+
+/// Итог стадии verifier — `{ findings, stats, unavailable }` JS плюс снятые находки.
+struct VerifierStageOut {
+    findings: Vec<Value>,
+    stats: Option<Value>,
+    /// Находки, снятые verifier'ом (rejected), в их последнем состоянии.
+    rejected: Vec<Value>,
+    /// `{reason, unverified}` — verifier недоступен (RFC 18), только в strict-режиме.
+    unavailable: Option<Value>,
+}
+
+impl VerifierStageOut {
+    fn untouched(findings: Vec<Value>) -> Self {
+        Self { findings, stats: None, rejected: Vec::new(), unavailable: None }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -914,7 +968,14 @@ impl<'a> ReviewPipeline<'a> {
                 StickyData::default()
             }
         };
-        let prescan_result: PrescanResult = self.deps.prescan.run(&changed_paths)?;
+        // Удалённым файлам линтер не нужен: их нет в рабочем дереве (RFC 17).
+        let deleted_paths = collect_deleted_paths(&diff);
+        let prescan_paths: Vec<String> = if deleted_paths.is_empty() {
+            changed_paths.clone()
+        } else {
+            changed_paths.iter().filter(|p| !deleted_paths.contains(p)).cloned().collect()
+        };
+        let prescan_result: PrescanResult = self.deps.prescan.run(&prescan_paths)?;
         let symbols = collect_blast_symbols(&changed_text, Some(&content_map), usize_of(lim("maxSymbols")));
         self.log(&format!(
             "файлов: {} · символов под blast-radius: {} {}",
@@ -944,6 +1005,36 @@ impl<'a> ReviewPipeline<'a> {
         let blast_metrics_v = serde_json::to_value(&blast_metrics).unwrap_or(Value::Null);
         let graph_index = blast.graph_index.clone();
         self.log(&format!("prep parallel: {}мс (graphify+files+prior+prescan)", self.now().saturating_sub(prep_t0)));
+        // REVIEW_BLAST_REQUIRED (RFC 16): без code graph гейт не видит callers вне диффа →
+        // fail-closed ДО LLM (тратить токены на ревью, которое всё равно заблокируется, незачем).
+        let blast_failure =
+            if truthy(cfg, &["gate", "blastRequired"]) { blast_unavailable_reason(&blast_metrics) } else { None };
+        if let Some(reason) = blast_failure {
+            self.log(&format!("blast-radius недоступен ({reason}) — fail-closed (REVIEW_BLAST_REQUIRED)"));
+            obs.log_event("blast_failed", &json!({ "reason": reason, "required": true, "blast_radius": blast_metrics_v }));
+            let mut input = Map::new();
+            input.insert("pr".into(), serde_json::to_value(&pr)?);
+            input.insert("headSha".into(), json!(head_sha));
+            input.insert("reviewMode".into(), json!(review_mode));
+            input.insert("route".into(), route_v.clone());
+            input.insert("wouldBlock".into(), json!(true));
+            input.insert("counts".into(), json!({ "critical": 0, "major": 0, "minor": 0, "nit": 0 }));
+            input.insert("total".into(), json!(0));
+            input.insert("findings".into(), json!([]));
+            input.insert("blockers".into(), json!([]));
+            input.insert("reviews".into(), json!([]));
+            input.insert("blastMetrics".into(), blast_metrics_v.clone());
+            input.insert("changedPaths".into(), changed_paths_v.clone());
+            let payload = self.review_json(input)?;
+            self.persist_and_capture(st, obs, payload);
+            st.final_obs = json!({ "exitCode": 1, "wouldBlock": true, "blastFailed": reason, "degraded": true });
+            if !dry_run && post_creds {
+                if let Err(e) = self.deps.github.upsert_sticky(&build_blast_unavailable_summary(&markers.review, reason)) {
+                    self.log(&format!("заметку не запостили: {}", js_slice_utf16(&format!("{e:#}"), 200)));
+                }
+            }
+            return Ok(self.outcome(st, 1, true, true, Some(format!("blast-radius unavailable: {reason}"))));
+        }
 
         // Инвалидация carry-over по отпечаткам ДО LLM: устаревшие prior findings не подмешиваем.
         let prior_files: IndexMap<String, PriorFileRec> = files
@@ -1342,6 +1433,44 @@ impl<'a> ReviewPipeline<'a> {
         .collect::<Vec<_>>()
         .join(" ");
         let ok: Vec<String> = reviews.iter().filter(|r| !review_errored(r)).map(|r| r.model.clone()).collect();
+        // Покрытие по чанкам (RFC 19): чанк покрыт, если его отревьюила хоть одна ok-модель.
+        // Агрегат собирается из успешных чанков, и без этого счёта «7 из 10 частей» выглядело
+        // как полный прогон, а файлы упавших частей попадали в инкрементальный state.
+        let ok_reviews: Vec<&ModelReview> = reviews.iter().filter(|r| !review_errored(r)).collect();
+        let chunk_covered = |ci: usize| {
+            ok_reviews.iter().any(|r| !r.failed_chunks.contains(&ci) && !r.skipped_chunk_indexes.contains(&ci))
+        };
+        let uncovered_chunks: Vec<usize> =
+            if ok_reviews.is_empty() { Vec::new() } else { (0..chunks.len()).filter(|&ci| !chunk_covered(ci)).collect() };
+        // Сбой, а не тайм-бюджет: хоть одна модель упала на этом чанке — degraded по
+        // REVIEW_LLM_REQUIRED; пропуск по тайм-бюджету — заметка (note).
+        let failed_uncovered: Vec<usize> = uncovered_chunks
+            .iter()
+            .copied()
+            .filter(|ci| ok_reviews.iter().any(|r| r.failed_chunks.contains(ci)))
+            .collect();
+        let uncovered_paths: IndexSet<String> =
+            uncovered_chunks.iter().flat_map(|&ci| chunks.get(ci).map(|c| c.paths.clone()).unwrap_or_default()).collect();
+        if !failed_uncovered.is_empty() {
+            let failed_paths: IndexSet<String> = failed_uncovered
+                .iter()
+                .flat_map(|&ci| chunks.get(ci).map(|c| c.paths.clone()).unwrap_or_default())
+                .collect();
+            self.log(&format!(
+                "покрытие: {} из {} частей не отревьюены из-за сбоя модели {}",
+                failed_uncovered.len(),
+                chunks.len(),
+                serde_json::to_string(&failed_paths).unwrap_or_default()
+            ));
+            obs.log_event(
+                "coverage_gap",
+                &json!({
+                    "failed": failed_uncovered.len(),
+                    "total": chunks.len(),
+                    "paths": failed_paths.iter().take(20).collect::<Vec<_>>(),
+                }),
+            );
+        }
         // Находки моделей метятся происхождением: в JS гейт мутирует ТЕ ЖЕ объекты, что лежат
         // в `reviews[].findings`, и walkthrough sticky видит severity после verifier. Метка
         // снимается до любого вывода (write_back_to_reviews).
@@ -1447,13 +1576,13 @@ impl<'a> ReviewPipeline<'a> {
                 self.log_stage(obs, "after_refutation", &current);
                 refutation_stats = Some(stats);
             }
-            let verifier_stats = if any_ok {
-                let (f, s, rejected) = self.run_verifier_stage(current, &vctx, obs);
-                removed_llm.extend(rejected);
-                current = f;
-                s
+            let (verifier_stats, verifier_unavailable) = if any_ok {
+                let out = self.run_verifier_stage(current, &vctx, obs);
+                removed_llm.extend(out.rejected);
+                current = out.findings;
+                (out.stats, out.unavailable)
             } else {
-                None
+                (None, None)
             };
             // Перенесённые находки — ПОСЛЕ refutation и verifier, намеренно: обе стадии они
             // прошли в том прогоне, где были найдены. Пропусти их здесь ещё раз — и strict-
@@ -1463,7 +1592,7 @@ impl<'a> ReviewPipeline<'a> {
                 current = c.append_after_verifier(current);
                 self.log_stage(obs, "after_carry_over", &current);
             }
-            Ok(BeforeResolved { findings: current, refutation_stats, verifier_stats })
+            Ok(BeforeResolved { findings: current, refutation_stats, verifier_stats, verifier_unavailable })
         };
         let gate_res = run_gate_resolution(
             GateInput {
@@ -1481,14 +1610,49 @@ impl<'a> ReviewPipeline<'a> {
         let mut all_findings = std::mem::take(&mut gate_res.findings);
         // Один расчёт отпечатков на прогон: футер sticky, Δ-блок и артефакт — одна величина.
         attach_fingerprints(&mut all_findings, &texts);
+        // Кластер — блокер, если блокирует ЛЮБАЯ его находка (RFC 17): решение — свойство
+        // находки, а не первой в кластере.
         let blocker_clusters = gate_res
             .clusters
             .iter()
-            .filter(|g| g.first().and_then(|&i| all_findings.get(i)).is_some_and(|f| truthy(f, &["consensusBlock"])))
+            .filter(|g| g.iter().any(|&i| all_findings.get(i).is_some_and(|f| truthy(f, &["consensusBlock"]))))
             .count();
         let blocker_idx = gate_res.blockers.clone();
         let refutation_stats = gate_res.refutation_stats.clone().unwrap_or(Value::Null);
         let verifier_stats = gate_res.verifier_stats.clone().unwrap_or(Value::Null);
+        // Verifier не дал вердикта по находкам уровня блока из-за сбоя (RFC 18): находки уже
+        // понижены; блокирует ли прогон — как при аутедже LLM, по REVIEW_LLM_REQUIRED.
+        let verifier_unavailable: Option<Value> = gate_res.verifier_unavailable.clone().map(|v| {
+            let mut m = v.as_object().cloned().unwrap_or_default();
+            m.insert("blocked".into(), json!(llm_required));
+            Value::Object(m)
+        });
+        // Части PR, не отревьюенные из-за сбоя модели (RFC 19), — тот же рычаг.
+        let coverage_gap: Option<Value> = (!failed_uncovered.is_empty())
+            .then(|| json!({ "failed": failed_uncovered.len(), "total": chunks.len(), "blocked": llm_required }));
+        let degraded_block = verifier_unavailable.as_ref().is_some_and(|v| truthy(v, &["blocked"]))
+            || coverage_gap.as_ref().is_some_and(|v| truthy(v, &["blocked"]));
+        let degraded_why = [
+            verifier_unavailable
+                .as_ref()
+                .map(|v| {
+                    format!(
+                        "verifier недоступен ({}), не проверено {}",
+                        string(v, &["reason"]),
+                        get(v, &["unverified"]).map(js_to_string).unwrap_or_default()
+                    )
+                })
+                .unwrap_or_default(),
+            coverage_gap
+                .as_ref()
+                .map(|_| format!("не отревьюено {} из {} частей PR (сбой модели)", failed_uncovered.len(), chunks.len()))
+                .unwrap_or_default(),
+        ]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("; ");
+        let would_block = !blocker_idx.is_empty() || degraded_block;
         if !gate_res.fp_removed.is_empty() {
             self.log(&format!("ложных находок отфильтровано: {}", gate_res.fp_removed.len()));
         }
@@ -1499,10 +1663,17 @@ impl<'a> ReviewPipeline<'a> {
         self.log_stage(obs, "after_fp_filter", &all_findings);
         {
             let b: Vec<Value> = blocker_idx.iter().map(|&i| all_findings[i].clone()).collect();
-            obs.log_event(
-                "gate",
-                &json!({ "wouldBlock": !b.is_empty(), "blockers": b.len(), "sample": slim_findings(Some(&Value::Array(b)), 40) }),
-            );
+            let mut ev = Map::new();
+            ev.insert("wouldBlock".into(), json!(would_block));
+            ev.insert("blockers".into(), json!(b.len()));
+            if let Some(v) = &verifier_unavailable {
+                ev.insert("verifierUnavailable".into(), v.clone());
+            }
+            if let Some(v) = &coverage_gap {
+                ev.insert("coverageGap".into(), v.clone());
+            }
+            ev.insert("sample".into(), slim_findings(Some(&Value::Array(b)), 40));
+            obs.log_event("gate", &Value::Object(ev));
         }
         self.log_stage(obs, "after_gate", &all_findings);
 
@@ -1556,6 +1727,8 @@ impl<'a> ReviewPipeline<'a> {
                 "refutationStats": refutation_stats,
                 "prescanResult": prescan_result_to_value(&prescan_result),
                 "fpRemoved": gate_res.fp_removed,
+                "verifierUnavailable": verifier_unavailable,
+                "coverageGap": coverage_gap,
                 // Δ — против ПОЛНОГО набора прошлого прогона: «закрыто» — всё, что ушло из
                 // отчёта, включая снятое инвалидацией.
                 "priorFindings": prior_sticky.findings,
@@ -1579,7 +1752,7 @@ impl<'a> ReviewPipeline<'a> {
         input.insert("headSha".into(), json!(head_sha));
         input.insert("reviewMode".into(), json!(review_mode));
         input.insert("route".into(), route_v.clone());
-        input.insert("wouldBlock".into(), json!(!blockers.is_empty()));
+        input.insert("wouldBlock".into(), json!(would_block));
         input.insert("verdict".into(), summary.verdict.clone());
         input.insert("counts".into(), counts.clone());
         input.insert("total".into(), json!(total));
@@ -1602,6 +1775,16 @@ impl<'a> ReviewPipeline<'a> {
         // Состояние следующего прогона — итоговый набор, видимый человеку (без prescan и
         // blast: они детерминированы и пересчитываются каждый раз).
         if incremental_on {
+            // Находка, до которой verifier не дошёл (RFC 17/18), и файлы непокрытых чанков
+            // (RFC 19) не переносятся, а их файлы не получают хэш: иначе «перезапустите ревью»
+            // после degraded-блока перенёс бы непроверенный critical как minor без LLM.
+            let unverified = unverified_paths(&all_findings, &uncovered_paths);
+            if !unverified.is_empty() {
+                self.log(&format!(
+                    "инкрементальность: {} файл(ов) с непроверенными verifier'ом находками — в следующем прогоне ревьюятся заново",
+                    unverified.len()
+                ));
+            }
             let next = build_next_state(NextStateInput {
                 pr_number: &json!(pr.number),
                 head_sha: &head_sha,
@@ -1613,12 +1796,12 @@ impl<'a> ReviewPipeline<'a> {
                 cards_targets: cards_targets.as_ref(),
                 cards_input_reused,
                 findings: &all_findings,
+                unverified_paths: Some(&unverified),
             });
             let mut log = |s: &str| self.log(s);
             write_incremental_state(Some(Path::new(&state_file)), &next, &mut log);
         }
 
-        let would_block = !blockers.is_empty();
         if dry_run {
             self.log("=== DRY-RUN: вывод не постится ===");
             self.log(&format!(
@@ -1627,8 +1810,10 @@ impl<'a> ReviewPipeline<'a> {
                 inline.len(),
                 outside.len()
             ));
-            self.log(&if would_block {
+            self.log(&if !blockers.is_empty() {
                 format!("⛔ WOULD BLOCK merge: {} кластер(ов) × {}", blockers.len(), block_on.join("/"))
+            } else if degraded_block {
+                format!("⛔ WOULD BLOCK merge (degraded): {degraded_why}")
             } else if review_mode == "moa" {
                 "✅ не блокирует (MoA-aggregator)".to_string()
             } else {
@@ -1645,6 +1830,12 @@ impl<'a> ReviewPipeline<'a> {
                 "exitCode": exit, "dryRun": true, "wouldBlock": would_block, "blockers": blockers.len(),
                 "total": total, "counts": counts, "inline": inline.len(),
             });
+            if degraded_block {
+                if let Some(o) = st.final_obs.as_object_mut() {
+                    o.insert("degraded".into(), json!(true));
+                }
+                return Ok(self.outcome(st, exit, would_block, true, Some(degraded_why)));
+            }
             return Ok(self.outcome(st, exit, would_block, false, None));
         }
 
@@ -1674,13 +1865,21 @@ impl<'a> ReviewPipeline<'a> {
 
         self.notify(&pr, &counts, total, None);
 
-        if would_block {
+        if !blockers.is_empty() {
             self.log(&format!("⛔ merge ЗАБЛОКИРОВАН: {} кластер(ов) уровня {}", blockers.len(), block_on.join("/")));
             st.final_obs = json!({
                 "exitCode": 1, "wouldBlock": true, "blockers": blockers.len(), "total": total,
                 "counts": counts, "inline": inline.len(),
             });
             return Ok(self.outcome(st, 1, true, false, None));
+        }
+        if degraded_block {
+            self.log(&format!("⛔ merge ЗАБЛОКИРОВАН (degraded): {degraded_why} — перезапустите ревью"));
+            st.final_obs = json!({
+                "exitCode": 1, "wouldBlock": true, "degraded": true, "blockers": 0, "total": total,
+                "counts": counts, "inline": inline.len(),
+            });
+            return Ok(self.outcome(st, 1, true, true, Some(degraded_why)));
         }
         self.log(&format!("готово — блокеров нет ({review_mode})."));
         st.final_obs = json!({
@@ -1864,26 +2063,53 @@ impl<'a> ReviewPipeline<'a> {
         Ok(self.outcome(st, exit, gate_blocked, true, Some("llm unavailable".into())))
     }
 
-    /// Verifier Pass B (`runVerifierStage`): кандидаты critical/major + доказуемые advisory.
-    /// Fail-open: сбой LLM оставляет находки как есть.
-    /// Третий элемент — находки, снятые verifier'ом (rejected), в их последнем состоянии.
-    fn run_verifier_stage(
-        &self,
-        mut all: Vec<Value>,
-        c: &VerifierStageCtx<'_>,
-        obs: &Observability,
-    ) -> (Vec<Value>, Option<Value>, Vec<Value>) {
+    /// `markVerifierUnavailable` (RFC 18): verifier не дал вердикта по находкам уровня блока
+    /// из-за сбоя (исключение первого вызова, ни одного валидного вердикта, тайм-бюджет).
+    /// Такая находка не может считаться подтверждённым блокером — понижается до minor с
+    /// `verifierStatus: unavailable`; судьбу прогона решает REVIEW_LLM_REQUIRED в гейте.
+    fn mark_verifier_unavailable(&self, all: &mut [Value], pending: &[usize], reason: &str, obs: &Observability) -> Value {
+        for &i in pending {
+            let Some(o) = all.get_mut(i).and_then(Value::as_object_mut) else { continue };
+            let was = o.get("severity").map(js_to_string).unwrap_or_else(|| "undefined".into());
+            o.insert(
+                "verifierReason".into(),
+                json!(format!("verifier недоступен ({reason}) — было {was}, понижено до minor")),
+            );
+            o.insert("severity".into(), json!("minor"));
+            o.insert("verifierStatus".into(), json!("unavailable"));
+        }
+        self.log(&format!(
+            "verifier недоступен ({reason}): {} находок уровня блока не проверены → minor",
+            pending.len()
+        ));
+        obs.log_event("verifier_unavailable", &json!({ "reason": reason, "unverified": pending.len() }));
+        json!({ "reason": reason, "unverified": pending.len() })
+    }
+
+    /// Verifier Pass B (`runVerifierStage`): кандидаты critical/major + доказуемые advisory,
+    /// батчами (RFC 17). Сбой судит только strict-режим ([`Self::mark_verifier_unavailable`]);
+    /// при REVIEW_VERIFIER_STRICT=0 находки без вердикта остаются как есть.
+    fn run_verifier_stage(&self, mut all: Vec<Value>, c: &VerifierStageCtx<'_>, obs: &Observability) -> VerifierStageOut {
         let cfg = self.cfg;
         if !truthy(cfg, &["verifier", "enabled"]) {
-            return (all, None, Vec::new());
-        }
-        if c.deadline > 0 && (c.deadline as i128 - self.now() as i128) < 120_000 {
-            self.log("verifier pass B пропущен: тайм-бюджет на исходе (<2 мин в запасе)");
-            obs.log_event("verifier_skip", &json!({ "reason": "time_budget" }));
-            return (all, None, Vec::new());
+            return VerifierStageOut::untouched(all);
         }
         let block_on = str_list(cfg, &["gate", "blockOn"]);
         let block_on_v: Vec<Value> = block_on.iter().map(|s| json!(s)).collect();
+        let strict = truthy(cfg, &["verifier", "strictBlocks"]);
+        let is_block_tier = |f: &Value| {
+            let sev = f.get("severity").and_then(Value::as_str).unwrap_or("");
+            block_on.iter().any(|b| b == sev) && !truthy(f, &["prescan"])
+        };
+        let budget_low = |now: u64| c.deadline > 0 && (c.deadline as i128 - now as i128) < 120_000;
+        if budget_low(self.now()) {
+            self.log("verifier pass B пропущен: тайм-бюджет на исходе (<2 мин в запасе)");
+            obs.log_event("verifier_skip", &json!({ "reason": "time_budget" }));
+            let pending: Vec<usize> = (0..all.len()).filter(|&i| is_block_tier(&all[i])).collect();
+            let unavailable = (strict && !pending.is_empty())
+                .then(|| self.mark_verifier_unavailable(&mut all, &pending, "time_budget", obs));
+            return VerifierStageOut { unavailable, ..VerifierStageOut::untouched(all) };
+        }
         let threshold = number(cfg, &["actionability", "threshold"]);
         // Порог ДОПУСКА к verifier'у ниже порога маршрута (docs/review-quality.md §2.2, P1):
         // кандидатом становится то, что СТАНЕТ доказуемым после подтверждения. Порог
@@ -1910,8 +2136,18 @@ impl<'a> ReviewPipeline<'a> {
         } else {
             Vec::new()
         };
-        let max_candidates = usize_of(number(cfg, &["verifier", "maxCandidates"]));
-        let candidates = select_verifier_candidates(&all, &block_on_v, max_candidates, &pool, advisory_max);
+        // Блокеры сверх капа одного вызова идут следующими батчами (RFC 17): кап одного
+        // вызова держит размер промпта, число батчей — цену прогона.
+        let batch_cap = usize_of(number(cfg, &["verifier", "maxCandidates"])).max(1);
+        let max_batches_n = number(cfg, &["verifier", "maxBatches"]);
+        // `verifier.maxBatches ?? 1`: нет поля — один батч; NaN/0 — `Math.max(1, …)`.
+        let max_batches = if get(cfg, &["verifier", "maxBatches"]).is_none_or(Value::is_null) {
+            1
+        } else {
+            usize_of(max_batches_n).max(1)
+        };
+        let candidates =
+            select_verifier_candidates(&all, &block_on_v, batch_cap.saturating_mul(max_batches), &pool, advisory_max);
         if !pool.is_empty() {
             // Насколько пониженный порог расширил допуск — измеримо, а не вера в P1.
             let admitted = pool
@@ -1936,78 +2172,137 @@ impl<'a> ReviewPipeline<'a> {
         }
         if candidates.is_empty() {
             obs.log_event("verifier_skip", &json!({ "reason": "no_candidates" }));
-            return (all, None, Vec::new());
+            return VerifierStageOut::untouched(all);
+        }
+        // Первый батч — как прежний единственный вызов: до капа блокеров плюс advisory.
+        // Остальные — только блокеры: advisory не стоят лишнего вызова.
+        let block_tier: Vec<usize> = candidates.iter().copied().filter(|&i| is_block_tier(&all[i])).collect();
+        let advisory: Vec<usize> = candidates.iter().copied().filter(|&i| !is_block_tier(&all[i])).collect();
+        let mut batches: Vec<Vec<usize>> = vec![block_tier.iter().take(batch_cap).copied().chain(advisory.iter().copied()).collect()];
+        for chunk in block_tier.get(batch_cap..).unwrap_or(&[]).chunks(batch_cap) {
+            batches.push(chunk.to_vec());
         }
         self.log(&format!(
-            "verifier pass B: {} кандидат(ов) {} · модель {}",
+            "verifier pass B: {} кандидат(ов) {} · батчей {} · модель {}",
             candidates.len(),
             block_on.join("/"),
+            batches.len(),
             string(cfg, &["verifier", "model"])
         ));
-        let mut cand_values: Vec<Value> = candidates.iter().map(|&i| all[i].clone()).collect();
-        // Метка происхождения — служебная, в промпт verifier'а она не уходит.
-        strip_origin(&mut cand_values);
-        // Verifier получает только файлы/секции диффа кандидатов и окна вокруг их строк.
-        let cand_files: IndexSet<String> = cand_values
-            .iter()
-            .filter_map(|f| f.get("file").filter(|v| js_truthy(v)).map(js_to_string))
-            .collect();
         let margin = number(cfg, &["verifier", "contextMargin"]);
-        let ctx_window = build_verifier_file_contents(c.content_map, &cand_values, margin);
-        let sections: Vec<String> = extract_file_diff_sections(c.annotated)
-            .into_iter()
-            .filter(|(p, _)| cand_files.contains(p))
-            .map(|(_, s)| s)
-            .collect();
-        let annotated_scoped = if sections.is_empty() { c.annotated.to_string() } else { sections.join("\n") };
-        self.log(&format!(
-            "verifier ctx: {} файл(ов) с кандидатами из {}, контекст {}→{} симв. (окна ±{}), дифф {}/{} симв.",
-            cand_files.len(),
-            c.content_map.len(),
-            ctx_window.before,
-            ctx_window.after,
-            js_to_string(&num(margin)),
-            u16_len(&annotated_scoped),
-            u16_len(c.annotated)
-        ));
-        // Карточки символов verifier'у (RFC 14, решение 4) — только под флагом.
-        let verifier_cards: Vec<String> = match c.symbol_cards {
-            Some(sc) if truthy(cfg, &["verifier", "symbolCards"]) && !sc.by_path.is_empty() => {
-                select_chunk_cards(
-                    &sc.by_path,
-                    &cand_files.iter().cloned().collect::<Vec<_>>(),
-                    number(cfg, &["limits", "symbolCardsMax"]),
-                    number(cfg, &["limits", "symbolCardsMaxChars"]),
-                    &format!("{annotated_scoped}\n{}", ctx_window.text),
-                )
-                .cards
+        let verify_batch = |all: &[Value], batch: &[usize], bi: usize| -> Result<Vec<Value>> {
+            let mut cand_values: Vec<Value> = batch.iter().map(|&i| all[i].clone()).collect();
+            // Метка происхождения — служебная, в промпт verifier'а она не уходит.
+            strip_origin(&mut cand_values);
+            // Verifier получает только файлы/секции диффа кандидатов и окна вокруг их строк.
+            let cand_files: IndexSet<String> = cand_values
+                .iter()
+                .filter_map(|f| f.get("file").filter(|v| js_truthy(v)).map(js_to_string))
+                .collect();
+            let ctx_window = build_verifier_file_contents(c.content_map, &cand_values, margin);
+            let sections: Vec<String> = extract_file_diff_sections(c.annotated)
+                .into_iter()
+                .filter(|(p, _)| cand_files.contains(p))
+                .map(|(_, s)| s)
+                .collect();
+            let annotated_scoped = if sections.is_empty() { c.annotated.to_string() } else { sections.join("\n") };
+            let tag = if batches.len() > 1 { format!(" [батч {}/{}]", bi + 1, batches.len()) } else { String::new() };
+            self.log(&format!(
+                "verifier ctx{tag}: {} файл(ов) с кандидатами из {}, контекст {}→{} симв. (окна ±{}), дифф {}/{} симв.",
+                cand_files.len(),
+                c.content_map.len(),
+                ctx_window.before,
+                ctx_window.after,
+                js_to_string(&num(margin)),
+                u16_len(&annotated_scoped),
+                u16_len(c.annotated)
+            ));
+            // Карточки символов verifier'у (RFC 14, решение 4) — только под флагом.
+            let verifier_cards: Vec<String> = match c.symbol_cards {
+                Some(sc) if truthy(cfg, &["verifier", "symbolCards"]) && !sc.by_path.is_empty() => {
+                    select_chunk_cards(
+                        &sc.by_path,
+                        &cand_files.iter().cloned().collect::<Vec<_>>(),
+                        number(cfg, &["limits", "symbolCardsMax"]),
+                        number(cfg, &["limits", "symbolCardsMaxChars"]),
+                        &format!("{annotated_scoped}\n{}", ctx_window.text),
+                    )
+                    .cards
+                }
+                _ => Vec::new(),
+            };
+            if !verifier_cards.is_empty() {
+                self.log(&format!("verifier: карточек символов {}", verifier_cards.len()));
             }
-            _ => Vec::new(),
+            self.deps.engine.verify_findings(
+                &cand_values,
+                &VerifyContext {
+                    annotated: annotated_scoped,
+                    file_contents: ctx_window.text,
+                    blast_blocks: c.blast_blocks.to_vec(),
+                    pr: c.pr.clone(),
+                    changed_files_section: c.changed_files_section.to_string(),
+                    symbol_cards: verifier_cards,
+                },
+            )
         };
-        if !verifier_cards.is_empty() {
-            self.log(&format!("verifier: карточек символов {}", verifier_cards.len()));
+
+        // Сначала все вызовы, потом одно применение: сбой посреди батчей не должен оставить
+        // набор наполовину применённым.
+        let mut sent: Vec<usize> = Vec::new();
+        let mut verdicts: Vec<Value> = Vec::new();
+        let mut batches_sent = 0usize;
+        let mut stop_reason = "";
+        for (bi, batch) in batches.iter().enumerate() {
+            if bi > 0 && budget_low(self.now()) {
+                stop_reason = "time_budget";
+                self.log(&format!("verifier: тайм-бюджет — проверено {} из {} кандидатов", sent.len(), candidates.len()));
+                break;
+            }
+            let batch_verdicts = match verify_batch(&all, batch, bi) {
+                Ok(v) => v,
+                Err(e) => {
+                    let msg = format!("{e:#}");
+                    if bi == 0 {
+                        self.log(&format!("verifier pass failed: {msg}"));
+                        obs.log_event("verifier_error", &json!({ "error": js_slice_utf16(&msg, 200) }));
+                        let unavailable = (strict && !block_tier.is_empty())
+                            .then(|| self.mark_verifier_unavailable(&mut all, &block_tier, "error", obs));
+                        return VerifierStageOut { unavailable, ..VerifierStageOut::untouched(all) };
+                    }
+                    // Первый батч прошёл: его вердикты не выбрасываем, непроверенный хвост —
+                    // недоступность (ниже).
+                    self.log(&format!("verifier: батч {}/{} упал ({msg}) — хвост не проверен", bi + 1, batches.len()));
+                    obs.log_event("verifier_error", &json!({ "batch": bi, "error": js_slice_utf16(&msg, 200) }));
+                    stop_reason = "batch_error";
+                    break;
+                }
+            };
+            for v in batch_verdicts {
+                // `Number.isInteger(idx) && 0 <= idx < batch.length` — чужие индексы отсеиваются
+                // до сдвига, иначе попали бы в соседний батч.
+                let Some(idx) = v.get("candidateIndex").and_then(Value::as_f64).filter(|x| x.fract() == 0.0) else {
+                    continue;
+                };
+                if idx < 0.0 || idx >= batch.len() as f64 {
+                    continue;
+                }
+                let mut m = v.as_object().cloned().unwrap_or_default();
+                m.insert("candidateIndex".into(), json!(idx as usize + sent.len()));
+                verdicts.push(Value::Object(m));
+            }
+            sent.extend(batch.iter().copied());
+            batches_sent += 1;
         }
-        let verdicts = match self.deps.engine.verify_findings(
-            &cand_values,
-            &VerifyContext {
-                annotated: annotated_scoped,
-                file_contents: ctx_window.text,
-                blast_blocks: c.blast_blocks.to_vec(),
-                pr: c.pr.clone(),
-                changed_files_section: c.changed_files_section.to_string(),
-                symbol_cards: verifier_cards,
-            },
-        ) {
-            Ok(v) => v,
-            Err(e) => {
-                let msg = format!("{e:#}");
-                self.log(&format!("verifier pass failed (fail-open, findings сохранены): {msg}"));
-                obs.log_event("verifier_error", &json!({ "error": js_slice_utf16(&msg, 200) }));
-                return (all, None, Vec::new());
-            }
-        };
-        let strict = truthy(cfg, &["verifier", "strictBlocks"]);
-        let applied = apply_verifier_verdicts(&all, &candidates, &verdicts, strict);
+        // Ни одного валидного вердикта — сбой судьи, а не его решение: тот же исход, что у
+        // исключения.
+        if verdicts.is_empty() && sent.iter().any(|&i| is_block_tier(&all[i])) {
+            obs.log_event("verifier_error", &json!({ "error": "no valid verdicts" }));
+            let unavailable =
+                (strict && !block_tier.is_empty()).then(|| self.mark_verifier_unavailable(&mut all, &block_tier, "empty", obs));
+            return VerifierStageOut { unavailable, ..VerifierStageOut::untouched(all) };
+        }
+        let applied = apply_verifier_verdicts(&all, &sent, &verdicts, strict);
         for m in &applied.mutations {
             if let Some(o) = all.get_mut(m.index).and_then(Value::as_object_mut) {
                 for (k, v) in &m.set {
@@ -2019,21 +2314,29 @@ impl<'a> ReviewPipeline<'a> {
             self.log(line);
         }
         let mut stats = applied.stats.clone();
-        // Strict + кап REVIEW_VERIFIER_MAX: eligible-находки сверх капа не верифицированы и
-        // блокировать без верификации не должны (бэклог #7) → minor.
+        let sent_set: HashSet<usize> = sent.iter().copied().collect();
+        // Хвост, не дошедший из-за сбоя или тайм-бюджета, — недоступность, а не кап.
+        let mut unavailable = None;
+        if !stop_reason.is_empty() {
+            let tail: Vec<usize> =
+                applied.kept.iter().copied().filter(|&i| is_block_tier(&all[i]) && !sent_set.contains(&i)).collect();
+            if strict && !tail.is_empty() {
+                unavailable = Some(self.mark_verifier_unavailable(&mut all, &tail, stop_reason, obs));
+            }
+        }
+        // Strict: eligible-находки, не дошедшие до verifier'а (сверх капа × батчей), без
+        // верификации не блокируют (бэклог #7) → minor.
         if strict {
-            let cand_set: HashSet<usize> = candidates.iter().copied().collect();
+            let why = format!("сверх капа {batch_cap} × {max_batches}");
             let mut overflow = 0usize;
             for &i in &applied.kept {
-                let f = &all[i];
-                let sev = f.get("severity").and_then(Value::as_str).unwrap_or("");
-                if block_on.iter().any(|b| b == sev) && !truthy(f, &["prescan"]) && !cand_set.contains(&i) {
+                if is_block_tier(&all[i]) && !sent_set.contains(&i) {
                     if let Some(o) = all[i].as_object_mut() {
                         o.insert("severity".into(), json!("minor"));
                         o.insert("verifierStatus".into(), json!("overflow"));
                         o.insert(
                             "verifierReason".into(),
-                            json!(format!("сверх капа verifier ({max_candidates}) — понижено до minor")),
+                            json!(format!("не проверено verifier'ом ({why}) — понижено до minor")),
                         );
                     }
                     overflow += 1;
@@ -2042,10 +2345,11 @@ impl<'a> ReviewPipeline<'a> {
             if overflow > 0 {
                 stats.insert("overflow".into(), json!(overflow));
                 self.log(&format!(
-                    "verifier strict: {overflow} находок сверх капа {max_candidates} → minor (без верификации не блокируют)"
+                    "verifier strict: {overflow} находок не проверено ({why}) → minor (без верификации не блокируют)"
                 ));
             }
         }
+        stats.insert("batches".into(), json!(batches_sent));
         let n = |k: &str| stats.get(k).map(js_to_string).unwrap_or_default();
         self.log(&format!(
             "verifier итог: verified={} rejected={} downgraded={} missing={}",
@@ -2060,7 +2364,12 @@ impl<'a> ReviewPipeline<'a> {
         let (out, rejected): (Vec<_>, Vec<_>) = all.into_iter().enumerate().partition(|(i, _)| kept.contains(i));
         let out: Vec<Value> = out.into_iter().map(|(_, f)| f).collect();
         self.log_stage(obs, "after_verifier", &out);
-        (out, Some(stats), rejected.into_iter().map(|(_, f)| f).collect())
+        VerifierStageOut {
+            findings: out,
+            stats: Some(stats),
+            rejected: rejected.into_iter().map(|(_, f)| f).collect(),
+            unavailable,
+        }
     }
 
     /// Распределение actionability-скоров (docs/review-quality.md §3, P3.2): пик у порога —

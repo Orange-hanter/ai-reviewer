@@ -259,17 +259,181 @@ fn minor_only_does_not_block() {
     assert!(!h.sticky().contains("Merge заблокирован"));
 }
 
+fn thirteen_criticals() -> ModelReview {
+    review(
+        "m1",
+        (1..=13)
+            .map(|i| json!({ "file": "foo.ts", "line": i, "severity": "critical", "title": format!("баг {i}"), "body": "", "confidence": 0.9, "model": "m1" }))
+            .collect(),
+    )
+}
+
+fn verified_for(n: usize) -> Vec<Value> {
+    (0..n).map(|i| json!({ "candidateIndex": i, "decision": "verified" })).collect()
+}
+
+type ReviewsFn = dyn Fn(&[Chunk]) -> ReviewAllResult + Send + Sync;
+type VerifyFn = dyn Fn(usize, &[Value]) -> Result<Vec<Value>> + Send + Sync;
+
+/// Движок по сценарию: ответ `reviewAllModels` и `verifyFindings` (номер вызова → ответ)
+/// задаёт тест; размеры батчей verifier'а и пути чанков записываются.
+struct ScriptedEngine {
+    reviews: Box<ReviewsFn>,
+    verify: Box<VerifyFn>,
+    batch_sizes: std::sync::Arc<Mutex<Vec<usize>>>,
+    reviewed_paths: std::sync::Arc<Mutex<Vec<String>>>,
+}
+
+impl ScriptedEngine {
+    fn new(reviews: Vec<ModelReview>, verify: impl Fn(usize, &[Value]) -> Result<Vec<Value>> + Send + Sync + 'static) -> Self {
+        Self {
+            reviews: Box::new(move |_| reviews.clone()),
+            verify: Box::new(verify),
+            batch_sizes: Default::default(),
+            reviewed_paths: Default::default(),
+        }
+    }
+}
+
+impl EngineApi for ScriptedEngine {
+    fn review_all_models(&self, chunks: &[Chunk], _: &ReviewContext) -> Result<ReviewAllResult> {
+        self.reviewed_paths.lock().unwrap().extend(chunks.iter().flat_map(|c| c.paths.clone()));
+        Ok((self.reviews)(chunks))
+    }
+    fn verify_findings(&self, candidates: &[Value], _: &VerifyContext) -> Result<Vec<Value>> {
+        let call = {
+            let mut b = self.batch_sizes.lock().unwrap();
+            b.push(candidates.len());
+            b.len() - 1
+        };
+        (self.verify)(call, candidates)
+    }
+}
+
+/// Прогон с движком по сценарию; возвращает итог, harness (sticky) и размеры батчей.
+fn run_scripted(h: Harness, engine: ScriptedEngine, diff: &str) -> (PipelineOutcome, Harness, Vec<usize>, Vec<String>) {
+    let mut h = h;
+    let sizes = engine.batch_sizes.clone();
+    let paths = engine.reviewed_paths.clone();
+    h.engine = Some(Box::new(engine));
+    let out = h.run(diff).unwrap();
+    let sizes = sizes.lock().unwrap().clone();
+    let paths = paths.lock().unwrap().clone();
+    (out, h, sizes, paths)
+}
+
 #[test]
-fn verifier_strict_overflow_beyond_cap_is_downgraded() {
-    let findings: Vec<Value> = (1..=13)
-        .map(|i| json!({ "file": "foo.ts", "line": i, "severity": "critical", "title": format!("баг {i}"), "body": "", "confidence": 0.9, "model": "m1" }))
-        .collect();
-    let mut h = Harness::new(vec![review("m1", findings)]).env("REVIEW_VERIFIER", "1");
+fn verifier_thirteenth_goes_to_second_batch_and_blocks() {
+    let h = Harness::new(vec![]).env("REVIEW_VERIFIER", "1");
+    let (out, h, sizes, _) =
+        run_scripted(h, ScriptedEngine::new(vec![thirteen_criticals()], |_, c| Ok(verified_for(c.len()))), CODE_DIFF);
+    assert_eq!(out.exit_code, 1);
+    assert_eq!(sizes, vec![12, 1], "кап одного вызова держится, хвост — отдельным батчем");
+    assert!(h.sticky().contains("🔴13 🟠0 🟡0"), "все 13 critical проверены, ни одна не overflow");
+}
+
+#[test]
+fn verifier_second_batch_verdict_lands_on_its_own_finding() {
+    let h = Harness::new(vec![]).env("REVIEW_VERIFIER", "1");
+    let engine = ScriptedEngine::new(vec![thirteen_criticals()], |call, c| {
+        Ok(if call == 0 {
+            verified_for(c.len())
+        } else {
+            vec![json!({ "candidateIndex": 0, "decision": "rejected", "reason": "нет бага" })]
+        })
+    });
+    let (_, h, _, _) = run_scripted(h, engine, CODE_DIFF);
+    let md = h.sticky();
+    assert!(md.contains("🔴12"), "rejected с индексом 0 второго батча не лёг на индекс 0 первого");
+    assert!(!md.contains("баг 13"), "13-я отклонена своим вердиктом");
+}
+
+#[test]
+fn verifier_strict_overflow_beyond_cap_times_batches_is_downgraded() {
+    let mut h = Harness::new(vec![thirteen_criticals()]).env("REVIEW_VERIFIER", "1").env("REVIEW_VERIFIER_BATCHES", "1");
     h.fakes.engine.verdicts = verify_all();
     assert_eq!(h.run(CODE_DIFF).unwrap().exit_code, 1, "12 верифицированных critical блокируют");
     let md = h.sticky();
     assert!(md.contains("🔴12"), "12 critical после verifier");
-    assert!(md.contains("🟡1"), "13-я (сверх капа) → minor");
+    assert!(md.contains("🟡1"), "13-я (сверх капа × батчей) → minor");
+}
+
+#[test]
+fn verifier_tail_batch_failure_keeps_first_batch_verdicts() {
+    let h = Harness::new(vec![]).env("REVIEW_VERIFIER", "1");
+    let engine = ScriptedEngine::new(vec![thirteen_criticals()], |call, c| {
+        if call > 0 {
+            anyhow::bail!("rate limit");
+        }
+        Ok((0..c.len()).map(|i| json!({ "candidateIndex": i, "decision": if i == 0 { "rejected" } else { "verified" } })).collect())
+    });
+    let (out, h, _, _) = run_scripted(h, engine, CODE_DIFF);
+    assert_eq!(out.exit_code, 1);
+    let md = h.sticky();
+    assert!(md.contains("🔴11"), "11 подтверждены, 1 отклонён в первом батче");
+    assert!(md.contains("🟡1"), "непроверенный хвост → minor");
+}
+
+// RFC 18: сбой verifier'а — одно состояние «недоступен», независимо от вида сбоя.
+#[test]
+fn verifier_unavailable_any_failure_is_degraded_block() {
+    let cases: Vec<(&str, Box<VerifyFn>)> = vec![
+        ("исключение", Box::new(|_, _| anyhow::bail!("503"))),
+        ("пустой ответ", Box::new(|_, _| Ok(vec![]))),
+        ("чужие индексы", Box::new(|_, _| Ok(vec![json!({ "candidateIndex": 7, "decision": "verified" })]))),
+    ];
+    for (label, verify) in cases {
+        let h = Harness::new(vec![]).env("REVIEW_VERIFIER", "1");
+        let mut engine = ScriptedEngine::new(vec![critical_review()], |_, _| Ok(vec![]));
+        engine.verify = verify;
+        let (out, h, _, _) = run_scripted(h, engine, CODE_DIFF);
+        assert_eq!(out.exit_code, 1, "{label}: REVIEW_LLM_REQUIRED=1 — блок до перезапуска");
+        assert!(out.degraded, "{label}");
+        let md = h.sticky();
+        assert!(md.contains("⛔ ревью не завершено"), "{label}: {}", &md[..md.len().min(400)]);
+        assert!(md.contains("Merge заблокирован: verifier недоступен"), "{label}");
+        assert!(md.contains("🔴0"), "{label}: непроверенный critical не блокер");
+        assert!(!md.contains("нужны правки"), "{label}");
+    }
+}
+
+#[test]
+fn verifier_unavailable_with_llm_optional_is_fail_open_with_note() {
+    let h = Harness::new(vec![]).env("REVIEW_VERIFIER", "1").env("REVIEW_LLM_REQUIRED", "0");
+    let (out, h, _, _) = run_scripted(h, ScriptedEngine::new(vec![critical_review()], |_, _| anyhow::bail!("503")), CODE_DIFF);
+    assert_eq!(out.exit_code, 0);
+    let md = h.sticky();
+    assert!(md.contains("⚠️ **Verifier недоступен**"));
+    assert!(md.contains("merge не блокируется"));
+}
+
+#[test]
+fn verifier_time_budget_is_the_same_unavailable_state() {
+    let dir = tmp_dir("vu-budget");
+    let h = Harness::new(vec![]).env("REVIEW_VERIFIER", "1").env("REVIEW_TIME_BUDGET_MIN", "1").obs(&dir);
+    let (out, h, sizes, _) =
+        run_scripted(h, ScriptedEngine::new(vec![critical_review()], |_, c| Ok(verified_for(c.len()))), CODE_DIFF);
+    assert_eq!(out.exit_code, 1);
+    assert!(sizes.is_empty(), "verifier не вызывался");
+    assert!(h.sticky().contains("verifier недоступен** (time_budget)"));
+    let rows = read_jsonl(&dir);
+    let ev = rows.iter().find(|r| r["type"] == "verifier_unavailable").expect("событие verifier_unavailable");
+    assert_eq!(ev["reason"], json!("time_budget"));
+    assert_eq!(ev["unverified"], json!(1));
+    let gate = rows.iter().find(|r| r["type"] == "gate").unwrap();
+    assert_eq!(gate["verifierUnavailable"], json!({ "reason": "time_budget", "unverified": 1, "blocked": true }));
+    assert_eq!(gate["wouldBlock"], json!(true));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn verifier_failure_without_block_candidates_does_not_touch_gate() {
+    let mut minor = critical_review();
+    minor.findings[0]["severity"] = json!("minor");
+    let h = Harness::new(vec![]).env("REVIEW_VERIFIER", "1");
+    let (out, h, _, _) = run_scripted(h, ScriptedEngine::new(vec![minor], |_, _| anyhow::bail!("503")), CODE_DIFF);
+    assert_eq!(out.exit_code, 0);
+    assert!(!h.sticky().contains("verifier недоступен"));
 }
 
 #[test]
@@ -281,6 +445,9 @@ fn verifier_failure_is_fail_open() {
     let out = h.run(CODE_DIFF).unwrap();
     assert_eq!(h.fakes.calls.count("verify"), 1);
     assert_eq!(out.exit_code, 1, "сбой verifier не снимает находку и не роняет прогон");
+    // REVIEW_VERIFIER_STRICT=0 — доверие агрегатору: critical блокирует, «недоступен» нет
+    assert!(h.sticky().contains("нужны правки"));
+    assert!(!h.sticky().contains("verifier недоступен"));
 }
 
 #[test]
@@ -322,7 +489,7 @@ fn before_resolve_runs_between_fp_filter_and_gate() {
                 x
             })
             .collect();
-        Ok(BeforeResolved { findings: f, refutation_stats: Some(json!({ "kept": 1 })), verifier_stats: None })
+        Ok(BeforeResolved { findings: f, refutation_stats: Some(json!({ "kept": 1 })), ..BeforeResolved::default() })
     };
     let log = |_: &str| {};
     let res = run_gate_resolution(
@@ -922,4 +1089,190 @@ fn engine_usage_reaches_run_end_and_sticky_cost_line() {
     assert_eq!(end["tokens_total"], json!(1500), "efficiencyMetrics в run_end: {end}");
     assert!(h.sticky().contains("💰 2k tokens"), "строка стоимости в sticky: {}", h.sticky());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// RFC 19: покрытие по чанкам — упавшая часть PR не выдаётся за отревьюенную
+// ---------------------------------------------------------------------------
+
+fn ok_empty(model: &str) -> ModelReview {
+    ModelReview { model: model.into(), summary: Some("ok".into()), ..ModelReview::default() }
+}
+
+fn failed_chunk0(model: &str) -> ModelReview {
+    ModelReview { failed_chunks: vec![0], ..ok_empty(model) }
+}
+
+#[test]
+fn chunk_failed_for_all_models_is_degraded_block() {
+    let dir = tmp_dir("cov");
+    let h = Harness::new(vec![failed_chunk0("m1"), failed_chunk0("m2")]).obs(&dir);
+    let out = h.run(CODE_DIFF).unwrap();
+    assert_eq!(out.exit_code, 1, "REVIEW_LLM_REQUIRED=1: часть PR без ревью блокирует");
+    assert!(out.degraded);
+    assert_eq!(out.reason.as_deref(), Some("не отревьюено 1 из 1 частей PR (сбой модели)"));
+    let md = h.sticky();
+    assert!(md.contains("⛔ ревью не завершено"));
+    assert!(md.contains("Merge заблокирован: ревью неполное** — 1 из 1 частей PR"));
+    let rows = read_jsonl(&dir);
+    let gap = rows.iter().find(|r| r["type"] == "coverage_gap").expect("событие coverage_gap");
+    assert_eq!(gap["failed"], json!(1));
+    assert_eq!(gap["paths"], json!(["foo.ts"]));
+    let gate = rows.iter().find(|r| r["type"] == "gate").unwrap();
+    assert_eq!(gate["coverageGap"], json!({ "failed": 1, "total": 1, "blocked": true }));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn chunk_failed_for_one_model_but_covered_by_other_is_not_a_block() {
+    let h = Harness::new(vec![failed_chunk0("m1"), ok_empty("m2")]);
+    assert_eq!(h.run(CODE_DIFF).unwrap().exit_code, 0);
+    assert!(!h.sticky().contains("ревью неполное"));
+}
+
+#[test]
+fn chunk_failed_with_llm_optional_is_fail_open_with_note() {
+    let h = Harness::new(vec![failed_chunk0("m1"), failed_chunk0("m2")]).env("REVIEW_LLM_REQUIRED", "0");
+    assert_eq!(h.run(CODE_DIFF).unwrap().exit_code, 0);
+    assert!(h.sticky().contains("⚠️ **Ревью неполное**"));
+}
+
+#[test]
+fn chunk_failed_dry_run_would_block_degraded() {
+    let mut h = Harness::new(vec![failed_chunk0("m1"), failed_chunk0("m2")]);
+    h.dry_run = true;
+    let out = h.run(CODE_DIFF).unwrap();
+    assert_eq!(out.exit_code, 1);
+    assert!(out.would_block && out.degraded);
+    assert_eq!(out.artifact.as_ref().unwrap()["wouldBlock"], json!(true));
+}
+
+#[test]
+fn incremental_failed_chunk_file_is_reviewed_again() {
+    let dir = tmp_dir("incr-cov");
+    let state = dir.join("state.json");
+    let fail_bar = |chunks: &[Chunk]| -> Vec<usize> {
+        chunks.iter().position(|c| c.paths.iter().any(|p| p == "bar.ts")).into_iter().collect()
+    };
+    let h = incremental(vec![], &state).env("REVIEW_LLM_REQUIRED", "0");
+    let mut engine = ScriptedEngine::new(vec![], |_, _| Ok(vec![]));
+    engine.reviews = Box::new(move |chunks| {
+        ["m1", "m2"].iter().map(|m| ModelReview { failed_chunks: fail_bar(chunks), ..ok_empty(m) }).collect()
+    });
+    run_scripted(h, engine, TWO_FILE_DIFF);
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
+    assert!(saved["hashes"].get("bar.ts").is_none(), "хэш файла упавшей части не пишется: {saved}");
+
+    let h = incremental(vec![], &state).env("REVIEW_LLM_REQUIRED", "0");
+    let (_, _, _, paths) =
+        run_scripted(h, ScriptedEngine::new(vec![ok_empty("m1"), ok_empty("m2")], |_, _| Ok(vec![])), &two_file_v2());
+    assert!(paths.iter().any(|p| p == "bar.ts"), "bar.ts обязан уйти в LLM заново: {paths:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn incremental_unverified_finding_is_not_carried() {
+    let dir = tmp_dir("incr-vu");
+    let state = dir.join("state.json");
+    let h = incremental(vec![], &state).env("REVIEW_VERIFIER", "1");
+    let (first, _, _, _) = run_scripted(h, ScriptedEngine::new(vec![bar_critical()], |_, _| anyhow::bail!("503")), TWO_FILE_DIFF);
+    assert_eq!(first.exit_code, 1, "degraded-блок: verifier недоступен");
+
+    let h = incremental(vec![], &state).env("REVIEW_VERIFIER", "1");
+    let (second, h, _, paths) =
+        run_scripted(h, ScriptedEngine::new(vec![bar_critical()], |_, c| Ok(verified_for(c.len()))), &two_file_v2());
+    assert!(paths.iter().any(|p| p == "bar.ts"), "непроверенная находка не переносится — файл ревьюится заново");
+    assert_eq!(second.exit_code, 1);
+    assert!(h.sticky().contains("нужны правки"), "теперь блокер подтверждён verifier'ом");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// RFC 16: REVIEW_BLAST_REQUIRED — fail-closed без code graph
+// ---------------------------------------------------------------------------
+
+fn blast_radius(status: &str, resolved: usize, reason: &str) -> BlastRadius {
+    let mut skip = indexmap::IndexMap::new();
+    skip.insert(reason.to_string(), 1);
+    BlastRadius {
+        blocks: vec![],
+        metrics: BlastMetrics {
+            symbols_total: 1,
+            symbols_resolved: Some(resolved),
+            graph_status: status.into(),
+            skip_reason: reason.into(),
+            skip_reasons: skip,
+            ..BlastMetrics::default()
+        },
+        graph_index: None,
+    }
+}
+
+#[test]
+fn blast_required_without_graph_fails_closed_before_llm() {
+    let dir = tmp_dir("blast-req");
+    let mut h = Harness::new(vec![review("m1", vec![])]).env("REVIEW_BLAST_REQUIRED", "1").obs(&dir);
+    h.fakes.graphify.radius = blast_radius("missing", 0, "graph_missing");
+    let out = h.run(CODE_DIFF).unwrap();
+    assert_eq!(out.exit_code, 1, "без графа merge заблокирован");
+    assert!(out.would_block && out.degraded);
+    assert_eq!(out.reason.as_deref(), Some("blast-radius unavailable: graph_missing"));
+    assert_eq!(h.fakes.calls.count("review"), 0, "LLM не вызывался");
+    let bodies = h.fakes.calls.sticky_bodies();
+    assert_eq!(bodies.len(), 1);
+    assert!(bodies[0].contains("graph_missing") && bodies[0].contains("REVIEW_BLAST_REQUIRED=1"));
+    let rows = read_jsonl(&dir);
+    let ev = rows.iter().find(|r| r["type"] == "blast_failed").expect("событие blast_failed");
+    assert_eq!(ev["reason"], json!("graph_missing"));
+    assert_eq!(ev["required"], json!(true));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let mut optional = Harness::new(vec![review("m1", vec![])]);
+    optional.fakes.graphify.radius = blast_radius("missing", 0, "graph_missing");
+    assert_eq!(optional.run(CODE_DIFF).unwrap().exit_code, 0, "дефолт 0: отсутствие графа — fail-open");
+    assert_eq!(optional.fakes.calls.count("review"), 1);
+}
+
+#[test]
+fn blast_required_with_graph_and_no_dependents_runs_normally() {
+    let mut h = Harness::new(vec![review("m1", vec![])]).env("REVIEW_BLAST_REQUIRED", "1");
+    h.fakes.graphify.radius = blast_radius("fresh", 1, "no_dependents");
+    assert_eq!(h.run(CODE_DIFF).unwrap().exit_code, 0);
+    assert_eq!(h.fakes.calls.count("review"), 1);
+}
+
+#[test]
+fn blast_unavailable_reason_matches_js() {
+    let mut m = blast_radius("fresh", 0, "graphify_timeout").metrics;
+    assert_eq!(blast_unavailable_reason(&m), Some("graphify_timeout"), "все запросы упали");
+    m.symbols_total = 2;
+    assert_eq!(blast_unavailable_reason(&m), None, "упала часть — радиус посчитан");
+    m.skip_reasons.insert("graph_enrichment_unavailable".into(), 1);
+    assert_eq!(blast_unavailable_reason(&m), Some("graph_unreadable"));
+    m.skip_reason = "client_did_not_report".into();
+    assert_eq!(blast_unavailable_reason(&m), None);
+}
+
+// ---------------------------------------------------------------------------
+// RFC 17: prescan не запускается на удалённых файлах
+// ---------------------------------------------------------------------------
+
+#[test]
+fn prescan_skips_deleted_files() {
+    let diff = format!(
+        "{CODE_DIFF}diff --git a/old.ts b/old.ts\ndeleted file mode 100644\n--- a/old.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-export const gone = 1;\n"
+    );
+    let h = Harness::new(vec![review("m1", vec![])]);
+    h.run(&diff).unwrap();
+    let runs: Vec<Vec<String>> = h
+        .fakes
+        .calls
+        .records()
+        .into_iter()
+        .filter_map(|r| match r {
+            CallRecord::PrescanRun { changed_paths } => Some(changed_paths),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(runs, vec![vec!["foo.ts".to_string()]], "удалённого old.ts нет в рабочем дереве");
 }

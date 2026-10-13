@@ -482,6 +482,24 @@ pub struct NextStateInput<'a> {
     /// Итоговый набор находок прогона (виден человеку); фильтр [`carryable_findings`]
     /// применяется здесь.
     pub findings: &'a [Value],
+    /// Файлы, которые следующий прогон обязан ревьюить заново (RFC 18/19): с находками,
+    /// до которых verifier не дошёл (`verifierStatus` unavailable/overflow), и файлы
+    /// чанков, не отревьюенных ни одной моделью. Их находки не переносятся, а хэши не
+    /// пишутся — иначе перенос считал бы непроверенное проверенным.
+    pub unverified_paths: Option<&'a IndexSet<String>>,
+}
+
+/// Файлы, которые следующий прогон обязан ревьюить заново: находки с
+/// `verifierStatus` unavailable/overflow плюс `uncovered` — файлы непокрытых чанков.
+/// Порядок — как у `new Set([...findings, ...uncovered])` в JS.
+pub fn unverified_paths(findings: &[Value], uncovered: &IndexSet<String>) -> IndexSet<String> {
+    let mut out: IndexSet<String> = findings
+        .iter()
+        .filter(|f| matches!(f.get("verifierStatus").and_then(Value::as_str), Some("unavailable" | "overflow")))
+        .filter_map(|f| f.get("file").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    out.extend(uncovered.iter().cloned());
+    out
 }
 
 /// Состояние для следующего прогона.
@@ -501,7 +519,16 @@ pub fn build_next_state(input: NextStateInput<'_>) -> Value {
     o.insert("headSha".into(), json!(input.head_sha));
     o.insert("configFp".into(), json!(input.config_fp));
     o.insert("sinceFull".into(), since_full);
-    o.insert("hashes".into(), json!(input.hashes));
+    let skip = input.unverified_paths.filter(|u| !u.is_empty());
+    match skip {
+        Some(u) => {
+            let kept: IndexMap<&String, &String> = input.hashes.iter().filter(|(p, _)| !u.contains(p.as_str())).collect();
+            o.insert("hashes".into(), json!(kept));
+        }
+        None => {
+            o.insert("hashes".into(), json!(input.hashes));
+        }
+    }
     if let Some(ci) = input.cards_input.filter(|c| !c.is_empty()) {
         o.insert("cardsInput".into(), json!(ci));
         o.insert("cardsTargets".into(), input.cards_targets.map(|t| Value::Object(t.clone())).unwrap_or(Value::Null));
@@ -509,7 +536,11 @@ pub fn build_next_state(input: NextStateInput<'_>) -> Value {
     if input.cards_input_reused > 0 {
         o.insert("cardsInputReused".into(), json!(true));
     }
-    o.insert("findings".into(), Value::Array(carryable_findings(input.findings)));
+    let mut carry = carryable_findings(input.findings);
+    if let Some(u) = skip {
+        carry.retain(|f| !f.get("file").and_then(Value::as_str).is_some_and(|p| u.contains(p)));
+    }
+    o.insert("findings".into(), Value::Array(carry));
     Value::Object(o)
 }
 
@@ -839,6 +870,7 @@ mod tests {
             cards_targets: Some(&targets),
             cards_input_reused: 0,
             findings: &findings,
+            unverified_paths: None,
         });
         assert_eq!(next["sinceFull"], json!(4));
         assert_eq!(next["findings"], json!([{ "file": "a.ts", "severity": "major" }]));
@@ -856,10 +888,45 @@ mod tests {
             cards_targets: None,
             cards_input_reused: 1,
             findings: &[],
+            unverified_paths: None,
         });
         assert_eq!(full["sinceFull"], json!(0));
         assert_eq!(full["cardsInputReused"], json!(true));
         assert!(full.get("cardsInput").is_none());
+    }
+
+    /// RFC 18/19: находка, до которой verifier не дошёл, и файлы непокрытых чанков не
+    /// переносятся, их хэши не пишутся — следующий прогон ревьюит эти файлы заново.
+    #[test]
+    fn следующее_состояние_без_непроверенных_файлов() {
+        let h = smap(&[("a.ts", "h1"), ("b.ts", "h2"), ("c.ts", "h3"), ("d.ts", "h4")]);
+        let p = paths(&["a.ts", "b.ts", "c.ts", "d.ts"]);
+        let plan = IncrementalPlan::disabled(&p);
+        let findings = [
+            json!({ "file": "a.ts", "severity": "minor", "verifierStatus": "unavailable" }),
+            json!({ "file": "a.ts", "severity": "major" }),
+            json!({ "file": "b.ts", "severity": "minor", "verifierStatus": "overflow" }),
+            json!({ "file": "c.ts", "severity": "major", "verifierStatus": "verified" }),
+            json!({ "file": "d.ts", "severity": "nit" }),
+        ];
+        let uncovered: IndexSet<String> = ["d.ts".to_string()].into_iter().collect();
+        let u = unverified_paths(&findings, &uncovered);
+        assert_eq!(u.iter().cloned().collect::<Vec<_>>(), vec!["a.ts", "b.ts", "d.ts"]);
+        let next = build_next_state(NextStateInput {
+            pr_number: &json!(1),
+            head_sha: "s",
+            config_fp: "fp",
+            plan: &plan,
+            prior: None,
+            hashes: &h,
+            cards_input: None,
+            cards_targets: None,
+            cards_input_reused: 0,
+            findings: &findings,
+            unverified_paths: Some(&u),
+        });
+        assert_eq!(next["hashes"], json!({ "c.ts": "h3" }));
+        assert_eq!(next["findings"], json!([{ "file": "c.ts", "severity": "major", "verifierStatus": "verified" }]));
     }
 
     #[test]

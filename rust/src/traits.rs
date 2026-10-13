@@ -365,6 +365,13 @@ pub struct ModelReview {
     /// а не сумму (`pipeline.mjs:417-418`).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub skipped_chunks: u32,
+    /// Индексы чанков, которые модель не отревьюила из-за сбоя (не тайм-бюджета) —
+    /// `failedChunks` (`lib/engine.mjs`, RFC 19). Пайплайн считает по ним покрытие PR.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failed_chunks: Vec<usize>,
+    /// Индексы чанков, пропущенных по тайм-бюджету (`skippedChunkIndexes`, RFC 19).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped_chunk_indexes: Vec<usize>,
     /// MoA: реальная модель-жюри (`lib/engine.mjs:334`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub aggregator: Option<String>,
