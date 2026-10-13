@@ -2,7 +2,7 @@
 
 1. Скопировать в Orakul:
    - `profile.json` + `repo-rules.md` → `ops/ai-review/`
-   - `ai-reviewer-ref` → `ops/ai-reviewer-ref` (одна строка `v0.5.0`)
+   - `ai-reviewer-ref` → `ops/ai-reviewer-ref` (одна строка `v0.5.1`)
 2. В `.github/workflows/pr-review.yml` заменить шаг `Run AI review` (git archive
    `ops/pr-review`) на шаги из `examples/ci/pr-review.yml`: Read pin → Checkout
    `Orange-hanter/ai-reviewer` → `node .ai-reviewer-engine/bin/pr-review.mjs` с
