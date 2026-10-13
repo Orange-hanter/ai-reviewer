@@ -211,6 +211,24 @@ fn critical_blocks_and_publishes_inline_and_sticky() {
 }
 
 #[test]
+fn icon_base_url_iconizes_sticky_and_inline_but_not_footer() {
+    // pipeline.mjs:421-422 — withIcons(deps.github, cfg.render.iconBaseUrl).
+    let base = "https://icons.example/v1";
+    let h = Harness::new(vec![critical_review()]).env("REVIEW_ICON_BASE_URL", base);
+    h.run(CODE_DIFF).unwrap();
+    let sticky = h.sticky();
+    assert!(sticky.contains(&format!(r#"<img src="{base}/gate-blocked.svg" alt="⛔""#)), "{sticky}");
+    let footer = sticky.lines().find(|l| l.contains("-data:")).expect("футер sticky");
+    assert!(!footer.contains("<img"), "HTML-комментарий футера не трогается: {footer}");
+    let inline = &h.fakes.calls.posted_reviews()[0].0[0].body;
+    assert!(inline.contains(&format!(r#"<img src="{base}/sev-critical.svg""#)), "{inline}");
+    // Без базы — эмодзи, как раньше.
+    let plain = Harness::new(vec![critical_review()]);
+    plain.run(CODE_DIFF).unwrap();
+    assert!(!plain.sticky().contains("<img src=") && plain.sticky().contains('⛔'));
+}
+
+#[test]
 fn absent_path_claim_about_existing_file_is_filtered_as_fp() {
     let absent = || {
         review(
