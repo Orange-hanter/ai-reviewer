@@ -4,6 +4,7 @@
 use std::fs;
 
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 
 #[test]
@@ -42,4 +43,18 @@ fn eval_failing_fixture_exits_1() {
         .assert()
         .code(1)
         .stdout(contains("⛔ 1 fixture(s) FAILED"));
+}
+
+#[test]
+fn eval_argv_as_in_js_unknown_flags_and_bare_fixtures() {
+    // bin/pr-review-eval.mjs: argv.includes/indexOf — неизвестный флаг игнорируется,
+    // `--fixtures` без значения → undefined → дефолтные фикстуры пакета.
+    for args in [&["eval", "--fixtures"][..], &["eval", "--quiet"][..], &["eval", "extra", "--json"][..]] {
+        Command::cargo_bin("pr-review")
+            .unwrap()
+            .args(args)
+            .assert()
+            .code(0)
+            .stdout(contains("passed (100%)").or(contains("\"ok\": true")));
+    }
 }
