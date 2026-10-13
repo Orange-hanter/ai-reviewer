@@ -586,7 +586,8 @@ pub fn eslint_json_to_findings(
                 .filter(|v| js_truthy(v))
                 .map(js_to_string)
                 .unwrap_or_else(|| "eslint".to_string());
-            let sev_arg = msg.get("severity").filter(|v| !v.is_null());
+            // Дефолт `= 2` только для отсутствующего поля: null уходит как есть (→ minor).
+            let sev_arg = msg.get("severity");
             let severity = map_eslint_rule_severity(&rule_id, sev_arg, block_rules);
             let body = js_trim(&msg.get("message").filter(|v| js_truthy(v)).map(js_to_string).unwrap_or_default())
                 .to_string();
@@ -1042,6 +1043,20 @@ pub(crate) mod tests {
             "messages": [{ "ruleId": "no-restricted-imports", "severity": 2, "message": "layer", "line": 1 }] }]);
         let f = eslint_json_to_findings(&res, &eslint_block_rule_set(None), Some(&map), Path::new("/repo"), p.layout());
         assert_eq!(f[0]["file"], "client/src/foo.ts");
+    }
+
+    #[test]
+    fn eslint_null_severity_is_not_default_two() {
+        // JS: дефолт параметра `eslintSeverity = 2` срабатывает только на undefined;
+        // `null === 2` ложно → minor, а отсутствующее поле → major.
+        let p = neutral();
+        let res = json!([{ "filePath": "a.ts", "messages": [
+            { "ruleId": "no-console", "severity": null, "line": 3, "message": "x" },
+            { "ruleId": "no-console", "line": 4, "message": "y" },
+        ] }]);
+        let f = eslint_json_to_findings(&res, &eslint_block_rule_set(None), None, Path::new("/r"), p.layout());
+        assert_eq!(f[0]["severity"], "minor");
+        assert_eq!(f[1]["severity"], "major");
     }
 
     #[test]
