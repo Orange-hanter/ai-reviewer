@@ -1256,6 +1256,19 @@ fn blast_required_without_graph_fails_closed_before_llm() {
 }
 
 #[test]
+fn blast_required_sticky_goes_through_icon_wrapper() {
+    // pipeline.mjs: заметка blast-required постится через withIcons-клиент, как и остальные.
+    let base = "https://icons.example/v1";
+    let mut h = Harness::new(vec![review("m1", vec![])]).env("REVIEW_BLAST_REQUIRED", "1").env("REVIEW_ICON_BASE_URL", base);
+    h.fakes.graphify.radius = blast_radius("missing", 0, "graph_missing");
+    assert_eq!(h.run(CODE_DIFF).unwrap().exit_code, 1);
+    let bodies = h.fakes.calls.sticky_bodies();
+    assert_eq!(bodies.len(), 1);
+    assert!(bodies[0].contains(&format!(r#"<img src="{base}/gate-blocked.svg""#)), "{}", bodies[0]);
+    assert!(bodies[0].contains(&format!(r#"<img src="{base}/bot.svg""#)), "{}", bodies[0]);
+}
+
+#[test]
 fn blast_required_with_graph_and_no_dependents_runs_normally() {
     let mut h = Harness::new(vec![review("m1", vec![])]).env("REVIEW_BLAST_REQUIRED", "1");
     h.fakes.graphify.radius = blast_radius("fresh", 1, "no_dependents");

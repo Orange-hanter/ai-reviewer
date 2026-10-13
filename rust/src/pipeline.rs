@@ -1019,7 +1019,7 @@ impl<'a> ReviewPipeline<'a> {
             self.persist_and_capture(st, obs, payload);
             st.final_obs = json!({ "exitCode": 1, "wouldBlock": true, "blastFailed": reason, "degraded": true });
             if !dry_run && post_creds {
-                if let Err(e) = self.deps.github.upsert_sticky(&build_blast_unavailable_summary(&markers.review, reason)) {
+                if let Err(e) = self.github().upsert_sticky(&build_blast_unavailable_summary(&markers.review, reason)) {
                     self.log(&format!("заметку не запостили: {}", js_slice_utf16(&format!("{e:#}"), 200)));
                 }
             }
