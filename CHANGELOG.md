@@ -10,6 +10,17 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+### Исправлено — ложные «caller вне диффа» на путях с `_`
+
+`emitBlastRadiusFindings` разбирает пути из текста blast-блока, а `formatBlastBlock`
+пишет его для Markdown: `_` → `ˍ` (U+02CD). Путь `cod_doc/x.py` из блока не совпадал
+с путём диффа, и каждый caller в файле с подчёркиванием выходил находкой «Breaking
+change: caller вне диффа не обновлён» — на cod-doc PR #195 все 8 таких находок были
+про файлы самого диффа. Тот же разбор терял confidence и `cross-community` у рёбер с
+`_` в relation (`imports_from`). `parseBlastDependents` возвращает обратимую часть
+экранирования (`ˍ`→`_`, `∗`→`*`); путь в находке теперь настоящий, и inline-комментарий
+встаёт на файл. Получают исправленные пути и cue-факты (`lib/cues.mjs`).
+
 ### Исправлено — blast-radius пуст на Python-репозиториях
 
 `extractChangedSymbols` / `collectBlastSymbols` узнавали только JS/TS-экспорты, а добор из

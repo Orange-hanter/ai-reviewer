@@ -28,7 +28,7 @@ const {
   windowFileEntry, buildVerifierFileContents, windowChunkFileContents,
 } = await import('../index.mjs');
 const {
-  buildGraphIndex, resolveUniqueNode, enrichAffectedDep, bareLabel,
+  buildGraphIndex, resolveUniqueNode, enrichAffectedDep, bareLabel, formatBlastBlock,
 } = await import('../lib/graphify.mjs');
 const { resetFpPatternsCache } = await import('../lib/fp-patterns.mjs');
 const { BLAST_CONF_AMBIGUOUS } = await import('../lib/constants.mjs');
@@ -1474,6 +1474,28 @@ test('emitBlastRadiusFindings: cross-layer caller outside diff', () => {
   assert.equal(findings[0].line, 10);
   assert.ok(findings[0].body.includes('`api()`'));
   assert.ok(!findings.some((f) => f.file === 'packages/core/x.ts'), 'same-layer excluded');
+  resetProfile();
+});
+
+test('emitBlastRadiusFindings: путь с `_` из blast-блока совпадает с путём диффа', () => {
+  // formatBlastBlock экранирует `_` → `ˍ` для Markdown; без обратной замены caller
+  // в cod_doc/services/agent_service.py считался «вне диффа», хотя файл в диффе.
+  setProfile({ layout: { layerDirs: ['cod_doc/services', 'cod_doc/mcp'] } });
+  const limits = { godNodeThreshold: 99, maxDepsPerSymbol: 10 };
+  const deps = [
+    { label: 'get()', file: 'cod_doc/services/agent_service.py', line: 358, relation: 'calls', confidence: 'EXTRACTED', crossCommunity: true },
+    { label: 'run_tool()', file: 'cod_doc/mcp/legacy_agent_tools.py', line: 76, relation: 'imports_from', confidence: 'EXTRACTED', crossCommunity: true },
+  ];
+  const blocks = [formatBlastBlock('row_id_for_slug', deps, limits)];
+  assert.ok(blocks[0].includes('agentˍservice'), 'блок экранирован — иначе тест ничего не проверяет');
+
+  const changed = ['cod_doc/services/project_service.py', 'cod_doc/services/agent_service.py'];
+  const findings = emitBlastRadiusFindings(blocks, changed, { symbols: ['row_id_for_slug'] });
+  assert.deepEqual(findings.map((f) => f.file), ['cod_doc/mcp/legacy_agent_tools.py'],
+    'caller из файла диффа не находка; оставшаяся — с настоящим путём');
+  assert.equal(findings[0].blastEdgeConfidence, 'EXTRACTED', 'relation с `_` не срывает разбор confidence');
+  assert.equal(findings[0].blastCrossCommunity, true);
+  assert.ok(findings[0].body.includes('`row_id_for_slug`'));
   resetProfile();
 });
 
