@@ -9,10 +9,10 @@
 //! - мутабельный профиль (getProfile/repoRules) НЕ читается из процесса Rust:
 //!   обёртка сериализует нужные части аргументами (repoRules, prompts.*,
 //!   layout.e2eSpec — ИСХОДНИКОМ, без компиляции на стороне JS);
-//! - layout.e2eSpec компилируется здесь с `(?i)` (профиль собирает
-//!   `new RegExp(raw, 'i')`). JS-only синтаксис (lookahead и т.п.) — ошибка
-//!   с маркером E2ESPEC_UNSUPPORTED: обёртка деградирует на чистый JS, как
-//!   layout.sensitive в actionability;
+//! - layout.e2eSpec компилируется здесь без учёта регистра (профиль собирает
+//!   `new RegExp(raw, 'i')`) на fancy-regex, как в profile.rs: lookahead и
+//!   backreference поддержаны. Не компилируется и fancy-regex — ошибка с
+//!   маркером E2ESPEC_UNSUPPORTED: обёртка деградирует на чистый JS;
 //! - JS-семантика строк сохранена: replace(/[...]+/g, ' ') схлопывает ПРОГОНЫ
 //!   символов в один пробел; .slice(0, 200) режет по UTF-16 юнитам (суррогатные
 //!   пары считаются за два).
@@ -270,14 +270,17 @@ wordings of the same problems: check each previous item against the CURRENT code
 still present → repeat with the same title and line) and add only GENUINELY new defects. The goal is a
 stable set from run to run, not a rotation of wordings."#;
 
-/// Маркер деградации: e2eSpec не компилируется regex-крейтом (JS-only синтаксис).
+/// Маркер деградации: e2eSpec не компилируется и fancy-regex (JS-only синтаксис).
 pub const E2ESPEC_UNSUPPORTED: &str = "E2ESPEC_UNSUPPORTED";
 
-/// layout.e2eSpec → regex с `(?i)`; JS-only синтаксис → ошибка с маркером.
-fn e2e_re(ctx: &PromptCtx) -> Result<Option<regex::Regex>> {
+/// layout.e2eSpec → regex без учёта регистра на fancy-regex — тем же построителем,
+/// что профиль (`profile::compile_js_i`, RFC 20, решение 4): lookahead/backreference работают,
+/// и паттерн, принятый профилем, здесь гарантированно компилируется. Не
+/// компилируется и fancy-regex → ошибка с маркером (обёртка деградирует на JS).
+fn e2e_re(ctx: &PromptCtx) -> Result<Option<fancy_regex::Regex>> {
     match &ctx.e2e_spec_source {
         None => Ok(None),
-        Some(src) => match regex::Regex::new(&format!("(?i){src}")) {
+        Some(src) => match crate::profile::compile_js_i(src) {
             Ok(re) => Ok(Some(re)),
             Err(e) => bail!("{E2ESPEC_UNSUPPORTED}: {e}"),
         },
@@ -465,7 +468,8 @@ pub fn build_changed_files_section(changed_paths: &[Value], chunk: &Value, ctx: 
         None => Vec::new(),
         Some(re) => changed_paths
             .iter()
-            .filter(|p| re.is_match(&js_to_string(p)))
+            // Ошибка сопоставления (лимит backtracking) — «не совпало», без аварии.
+            .filter(|p| re.is_match(&js_to_string(p)).unwrap_or(false))
             .cloned()
             .collect(),
     };
@@ -925,11 +929,18 @@ mod tests {
     }
 
     #[test]
-    fn changed_files_section_lookahead_degrades() {
+    fn changed_files_section_lookahead_e2e_spec_works() {
+        // RFC 20, решение 4: e2eSpec — диалект fancy-regex, как в profile.rs. Профиль
+        // с lookahead собирается, значит и промпт обязан собраться (иначе standalone
+        // обрывал run() до LLM — гейт молча выключался).
         let mut c = ctx();
-        c.e2e_spec_source = Some(r"e2e/.+(?=\.spec)".to_string());
+        c.e2e_spec_source = Some(r"E2E/.+(?=\.spec)".to_string());
+        let s = build_changed_files_section(&[json!("e2e/a.spec.ts"), json!("app/x.ts")], &json!({}), &c).unwrap();
+        assert!(s.contains("E2E specs"), "{s}");
+        assert!(s.contains("e2e/a.spec.ts"));
+        // Не компилируется и fancy-regex — маркер деградации для обёртки.
+        c.e2e_spec_source = Some(r"e2e/(".to_string());
         let r = build_changed_files_section(&[json!("e2e/a.spec.ts")], &json!({}), &c);
-        assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains(E2ESPEC_UNSUPPORTED));
     }
 

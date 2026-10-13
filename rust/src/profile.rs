@@ -30,7 +30,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
-use fancy_regex::{Regex, RegexBuilder};
+use fancy_regex::Regex;
 use indexmap::IndexMap;
 use serde_json::{json, Map, Value};
 
@@ -169,7 +169,16 @@ fn compile_candidate(candidate: Option<&str>, fallback: &str) -> (Option<String>
 /// `new RegExp(src, 'i')`. Причина ошибки не нужна ни одному вызывающему
 /// (в JS `catch` тоже безымянный), а `fancy_regex::Error` крупный — отдаём Option.
 fn compile_i(src: &str) -> Option<Regex> {
-    RegexBuilder::new(src).case_insensitive(true).build().ok()
+    compile_js_i(src).ok()
+}
+
+/// Флаг `i` — встроенным `(?i)` в начале, а НЕ `RegexBuilder::case_insensitive`:
+/// в fancy-regex 0.14 флаг построителя теряется, как только паттерн уходит в
+/// backtracking-движок (lookaround, backreference), и `E2E/.+(?=x)` перестаёт
+/// совпадать с `e2e/ax`. Встроенный флаг действует на весь паттерн, как в JS.
+/// Им же компилирует e2eSpec prompt.rs — один построитель на обе стороны.
+pub(crate) fn compile_js_i(src: &str) -> Result<Regex, fancy_regex::Error> {
+    Regex::new(&format!("(?i){src}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1023,6 +1032,20 @@ mod tests {
         let p = Profile::load_file_at(&dir.join("profile.json"), &dir).unwrap();
         assert_eq!(p.repo_rules, "");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn case_insensitive_flag_survives_lookaround_and_backrefs() {
+        // JS: new RegExp(raw, 'i') — флаг действует на весь паттерн. В fancy-regex 0.14
+        // RegexBuilder::case_insensitive теряется, как только в паттерне есть
+        // lookaround/backreference (сборка уходит в backtracking-движок).
+        let raw = json!({ "layout": { "e2eSpec": "E2E/.+(?=\\.spec)", "sensitive": "^(LIB)/\\1" } });
+        let p = Profile::normalize(&raw, Path::new("/nowhere"), "", Path::new("/nowhere"));
+        assert_eq!(p.layout().e2e_spec_source(), Some("E2E/.+(?=\\.spec)"));
+        assert!(p.layout().e2e_spec().unwrap().is_match("e2e/a.spec.ts").unwrap());
+        // Захват сравнивается побайтно (`lib/LIB` в JS совпадёт, здесь нет) — это уже
+        // диалект fancy-regex (RFC 20, решение 4), а не потеря флага.
+        assert!(p.layout().sensitive().unwrap().is_match("lib/lib").unwrap());
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! сериализуется обёрткой аргументом profile:
 //!   {repoRules: string, prompts: {advisorExtra, specialistExtra,
 //!    aggregatorExtra, verifierExtra}, e2eSpecSource: string|null}
-//! e2eSpec с JS-only синтаксисом (lookahead) → ошибка с маркером
+//! e2eSpec компилируется fancy-regex (lookahead поддержан); не компилируется → ошибка с маркером
 //! E2ESPEC_UNSUPPORTED: обёртка деградирует на чистый JS (как layout.sensitive
 //! в actionability), остальные ошибки пробрасываются.
 

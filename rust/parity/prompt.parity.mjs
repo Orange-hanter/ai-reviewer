@@ -8,7 +8,7 @@
  * нормализации). Диспетчеризация — env AI_REVIEWER_PROMPT_FORCE_JS (читается
  * на каждый вызов): js-сторона прогоняется с FORCE_JS=1, rust-сторона — без.
  * Профиль переключается между кейсами (default / правила+extras / orakul /
- * кастомный e2eSpec / lookahead-e2eSpec → согласованная деградация на JS).
+ * кастомный e2eSpec / lookahead-e2eSpec — fancy-regex на стороне Rust).
  *
  * Матрица:
  *   1. buildMessages: карта PR из чанка (split + e2e), готовая changedFilesSection,
@@ -21,7 +21,7 @@
  *      (успех/ошибки/все недоступны) + refutationSchema перед последним user;
  *   5. buildChangedFilesSection standalone: целиком/по частям/один частичный файл/
  *      спуфинг метки в имени; e2e-спеки: дефолтный профиль, кастомный e2eSpec,
- *      lookahead-e2eSpec (деградация rust-ветки на JS — выходы совпадают).
+ *      lookahead-e2eSpec (Rust собирает его fancy-regex — выходы совпадают).
  */
 
 import { existsSync } from 'node:fs';
