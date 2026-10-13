@@ -76,8 +76,12 @@ fn orakul() -> Profile {
 }
 
 fn tmp_dir(tag: &str) -> PathBuf {
+    // Наносекунды на macOS идут шагом в 1 мкс: параллельные тесты получали один каталог
+    // и перезаписывали друг другу changes.patch. Счётчик делает имя уникальным в процессе.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let dir = std::env::temp_dir().join(format!("pr-review-pipe-{tag}-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("pr-review-pipe-{tag}-{}-{nanos}-{seq}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -1262,13 +1266,13 @@ fn blast_required_with_graph_and_no_dependents_runs_normally() {
 #[test]
 fn blast_unavailable_reason_matches_js() {
     let mut m = blast_radius("fresh", 0, "graphify_timeout").metrics;
-    assert_eq!(blast_unavailable_reason(&m), Some("graphify_timeout"), "все запросы упали");
+    assert_eq!(crate::graphify_client::blast_unavailable_reason(Some(&m)), Some("graphify_timeout"), "все запросы упали");
     m.symbols_total = 2;
-    assert_eq!(blast_unavailable_reason(&m), None, "упала часть — радиус посчитан");
+    assert_eq!(crate::graphify_client::blast_unavailable_reason(Some(&m)), None, "упала часть — радиус посчитан");
     m.skip_reasons.insert("graph_enrichment_unavailable".into(), 1);
-    assert_eq!(blast_unavailable_reason(&m), Some("graph_unreadable"));
+    assert_eq!(crate::graphify_client::blast_unavailable_reason(Some(&m)), Some("graph_unreadable"));
     m.skip_reason = "client_did_not_report".into();
-    assert_eq!(blast_unavailable_reason(&m), None);
+    assert_eq!(crate::graphify_client::blast_unavailable_reason(Some(&m)), None);
 }
 
 // ---------------------------------------------------------------------------

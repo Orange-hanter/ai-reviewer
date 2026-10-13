@@ -520,29 +520,6 @@ struct VerifierStageCtx<'s> {
     symbol_cards: Option<&'s SymbolCards>,
 }
 
-/// Сбои запроса к графу (`QUERY_FAILURE_REASONS`, `lib/graphify.mjs`).
-const QUERY_FAILURE_REASONS: [&str; 3] = ["graphify_unavailable", "graphify_timeout", "graphify_error"];
-
-/// `blastUnavailableReason` (`lib/graphify.mjs`, RFC 16): причина, по которой blast-radius
-/// НЕ посчитан (инфра-сбой), или `None`. Пустой радиус при живом графе — не сбой.
-fn blast_unavailable_reason(m: &BlastMetrics) -> Option<&'static str> {
-    if m.skip_reason == "client_did_not_report" {
-        return None;
-    }
-    if m.graph_status == "missing" {
-        return Some("graph_missing");
-    }
-    let r = |k: &str| m.skip_reasons.get(k).copied().unwrap_or(0);
-    if r("graph_enrichment_unavailable") > 0 {
-        return Some("graph_unreadable");
-    }
-    let failed: u64 = QUERY_FAILURE_REASONS.iter().map(|k| r(k)).sum();
-    if m.symbols_total > 0 && failed >= m.symbols_total as u64 {
-        return Some(QUERY_FAILURE_REASONS.iter().copied().find(|k| r(k) > 0).unwrap_or("graphify_error"));
-    }
-    None
-}
-
 /// `buildBlastUnavailableSummary`: sticky при `REVIEW_BLAST_REQUIRED=1` и непосчитанном
 /// blast-radius (LLM не вызывался).
 fn build_blast_unavailable_summary(review_marker: &str, reason: &str) -> String {
@@ -1021,7 +998,7 @@ impl<'a> ReviewPipeline<'a> {
         // REVIEW_BLAST_REQUIRED (RFC 16): без code graph гейт не видит callers вне диффа →
         // fail-closed ДО LLM (тратить токены на ревью, которое всё равно заблокируется, незачем).
         let blast_failure =
-            if truthy(cfg, &["gate", "blastRequired"]) { blast_unavailable_reason(&blast_metrics) } else { None };
+            if truthy(cfg, &["gate", "blastRequired"]) { crate::graphify_client::blast_unavailable_reason(Some(&blast_metrics)) } else { None };
         if let Some(reason) = blast_failure {
             self.log(&format!("blast-radius недоступен ({reason}) — fail-closed (REVIEW_BLAST_REQUIRED)"));
             obs.log_event("blast_failed", &json!({ "reason": reason, "required": true, "blast_radius": blast_metrics_v }));
