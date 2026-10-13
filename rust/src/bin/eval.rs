@@ -24,7 +24,7 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
     let dir = cli.fixtures.unwrap_or_else(default_fixtures_dir);
-    let out = run_eval_harness(&dir, &process_env_map());
+    let out = run_eval_harness(&dir, &process_env_map(), &std::env::current_dir().unwrap_or_default());
     if cli.json {
         println!("{}", json_output(&out));
     } else {

@@ -55,12 +55,17 @@ pub fn process_env_map() -> Map<String, Value> {
 }
 
 /// `runEvalHarness`: конфиг (env + `REVIEW_MODE=consensus`, `OLLAMA_MODELS=m1,m2`) на
-/// встроенном профиле — JS-харнес профиль не резолвит, `getProfile()` отдаёт дефолт.
-pub fn run_eval_harness(fixtures_dir: &Path, env: &Map<String, Value>) -> EvalOutcome {
+/// профиле прогона — `loadReviewConfig` резолвит его (`REVIEW_PROFILE` → `.ai-reviewer.json`
+/// в `cwd` → встроенный), и `strict`/`requireQuote`/`appDir` профиля доходят до гейта.
+/// Лог битого профиля молчит: JS-харнес зовёт `resolveProfile(env)` без `log`.
+pub fn run_eval_harness(fixtures_dir: &Path, env: &Map<String, Value>, cwd: &Path) -> EvalOutcome {
     let mut env = env.clone();
     env.insert("REVIEW_MODE".into(), json!("consensus"));
     env.insert("OLLAMA_MODELS".into(), json!("m1,m2"));
-    let profile = Profile::default_builtin(&package_root());
+    let env_strings: std::collections::HashMap<String, String> =
+        env.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect();
+    let profile = Profile::resolve(&env_strings, cwd, |_| {})
+        .unwrap_or_else(|_| Profile::default_builtin_in(&package_root(), cwd));
     let cfg = load_review_config_parts(&env, &profile.config_input());
     let base_gate = cfg.get("gate").cloned().unwrap_or_else(|| json!({}));
     let prescan_cfg = cfg.get("prescan").cloned().unwrap_or(Value::Null);
@@ -427,9 +432,30 @@ mod tests {
         default_fixtures_dir()
     }
 
+    /// Каталог прогона без профиля: тесты не зависят от `.ai-reviewer.json` вокруг.
+    fn no_profile_dir() -> PathBuf {
+        PathBuf::from("/nonexistent/eval-cwd")
+    }
+
+    #[test]
+    fn harness_resolves_profile_from_cwd() {
+        // lib/eval.mjs: runEvalHarness → loadReviewConfig → resolveProfile(env) —
+        // strict:true профиля в cwd меняет гейт фикстур.
+        let cwd = tempfile::tempdir().unwrap();
+        fs::write(cwd.path().join(".ai-reviewer.json"), r#"{"strict":true}"#).unwrap();
+        let out = run_eval_harness(&repo_fixtures(), &Map::new(), cwd.path());
+        assert!(!out.ok, "strict-профиль ломает ожидания seed-фикстур");
+        // REVIEW_PROFILE из env побеждает автопоиск.
+        let named = cwd.path().join("neutral.json");
+        fs::write(&named, "{}").unwrap();
+        let mut env = Map::new();
+        env.insert("REVIEW_PROFILE".into(), json!(named.to_string_lossy()));
+        assert!(run_eval_harness(&repo_fixtures(), &env, cwd.path()).ok);
+    }
+
     #[test]
     fn all_repo_fixtures_pass() {
-        let out = run_eval_harness(&repo_fixtures(), &Map::new());
+        let out = run_eval_harness(&repo_fixtures(), &Map::new(), &no_profile_dir());
         let failed: Vec<String> = out
             .results
             .iter()
@@ -445,7 +471,7 @@ mod tests {
 
     #[test]
     fn missing_dir_is_empty_and_ok() {
-        let out = run_eval_harness(Path::new("/nonexistent/fixtures-t28"), &Map::new());
+        let out = run_eval_harness(Path::new("/nonexistent/fixtures-t28"), &Map::new(), &no_profile_dir());
         assert!(out.ok);
         assert_eq!(out.metrics["passRate"], json!(1.0));
         assert_eq!(out.metrics["precisionNote"], json!("n/a"));
@@ -464,7 +490,7 @@ mod tests {
             r#"{"findings":[{"file":"a.ts","line":1,"severity":"minor","title":"мелочь","body":"b","model":"m1","confidence":0.9}]}"#,
         )
         .unwrap();
-        let out = run_eval_harness(dir.path(), &Map::new());
+        let out = run_eval_harness(dir.path(), &Map::new(), &no_profile_dir());
         assert!(!out.ok);
         let r = &out.results[0];
         assert_eq!(r["pass"], json!(false));
