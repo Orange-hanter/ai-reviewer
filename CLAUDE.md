@@ -26,8 +26,9 @@ conventional (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `release:`).
 ```bash
 npm test          # node --test test/*.test.mjs — юнит + контракты (в т.ч. шаблоны examples/ci/)
 npm run eval      # golden fixtures без LLM — гейт post-processing
-npm run check     # test + eval + check:rust (cargo build/test + check:parity); нужен cargo;
-                  # ровно это гоняет CI (.github/workflows/ci.yml)
+npm run check     # cargo build + test + eval + check:rust (cargo test + check:parity); нужен
+                  # cargo; ровно это гоняет CI (.github/workflows/ci.yml). Без бинаря npm test
+                  # идёт по deprecated JS-копиям
 
 node --test test/pr-review.test.mjs                                # один файл
 node --test --test-name-pattern="parseDiff: validLines" test/…     # один тест
@@ -127,9 +128,15 @@ verifier, report, github, export, actionability, metrics, config/profile, json, 
 JS-модуль остаётся обёрткой с тем же API: зовёт бинарь из `rust/target/debug/` (JSON на stdin),
 а без бинаря работает эталонный JS. `AI_REVIEWER_<MOD>_BIN` — путь к бинарю,
 `AI_REVIEWER_<MOD>_FORCE_JS=1` — чистый JS. Оркестрация (`pipeline.mjs`, chunk-routing,
-specialist-merge, incremental) — только JS. Меняешь логику портированного модуля — меняй обе
-стороны: `rust/parity/*.parity.mjs` (`npm run check:parity`) сверяют собранный бинарь с JS и
-без `cargo build` сходятся тривиально.
+specialist-merge, incremental) — только JS.
+
+**С 0.6 Rust — основная реализация, JS-копии deprecated** ([RFC 20](proposals/20-rust-primary.md)).
+Новое поведение портированного модуля пишется только в Rust; JS-копию не правь (кроме
+механической правки общего с оркестрацией контракта) и не удаляй до аудита «ничего не
+потеряно». Разошедшиеся намеренно тексты помечаются в parity как rust-owned, а не
+подгоняются. Уже разошлись: каскад ретраев LLM (`rust/src/llm/cascade.rs`) и системные
+промпты (`rust/src/prompt.rs`, английские; вывод — на русском). `rust/parity/*.parity.mjs`
+(`npm run check:parity`) сверяют собранный бинарь с JS и без `cargo build` сходятся тривиально.
 
 ## Structure-контур
 

@@ -65,7 +65,8 @@ test('без профиля правил репозитория нет — пр�
     annotated: '+ const a = 1;', blastBlocks: [], pr: { number: 1, title: 't' },
     fileContents: '', priorFindings: [], changedPaths: ['src/a.ts'],
   });
-  assert.match(system.content, /senior review engineer/);
+  // Rust-промпт (0.6+) или deprecated JS-копия — без бинаря работает вторая.
+  assert.match(system.content, /final reviewer \(jury aggregator\)|senior review engineer/);
   assert.doesNotMatch(system.content, /Orakul/);
 });
 

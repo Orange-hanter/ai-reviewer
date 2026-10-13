@@ -68,21 +68,25 @@ test('паритет: ограничения выхода ролей есть в
   // Потолок жюри берём так же из JS-константы.
   const agg = /AGGREGATOR_MAX_ITEMS\s*=\s*(\d+)/.exec(js)?.[1];
   assert.ok(agg, 'в lib/prompt.mjs не найдена константа AGGREGATOR_MAX_ITEMS');
+  // С 0.6 тексты системных промптов принадлежат Rust (proposals/20-rust-primary.md):
+  // формулировки сторон разошлись, общими остались величины потолков и форматы выхода.
+  assert.match(rustSrc, new RegExp(`SPECIALIST_MAX_ITEMS: usize = ${cap};`), 'потолок пунктов роли разошёлся с JS');
+  assert.match(rustSrc, new RegExp(`AGGREGATOR_MAX_ITEMS: usize = ${agg};`), 'потолок находок жюри разошёлся с JS');
   const marks = [
-    [`AT MOST ${cap} items`, 'потолок числа пунктов у роли'],
-    ['Do NOT report nits', 'запрет nit-ов'],
-    ['quote the offending line verbatim', 'требование дословной цитаты'],
+    ['at most {SPECIALIST_MAX_ITEMS}', 'потолок числа пунктов у роли в тексте'],
+    ['do not report nits', 'запрет nit-ов'],
+    ['cannot quote verbatim', 'требование дословной цитаты'],
     // A4: цитата обязана быть у КАЖДОГО пункта роли, а не только у minor — маркер по формату
-    // строки в шаблоне пункта, его нельзя случайно оставить только в JS.
+    // строки в шаблоне пункта.
     ['  quote: <one line copied verbatim', 'строка `quote:` в шаблоне пункта роли'],
     // A3: потолок и длина полей выхода жюри — это оплаченные completion-токены.
-    [`AT MOST ${agg} findings`, 'потолок числа находок жюри'],
-    ['2–3 sentences: what breaks, why, and the fix', 'ограничение длины body'],
+    ['At most {AGGREGATOR_MAX_ITEMS} findings', 'потолок числа находок жюри'],
+    ['2–3 sentences: what breaks', 'ограничение длины body'],
     ['"summary": "one sentence', 'ограничение длины summary'],
   ];
   for (const [needle, what] of marks) {
     assert.ok(rustSrc.includes(needle), `rust/src/prompt.rs не содержит ${what} («${needle}»). `
-      + 'Правка промпта только в JS-копии меняет поведение лишь там, где бинарь не собран.');
+      + 'Ограничение выхода, потерянное в Rust, снимается везде, где собран бинарь.');
   }
   assert.ok(!/severity = critical\|major\|minor\|nit/.test(rustSrc),
     'rust/src/prompt.rs всё ещё разрешает роли репортить nit — шкала разошлась с JS.');
@@ -122,7 +126,7 @@ test('паритет: ни одна копия промпта не обещае�
   // иначе метка есть, а объясняющего её абзаца нет (или наоборот).
   const required = [
     ['[THIS PART, CONTEXT WINDOWED]', 'метка оконного контекста в карте PR'],
-    ['строки N–M пропущены', 'ссылка на маркер пропуска в тексте правила'],
+    ['lines N–M not shown', 'ссылка на маркер пропуска в тексте правила'],
     ['NO ABSENCE CLAIMS', 'запрет утверждений об отсутствии'],
   ];
   for (const [file, src] of copies) {
@@ -190,9 +194,11 @@ test('паритет: дорогие абзацы промпта условны 
     [/const AGGREGATOR_BLAST_RULE: &str/, 'абзац BLAST-RADIUS RULE вынесен в константу'],
     [/const AGGREGATOR_CONVERGENCE: &str/, 'абзац CONVERGENCE вынесен в константу'],
     [/const VERIFIER_BLAST_RULE: &str/, 'абзац verifier\'а про blast-radius вынесен в константу'],
-    [/if !blast_blocks\.is_empty\(\)\s*\{\s*system\.push_str\(AGGREGATOR_BLAST_RULE\)/, 'BLAST-RADIUS RULE под условием непустого blast-radius'],
-    [/if !priors\.is_empty\(\)\s*\{\s*system\.push_str\(AGGREGATOR_CONVERGENCE\)/, 'CONVERGENCE под условием непустых priors'],
-    [/if !blast_blocks\.is_empty\(\)\s*\{\s*system\.push_str\(VERIFIER_BLAST_RULE\)/, 'абзац verifier\'а под условием непустого blast-radius'],
+    [/if with_blast\s*\{\s*s\.push_str\(AGGREGATOR_BLAST_RULE\)/, 'BLAST-RADIUS RULE под условием'],
+    [/if with_priors\s*\{\s*s\.push_str\(AGGREGATOR_CONVERGENCE\)/, 'CONVERGENCE под условием'],
+    [/aggregator_system\(ctx, !blast_blocks\.is_empty\(\), !priors\.is_empty\(\)\)/, 'условия жюри — непустые blast-radius и priors'],
+    [/if with_blast\s*\{\s*s\.push_str\(VERIFIER_BLAST_RULE\)/, 'абзац verifier\'а под условием'],
+    [/verifier_system\(ctx, !blast_blocks\.is_empty\(\)\)/, 'условие verifier\'а — непустой blast-radius'],
   ];
   for (const [re, what] of rustMarks) {
     assert.match(rustSrc, re, `в rust/src/prompt.rs не найдено: ${what}. `

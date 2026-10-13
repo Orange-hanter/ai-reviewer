@@ -1893,24 +1893,24 @@ const entryBody = (entry) => entry.split('\n').slice(2, -1);
 test('windowFileEntry: одна строка-кандидат → окно ±margin, номера строк восстановимы по маркерам', () => {
   const out = windowFileEntry(mkEntry('a.ts', 300), [150], { margin: 10 });
   const body = entryBody(out);
-  assert.equal(body[0], '… (строки 1–139 пропущены)');
+  assert.equal(body[0], '… (lines 1–139 not shown)');
   assert.equal(body[1], 'строка 140');
   assert.equal(body[body.length - 2], 'строка 160');
-  assert.equal(body[body.length - 1], '… (строки 161–300 пропущены)');
+  assert.equal(body[body.length - 1], '… (lines 161–300 not shown)');
   assert.ok(out.startsWith('### a.ts\n```\n') && out.endsWith('\n```'), 'обёртка сохранена');
 });
 
 test('windowFileEntry: пересекающиеся окна сливаются, между разнесёнными — один маркер', () => {
   const merged = entryBody(windowFileEntry(mkEntry('a.ts', 300), [100, 110], { margin: 10 }));
-  assert.equal(merged.filter((l) => l.startsWith('… (строки')).length, 2, 'только голова и хвост');
+  assert.equal(merged.filter((l) => l.startsWith('… (lines')).length, 2, 'только голова и хвост');
   assert.deepEqual(merged.slice(1, 3), ['строка 90', 'строка 91'], 'слитое окно 90–120');
 
   const split = entryBody(windowFileEntry(mkEntry('a.ts', 300), [50, 250], { margin: 10 }));
-  const markers = split.filter((l) => l.startsWith('… (строки'));
+  const markers = split.filter((l) => l.startsWith('… (lines'));
   assert.deepEqual(markers, [
-    '… (строки 1–39 пропущены)',
-    '… (строки 61–239 пропущены)',
-    '… (строки 261–300 пропущены)',
+    '… (lines 1–39 not shown)',
+    '… (lines 61–239 not shown)',
+    '… (lines 261–300 not shown)',
   ]);
 });
 
@@ -1934,10 +1934,10 @@ test('windowChunkFileContents: разнесённые хунки → окна в
   const files = mkFiles({ 'a.ts': [50, 51, 250] });
   const r = windowChunkFileContents(contentMap, files, { margin: 10, minChars: 0 });
   const body = entryBody(r.map.get('a.ts'));
-  assert.deepEqual(body.filter((l) => l.startsWith('… (строки')), [
-    '… (строки 1–39 пропущены)',
-    '… (строки 62–239 пропущены)',
-    '… (строки 261–300 пропущены)',
+  assert.deepEqual(body.filter((l) => l.startsWith('… (lines')), [
+    '… (lines 1–39 not shown)',
+    '… (lines 62–239 not shown)',
+    '… (lines 261–300 not shown)',
   ], 'два окна (40–61 и 240–260), между ними и по краям — маркеры пропуска');
   assert.deepEqual(r.windowed, new Set(['a.ts']));
   assert.ok(r.after < r.before, `окна короче файла: ${r.before} → ${r.after}`);
@@ -1996,14 +1996,14 @@ test('buildChangedFilesSection: windowedPaths → метка CONTEXT WINDOWED и
   assert.ok(s.includes('- `a.ts` — [THIS PART]'), 'неоконный путь метку не получает');
   assert.ok(!s.includes('SOME HUNKS ONLY]\n'), 'подменять метку частичности нельзя: все хунки на месте');
   assert.ok(s.includes('HARD RULE — NO ABSENCE CLAIMS'), 'запрет включается одними окнами, без разрезания на части');
-  assert.ok(s.includes('строки N–M пропущены'), 'правило ссылается на маркер пропуска дословно');
+  assert.ok(s.includes('lines N–M not shown'), 'правило ссылается на маркер пропуска дословно');
   assert.ok(!s.includes('This PR is reviewed in parts'), 'PR из одного чанка ни на какие части не разрезан');
 });
 
 test('buildChangedFilesSection: без windowedPaths карта PR про окна молчит (откат)', () => {
   const whole = buildChangedFilesSection(['a.ts', 'b.ts'], { paths: ['a.ts', 'b.ts'], partialPaths: [] });
   assert.ok(!whole.includes('CONTEXT WINDOWED'));
-  assert.ok(!whole.includes('строки N–M пропущены'));
+  assert.ok(!whole.includes('lines N–M not shown'));
   assert.ok(!whole.includes('NO ABSENCE CLAIMS'), 'весь PR в одном чанке и без окон — запрещать нечего');
 
   const parts = buildChangedFilesSection(['a.ts', 'b.ts'], { paths: ['a.ts'], partialPaths: [] });
@@ -2025,7 +2025,7 @@ test('buildVerifierFileContents: только файлы кандидатов, �
   ], { margin: 80 });
   assert.equal(r.files, 2, 'c.ts без кандидатов в контекст не попал');
   assert.ok(!r.text.includes('### c.ts'));
-  assert.ok(r.text.includes('… (строки 121–169 пропущены)'), 'два окна a.ts не слились');
+  assert.ok(r.text.includes('… (lines 121–169 not shown)'), 'два окна a.ts не слились');
   assert.ok(!r.text.includes('### b.ts\n```\n… ('), 'b.ts отдан целиком: центрировать окно не на чем');
   assert.ok(r.after < r.before, `окна короче целых файлов: ${r.before} → ${r.after}`);
 });

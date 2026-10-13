@@ -20,17 +20,20 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Unit tests (node:test)
-        run: npm test
-
-      - name: Eval harness fixtures (R1)
-        run: npm run eval
-
+      # Rust собирается ПЕРВЫМ (RFC 20): основная реализация — бинари, и юнит-тесты должны
+      # идти по ней. Без бинаря обёртки падают на deprecated JS-копии — этот путь покрывает
+      # локальный `npm test` на машине без cargo.
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Rust build
         working-directory: rust
         run: cargo build
+
+      - name: Unit tests (node:test)
+        run: npm test
+
+      - name: Eval harness fixtures (R1)
+        run: npm run eval
 
       - name: Rust tests
         working-directory: rust
