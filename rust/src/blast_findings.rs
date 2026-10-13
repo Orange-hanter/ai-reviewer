@@ -129,7 +129,7 @@ fn dep_entry_re() -> &'static Regex {
         let pattern = concat!(
             r"(?i)(?:`([^`]+)`[{ws}]*@[{ws}]*)?",
             r"([^{ws},`]+?\.(?:{ext})):(?:L)?([0-9]+)",
-            r"(?:[{ws}]*\[([A-Za-z0-9_]+)\])?",
+            r"(?:[{ws}]*\[([A-Za-z0-9_\x{02CD}]+)\])?",
             r"(?:\[(EXTRACTED|INFERRED|AMBIGUOUS)\])?",
             r"(?:[{ws}]*(cross-community))?",
         )
@@ -137,6 +137,15 @@ fn dep_entry_re() -> &'static Regex {
         .replace("{ext}", &ext_alt);
         Regex::new(&pattern).expect("regex записи blast-зависимости компилируется")
     })
+}
+
+/// Обратное к обратимой части `escapeMdFragment` (`lib/blast-findings.mjs`,
+/// `unescapeMdFragment`): блок пишется для Markdown, и `_` в нём — `ˍ` (U+02CD), `*` — `∗`
+/// (U+2217). Без обратной замены путь `cod_doc/x.py` из блока не совпадал с путём диффа,
+/// и каждый caller в файле с подчёркиванием считался «вне диффа». Скобки и backtick
+/// экранируются необратимо (`[`→`(`) и тут не трогаются.
+fn unescape_md_fragment(s: &str) -> String {
+    s.replace('\u{02CD}', "_").replace('\u{2217}', "*")
 }
 
 /// Заголовок блока: `- \`symbol\`` в любой строке (`/^- \`([^\`]+)\`/m`).
@@ -243,7 +252,7 @@ pub fn parse_blast_dependents(blocks: &[String]) -> Vec<BlastDependent> {
         let symbol = symbol_re()
             .captures(block)
             .and_then(|c| c.get(1))
-            .map(|m| m.as_str().to_string())
+            .map(|m| unescape_md_fragment(m.as_str()))
             .unwrap_or_default();
         for m in dep_entry_re().captures_iter(block) {
             let group = |i: usize| m.get(i).map(|g| g.as_str()).unwrap_or("");
@@ -251,10 +260,10 @@ pub fn parse_blast_dependents(blocks: &[String]) -> Vec<BlastDependent> {
             let line = group(3).parse::<f64>().unwrap_or(f64::NAN);
             let line = if line.is_finite() && line != 0.0 { line } else { 1.0 };
             items.push(BlastDependent {
-                caller: group(1).to_string(),
-                file: trim_quotes(group(2)),
+                caller: unescape_md_fragment(group(1)),
+                file: unescape_md_fragment(&trim_quotes(group(2))),
                 line,
-                relation: group(4).to_string(),
+                relation: unescape_md_fragment(group(4)),
                 confidence: group(5).to_uppercase(),
                 cross_community: m.get(6).is_some(),
                 symbol: symbol.clone(),
@@ -460,6 +469,37 @@ mod tests {
         assert_eq!(paths.len(), 2);
         assert!(paths.contains("apps/web/a.ts"));
         assert!(paths.contains("apps/web/b.ts"));
+    }
+
+    #[test]
+    fn путь_с_подчёркиванием_из_блока_совпадает_с_путём_диффа() {
+        // JS: test('emitBlastRadiusFindings: путь с `_` из blast-блока совпадает с путём диффа').
+        // formatBlastBlock экранирует `_` → `ˍ` для Markdown; без обратной замены caller
+        // в cod_doc/services/agent_service.py считался «вне диффа», хотя файл в диффе.
+        use crate::graphify_client::{format_blast_block, AffectedDep, BlastLimits};
+        let p = layout_profile(json!({ "layerDirs": ["cod_doc/services", "cod_doc/mcp"] }));
+        let limits = BlastLimits { concurrency: 1, god_node_threshold: 99, max_deps_per_symbol: 10 };
+        let dep = |label: &str, file: &str, line: f64, relation: &str| AffectedDep {
+            confidence: Some("EXTRACTED".into()),
+            cross_community: true,
+            ..AffectedDep::raw(label, relation, file, line)
+        };
+        let deps = vec![
+            dep("get()", "cod_doc/services/agent_service.py", 358.0, "calls"),
+            dep("run_tool()", "cod_doc/mcp/legacy_agent_tools.py", 76.0, "imports_from"),
+        ];
+        let blocks = vec![format_blast_block("row_id_for_slug", &deps, &limits, false)];
+        assert!(blocks[0].contains("agent\u{02CD}service"), "блок экранирован — иначе тест ничего не проверяет");
+
+        let changed = strs(&["cod_doc/services/project_service.py", "cod_doc/services/agent_service.py"]);
+        let symbols = strs(&["row_id_for_slug"]);
+        let opts = BlastFindingsOpts { symbols: &symbols, ..BlastFindingsOpts::new(p.layout()) };
+        let findings = emit_blast_radius_findings(&blocks, &changed, &opts);
+        let files: Vec<&Value> = findings.iter().map(|f| &f["file"]).collect();
+        assert_eq!(files, vec![&json!("cod_doc/mcp/legacy_agent_tools.py")], "caller из файла диффа не находка");
+        assert_eq!(findings[0]["blastEdgeConfidence"], json!("EXTRACTED"), "relation с `_` не срывает разбор");
+        assert_eq!(findings[0]["blastCrossCommunity"], json!(true));
+        assert!(findings[0]["body"].as_str().unwrap().contains("`row_id_for_slug`"));
     }
 
     #[test]
