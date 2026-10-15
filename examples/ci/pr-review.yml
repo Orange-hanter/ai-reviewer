@@ -165,13 +165,32 @@ jobs:
             echo "::error::sha256 архива $NAME не совпал — бинари не установлены, движок на JS-копиях"
             exit 0
           fi
-          if ! command -v gh >/dev/null; then
+          # gh нужен для проверки provenance. На self-hosted раннере его часто нет — тогда
+          # берём пиненную версию из релиза cli/cli, сверенную по sha256, зашитому ЗДЕСЬ
+          # (не скачанному рядом). Обновляя GH_VER, обнови и обе суммы.
+          GH="$(command -v gh || true)"
+          if [ -z "$GH" ]; then
+            GH_VER=2.102.0
+            case "$T" in
+              linux-x64) GH_ARCH=linux_amd64; GH_SHA=bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386 ;;
+              linux-arm64) GH_ARCH=linux_arm64; GH_SHA=7862c86c72f43df3a2d93ddde6f473285b4e2af61b494849846827e513ef6484 ;;
+              *) GH_ARCH= ;;
+            esac
+            if [ -n "$GH_ARCH" ] \
+               && curl -fsSL --retry 3 -o "$D/gh.tar.gz" "https://github.com/cli/cli/releases/download/v$GH_VER/gh_${GH_VER}_${GH_ARCH}.tar.gz" \
+               && echo "$GH_SHA  $D/gh.tar.gz" | sha256sum -c - >/dev/null \
+               && tar -xzf "$D/gh.tar.gz" -C "$D"; then
+              GH="$D/gh_${GH_VER}_${GH_ARCH}/bin/gh"
+              echo "→ gh на раннере нет — взят gh $GH_VER из релиза cli/cli (sha256 сверен)"
+            fi
+          fi
+          if [ -z "$GH" ]; then
             echo "::warning::нет gh CLI — provenance архива не проверить, бинари не установлены, движок на JS-копиях"
             exit 0
           fi
           # source-ref: подпись должна прийти из сборки ИМЕННО этого тега. Запуск того же
           # workflow с ветки (с правленым файлом workflow) даёт attestation с ref ветки — отказ.
-          if ! gh attestation verify "$D/$NAME" --repo Orange-hanter/ai-reviewer \
+          if ! "$GH" attestation verify "$D/$NAME" --repo Orange-hanter/ai-reviewer \
                --signer-workflow Orange-hanter/ai-reviewer/.github/workflows/release-binaries.yml \
                --source-ref "refs/tags/$REF" --deny-self-hosted-runners; then
             echo "::error::provenance архива $NAME не подтверждена — бинари не установлены, движок на JS-копиях"
