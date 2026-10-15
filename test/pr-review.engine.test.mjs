@@ -587,7 +587,8 @@ test('specialist merge: одна модель на все роли → один 
   const [res] = await engine.reviewAllModels(MOA_CHUNK, { pr: {} });
 
   assert.equal(textCalls.length, 1, 'один prose-вызов вместо трёх');
-  assert.match(textCalls[0].system, /PANEL of 3/, 'модель предупреждена, что ролей три');
+  // Rust-текст (0.5+) и deprecated JS-копия пишут «panel of 3» в разном регистре.
+  assert.match(textCalls[0].system, /panel of 3/i, 'модель предупреждена, что ролей три');
   const byRole = Object.fromEntries(res.references.map((r) => [r.role, r.text]));
   assert.match(byRole.security, /sec/);
   assert.match(byRole.correctness, /corr/);

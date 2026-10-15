@@ -26,8 +26,9 @@ conventional (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `release:`).
 ```bash
 npm test          # node --test test/*.test.mjs — юнит + контракты (в т.ч. шаблоны examples/ci/)
 npm run eval      # golden fixtures без LLM — гейт post-processing
-npm run check     # test + eval + check:rust (cargo build/test + check:parity); нужен cargo;
-                  # ровно это гоняет CI (.github/workflows/ci.yml)
+npm run check     # cargo build + test + eval + check:rust (cargo test + check:parity); нужен
+                  # cargo; ровно это гоняет CI (.github/workflows/ci.yml). Без бинаря npm test
+                  # идёт по deprecated JS-копиям
 
 node --test test/pr-review.test.mjs                                # один файл
 node --test --test-name-pattern="parseDiff: validLines" test/…     # один тест
@@ -124,12 +125,20 @@ majors (`source === BLAST_FINDING_SOURCE`) — soft: без verifier не бло
 
 `rust/` — порт части `lib/*.mjs` (diff, router, findings, engine, llm, prompt, specialists,
 verifier, report, github, export, actionability, metrics, config/profile, json, structure-*).
-JS-модуль остаётся обёрткой с тем же API: зовёт бинарь из `rust/target/debug/` (JSON на stdin),
-а без бинаря работает эталонный JS. `AI_REVIEWER_<MOD>_BIN` — путь к бинарю,
+JS-модуль остаётся обёрткой с тем же API: зовёт бинарь (JSON на stdin), найденный
+`lib/rust-bin.mjs` (`rust/target/debug` → `release` → `rust/bin` из архива релиза), а без
+бинаря работает эталонный JS. Новый путь к бинарю — только через `defaultRustBin`
+(`test/rust-bin.test.mjs` это держит). `AI_REVIEWER_<MOD>_BIN` — путь к бинарю,
 `AI_REVIEWER_<MOD>_FORCE_JS=1` — чистый JS. Оркестрация (`pipeline.mjs`, chunk-routing,
-specialist-merge, incremental) — только JS. Меняешь логику портированного модуля — меняй обе
-стороны: `rust/parity/*.parity.mjs` (`npm run check:parity`) сверяют собранный бинарь с JS и
-без `cargo build` сходятся тривиально.
+specialist-merge, incremental) — только JS.
+
+**С 0.6 Rust — основная реализация, JS-копии deprecated** ([RFC 20](proposals/20-rust-primary.md)).
+Новое поведение портированного модуля пишется только в Rust; JS-копию не правь (кроме
+механической правки общего с оркестрацией контракта) и не удаляй до аудита «ничего не
+потеряно». Разошедшиеся намеренно тексты помечаются в parity как rust-owned, а не
+подгоняются. Уже разошлись: каскад ретраев LLM (`rust/src/llm/cascade.rs`) и системные
+промпты (`rust/src/prompt.rs`, английские; вывод — на русском). `rust/parity/*.parity.mjs`
+(`npm run check:parity`) сверяют собранный бинарь с JS и без `cargo build` сходятся тривиально.
 
 ## Structure-контур
 
@@ -175,7 +184,10 @@ dry-run MoA, `wait: false` + поллинг по `jobId`, RFC 08–12) и `curso
 формату из `proposals/README.md`.
 
 Релиз: зелёный `npm run check`, секция в `CHANGELOG.md` (есть `## Unreleased`), версия в
-`package.json` и бейдж в README, пин в `examples/consumers/orakul/ai-reviewer-ref`, тег.
+`package.json` и бейдж в README, пин в `examples/consumers/orakul/ai-reviewer-ref`, тег,
+GitHub-релиз. Публикация релиза запускает `.github/workflows/release-binaries.yml`: он
+собирает бинари по `rust/Cargo.lock` и прикладывает архивы. Без них потребитель остаётся на
+JS-копиях, поэтому проверь, что ассеты появились.
 Потребитель подключает движок по пину `ops/ai-reviewer-ref`, читаемому из базовой ветки —
 код PR никогда не исполняется с секретами прогона. Breaking для потребителя: смена namespace
 маркеров, формата футера sticky, контрактов `swarm`/`export`/`structure`.

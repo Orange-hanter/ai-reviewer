@@ -11,9 +11,11 @@ node_modules/
 # git-worktrees фоновых сессий Claude Code
 .claude/worktrees/
 
-# Rust build artifacts
+# Rust build artifacts. Cargo.lock в репозитории (RFC 20): по нему собираются бинари
+# релиза, без лока каждая сборка тянула бы свежие версии зависимостей.
 rust/target/
-rust/Cargo.lock
+# Готовые бинари из архива релиза (шаблон CI потребителя распаковывает их сюда).
+rust/bin/
 
 # COD-DOC
 __pycache__/

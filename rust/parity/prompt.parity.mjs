@@ -3,6 +3,13 @@
  *
  * Запуск: node rust/parity/prompt.parity.mjs   (требует cargo build)
  *
+ * С 0.6 системные промпты и указания жюри в reference-секциях принадлежат Rust
+ * (proposals/20-rust-primary.md): JS-копия заморожена как deprecated fallback, и эти
+ * тексты здесь не сверяются — у system-сообщений сверяется только роль, а кейсы
+ * reference-секций помечены rust-owned и считаются отдельно. Побайтово по-прежнему
+ * сверяются user-части (карта PR, blast, priors, контекст, дифф) — их собирают обе
+ * стороны из одних данных, и расхождение там — регрессия, а не переписанный текст.
+ *
  * Промпт — это ВХОД модели: любое расхождение меняет поведение LLM, поэтому
  * сравнение ПОБАЙТОВОЕ (assert.equal на строках, не deepEqual-подобные
  * нормализации). Диспетчеризация — env AI_REVIEWER_PROMPT_FORCE_JS (читается
@@ -15,7 +22,7 @@
  *      blast-radius, prior findings (с пустыми полями), prescan, fileContents
  *      с markdown-fence, PR title с backticks/переводами строк/emoji (UTF-16 slice);
  *   2. buildVerifierMessages: кандидаты без model/confidence, line=0, пустой body,
- *      blast пустой/непустой, пустой fileContents → «(нет)»;
+ *      blast пустой/непустой, пустой fileContents → «(нет)» в JS, «(none)» в Rust;
  *   3. buildReferenceMessages / buildSpecialistMessages — замена system, user из base;
  *   4. buildAggregatorMessages / buildSpecialistAggregatorMessages — reference-секции
  *      (успех/ошибки/все недоступны) + refutationSchema перед последним user;
@@ -42,7 +49,24 @@ const { buildVerifierMessages, buildSpecialistReferenceSection, buildMoAReferenc
 const { setProfile, resetProfile, normalizeProfile, loadProfileFile } = await import('../../lib/profile.mjs');
 
 let compared = 0;
+let rustOwned = 0;
 const failures = [];
+
+/**
+ * Единственная правка user-части в Rust с 0.6: заглушка пустого контекста verifier'а
+ * «(нет)» → «(none)» (промпт целиком английский). Остальная user-часть общая.
+ */
+const userJs = (content) => String(content).replace(/\n\(нет\)\n/, '\n(none)\n');
+
+/**
+ * Кейс, чей текст целиком принадлежит Rust (reference-секции с указаниями жюри и схемой
+ * refutation переписаны в 0.5): не сверяется, только считается — чтобы отчёт показывал,
+ * сколько паритета снято осознанно.
+ */
+function rustOwnedCase(label) {
+  rustOwned += 1;
+  console.log(`rust-owned (не сверяется): ${label}`);
+}
 
 /** Побайтовое сравнение строк/JSON-структур между FORCE_JS-ветками. */
 function check(label, fn) {
@@ -67,9 +91,10 @@ function check(label, fn) {
       assert.equal(rust.length, js.length);
       for (let i = 0; i < js.length; i++) {
         assert.equal(rust[i].role, js[i].role);
-        assert.equal(rust[i].content, js[i].content, `content[${i}]`);
+        // Системные промпты с 0.6 принадлежат Rust (см. шапку) — сверяем только роль.
+        if (js[i].role === 'system') continue;
+        assert.equal(rust[i].content, userJs(js[i].content), `content[${i}]`);
       }
-      assert.equal(JSON.stringify(rust), JSON.stringify(js));
     }
   } catch (e) {
     failures.push({
@@ -237,17 +262,16 @@ for (const [profileName, activate] of Object.entries(PROFILES)) {
     { role: 'correctness', model: 'corr-m', error: 'модель недоступна' },
     { role: 'architecture', model: 'arch-m', text: '' },
   ];
-  check(`${profileName}: buildAggregatorMessages`, () => prompt.buildAggregatorMessages(base, references));
-  check(`${profileName}: buildSpecialistAggregatorMessages`, () => prompt.buildSpecialistAggregatorMessages(base, references));
+  rustOwnedCase(`${profileName}: buildAggregatorMessages`);
+  rustOwnedCase(`${profileName}: buildSpecialistAggregatorMessages`);
   check(`${profileName}: aggregator all references failed`, () => prompt.buildAggregatorMessages(base, [
     { role: 'security', model: 'sec-m', error: 'down' },
   ]));
-  check(`${profileName}: specialist sections standalone`, () => [
-    buildSpecialistReferenceSection(references),
-    buildMoAReferenceSection(references),
+  rustOwnedCase(`${profileName}: specialist sections standalone`);
+  check(`${profileName}: reference sections empty`, () => [
     buildSpecialistReferenceSection([]),
     buildMoAReferenceSection([{ role: 'advisor', model: 'a1', error: 'boom' }]),
-  ]);
+  ].join('|'));
 
   // 5. buildChangedFilesSection standalone
   check(`${profileName}: changedFilesSection whole`, () => buildChangedFilesSection(['a.ts', 'b/e2e.spec.ts']));
@@ -284,7 +308,7 @@ for (const [profileName, activate] of Object.entries(PROFILES)) {
 
 resetProfile();
 
-console.log(`parity cases compared: ${compared}`);
+console.log(`parity cases compared: ${compared}, rust-owned: ${rustOwned}`);
 if (failures.length) {
   console.log(`FAILURES: ${failures.length}`);
   for (const f of failures.slice(0, 20)) {

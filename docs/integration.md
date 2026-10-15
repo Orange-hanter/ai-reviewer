@@ -123,7 +123,10 @@ OLLAMA_API_KEY=… REVIEW_PROFILE=ops/ai-review/profile.json \
 ## 8. Обновление версии
 
 1. В движке: зелёный `npm run check` (`npm test` + `npm run eval` + `check:rust`: `cargo build`,
-   `cargo test`, паритет JS ↔ Rust), тег `vX.Y.Z`.
+   `cargo test`, паритет JS ↔ Rust), тег `vX.Y.Z`. После публикации GitHub-релиза workflow
+   `release-binaries` прикладывает к нему архивы Rust-бинарей и sha256. Дождись их: шаблон
+   потребителя качает бинари по пину, а без архива движок работает на deprecated JS-копиях.
+   Пин на SHA или ветку архива не находит — пиньте тег.
 2. У потребителя: правка `ops/ai-reviewer-ref` → PR → ревью нового движка идёт **старым**
    (пин читается из базовой ветки) → merge.
 3. Первый прогон после bump сравнить с предыдущим: Δ-блок в sticky показывает, что изменилось

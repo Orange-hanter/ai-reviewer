@@ -8,8 +8,8 @@
 //!   не имели бы сквозного состояния между запросами. Семафоры живут в JS-обёртке,
 //!   бинарь сообщает о 429 флагом `throttled`;
 //! - JSON-mode graceful fallback (effort=none, больше токенов, снятие
-//!   response_format): живёт в JS-обёртке поверх `extractJsonObject`
-//!   (Rust-модуль json_repair через lib/json.mjs, переиспользуется как есть).
+//!   response_format) — не здесь, а в подмодуле [`cascade`] поверх `chat`; бинарь
+//!   включает его полем `cascade` во входе (с 0.6, раньше каскад жил в JS-обёртке).
 //!
 //! Паритет с JS (сверен с эталонной копией в lib/llm.mjs):
 //! - SSE: строки режутся по '\n' в любом месте (chunked-границы посреди
@@ -428,6 +428,8 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
         }
     }
 }
+
+pub mod cascade;
 
 #[cfg(test)]
 mod tests;

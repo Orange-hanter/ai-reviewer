@@ -1,0 +1,136 @@
+name: Release binaries
+
+# Готовые Rust-бинари к релизу (RFC 20). Потребитель не ставит cargo: шаблон
+# examples/ci/pr-review.yml скачивает архив своей платформы по тому же тегу, по которому
+# чекаутит движок, сверяет sha256 и распаковывает в .ai-reviewer-engine/rust/bin.
+# Без архива (тег без ассетов, неизвестная платформа) движок работает на deprecated JS-копиях.
+#
+# Запуск: публикация GitHub-релиза или вручную, выбрав в «Use workflow from» сам ТЕГ
+# (не ветку). Имени тега во входных параметрах нет намеренно: запуск с ветки исполнял бы
+# файл workflow этой ветки, и attestation с source ref ветки шаблон потребителя отвергает
+# (`--source-ref refs/tags/<тег>`).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Сборка идёт без права записи. contents: write есть только у джоба upload: в нём не
+# исполняется ни код репозитория, ни сторонние actions. Сборщик бинарей, которые потом
+# работают с секретами потребителя, не должен уметь подменить ассеты релиза.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04 — ради glibc 2.35: бинарь со свежего образа не запустится на раннере потребителя
+          # со старым glibc, а self-hosted раннеры обновляют редко.
+          - { target: linux-x64, os: ubuntu-22.04 }
+          - { target: linux-arm64, os: ubuntu-22.04-arm }
+          - { target: darwin-arm64, os: macos-14 }
+    env:
+      TAG: ${{ github.event.release.tag_name || github.ref_name }}
+      REF_TYPE: ${{ github.event_name == 'release' && 'tag' || github.ref_type }}
+    steps:
+      - name: Validate tag
+        run: |
+          [ "$REF_TYPE" = tag ] || { echo "запускать только на теге, а не на ветке"; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]] || { echo "invalid tag: $TAG"; exit 1; }
+
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      # rustup из образа раннера вместо стороннего action: в цепочке сборки релизных
+      # бинарей только first-party actions и Cargo.lock.
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build (release, по Cargo.lock)
+        working-directory: rust
+        run: cargo build --release --locked
+
+      # Дымовой прогон тем, что потребитель реально запустит: npm test с бинарями ТОЛЬКО из
+      # target/release (debug-сборки на этом раннере нет — обёртки найдут именно релизные).
+      - name: Smoke — npm test на релизных бинарях
+        run: npm test
+
+      - name: Pack
+        id: pack
+        run: |
+          set -euo pipefail
+          NAME="ai-reviewer-bins-${{ matrix.target }}.tar.gz"
+          STAGE="$RUNNER_TEMP/stage"
+          mkdir -p "$STAGE"
+          for src in rust/src/bin/*.rs; do
+            bin="$(basename "$src" .rs)"
+            cp "rust/target/release/$bin" "$STAGE/"
+          done
+          printf '{"tag":"%s","target":"%s","commit":"%s"}\n' "$TAG" "${{ matrix.target }}" "$(git rev-parse HEAD)" > "$STAGE/manifest.json"
+          tar -czf "$RUNNER_TEMP/$NAME" -C "$STAGE" .
+          cd "$RUNNER_TEMP"
+          if command -v sha256sum >/dev/null; then sha256sum "$NAME" > "$NAME.sha256"; else shasum -a 256 "$NAME" > "$NAME.sha256"; fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bins-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/${{ steps.pack.outputs.name }}
+            ${{ runner.temp }}/${{ steps.pack.outputs.name }}.sha256
+          if-no-files-found: error
+          retention-days: 3
+
+  upload:
+    name: Upload to release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write       # gh release upload
+      id-token: write       # подпись provenance (Sigstore)
+      attestations: write   # запись attestation в репозиторий
+    env:
+      TAG: ${{ github.event.release.tag_name || github.ref_name }}
+      REF_TYPE: ${{ github.event_name == 'release' && 'tag' || github.ref_type }}
+    steps:
+      - name: Validate tag
+        run: |
+          [ "$REF_TYPE" = tag ] || { echo "запускать только на теге, а не на ветке"; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]] || { echo "invalid tag: $TAG"; exit 1; }
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: bins-*
+          merge-multiple: true
+          path: dist
+
+      # Provenance: sha256 рядом с архивом доказывает только целостность скачивания, а не
+      # происхождение. Attestation подписана OIDC-идентичностью ЭТОГО workflow — шаблон
+      # потребителя проверяет её через `gh attestation verify --signer-workflow` и без неё
+      # бинари не ставит.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
+
+      - name: Verify and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c ./*.sha256
+          gh release upload "$TAG" ./* --clobber -R "$GITHUB_REPOSITORY"

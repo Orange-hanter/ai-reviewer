@@ -18,7 +18,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use ai_reviewer::prompt::{
-    build_aggregator_messages, build_changed_files_section, build_messages,
+    build_aggregator_messages, build_changed_files_section, build_merged_specialist_system, build_messages,
     build_moa_reference_section, build_reference_messages, build_specialist_aggregator_messages,
     build_specialist_messages, build_specialist_reference_section, build_verifier_messages,
     PromptCtx, E2ESPEC_UNSUPPORTED,
@@ -69,6 +69,9 @@ fn run() -> Result<()> {
         }
         "buildMoAReferenceSection" => {
             json!({ "text": build_moa_reference_section(&arr_arg(&v, "references")) })
+        }
+        "buildMergedSpecialistSystem" => {
+            json!({ "text": build_merged_specialist_system(&arr_arg(&v, "roles"), &ctx) })
         }
         "changedFilesSection" => {
             let paths = arr_arg(&v, "changedPaths");

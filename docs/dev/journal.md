@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-10-09
+last_updated: 2026-10-15
 audience: [next-session-agent, maintainers]
 ---
 
@@ -12,6 +12,63 @@ audience: [next-session-agent, maintainers]
 
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
+
+## 2026-10-15 — RFC 20: каскад и промпт в Rust, аудит JS-копий
+
+**Сделано (PR #47).**
+- Каскад ретраев LLM перенесён в `rust/src/llm/cascade.rs`. Добавлен ретрай на `low` с
+  `+8000` токенов при 400 «Reasoning is mandatory».
+- Системные промпты переписаны на английском в `rust/src/prompt.rs`.
+- JS-копии объявлены deprecated.
+- Живые проверки на OpenRouter: каскад на gemini, A/B жюри и проверка формата остальных
+  ролей — RFC 20, § 4. Gold-прогон не делался по решению владельца (бюджет).
+
+**Аудит JS-копий: ни один модуль сейчас удалить нельзя.**
+- **B1 — потребитель бинарей не получает.** `rust/` нет в `files`, в
+  `examples/ci/pr-review.yml` нет `cargo build`, готовых бинарей нет. У потребителя
+  работает только JS, и правки RFC 20 до него не доходят.
+- **B2.** Резолверы захардкожены на `rust/target/debug/<mod>`.
+- **B3.** Тесты, которые сами держат JS-путь:
+  - `test/github.test.mjs` весь на DI-fetch;
+  - `diff-line-terminators` и `findings-advisor-claims` форсируют FORCE_JS.
+- **B4.** Устаревший бинарь молча даёт старое поведение. Защита (JS-backfill) есть
+  только у config.
+- **B5. Пробелы parity:**
+  - у llm parity-скрипта нет;
+  - у diff не сверяются `parseDiff`/`buildChunks`.
+- **B6. Нет lookahead в Rust-regex.** На JS держатся FP-фильтр
+  (`matchesKnownFalsePositive`), `layout.sensitive` и `layout.e2eSpec`. Для prompt
+  деградация при lookahead в e2eSpec незаметно меняет вход модели на промпт 0.5.1.
+- **Не удаляемы вовсе** (единственная реализация или нужны в рантайме):
+  - `computeConfigPartsJs` (backfill на каждом `loadReviewConfig`);
+  - `lib/structure.mjs`;
+  - `lib/structure-drift.mjs`;
+  - JS-only оркестрация (`createReviewEngine`, `createVerifierRunner`, `createObservability`, профиль, fs-функции).
+- **Удалимы после B1:**
+  - router, report, specialists, export, metrics, json;
+  - копии engine;
+  - 9 модулей structure-* с parity.
+- **Удалимы после B1 и доработки:**
+  - prompt, actionability (B6);
+  - verifier — ветка `allFrom`, `lib/verifier.mjs:81,149`;
+  - github — перевести тесты на фейковый HTTP;
+  - diff (B5).
+
+**Решение по B1 (владелец):** готовые бинари в релизе. Сделаны три части:
+- `release-binaries.yml`;
+- шаг `Download engine binaries` в шаблоне потребителя;
+- поиск бинарей `lib/rust-bin.mjs` (заодно закрыт B2).
+
+Проверено локальной симуляцией потребителя. Архив упакован тем же циклом, что в workflow,
+`target/` спрятан, бинари лежат только в `rust/bin`. Результат: обёртки берут бинари из
+`rust/bin`, промпт новый, каскадные тесты зелёные.
+
+В полном `npm test` в этом режиме падают два теста `cursor-plugin` «fail-fast < 2000 мс»
+(2.5 с). Отдельно они проходят. Гипотеза (не проверена): macOS сканирует свежескопированные
+неподписанные бинари при первом запуске и нагружает машину. На Linux-раннере это не
+воспроизвести без релиза.
+
+Реального прогона workflow ещё не было: он запустится на первом релизе после мержа.
 
 ## 2026-10-13 — 0.5.1
 
