@@ -147,7 +147,7 @@ D traversal, E floating promise). Вызовы шли через `chatJson` с R
   `ai-reviewer-bins-<target>.tar.gz` и `.sha256`. `rust/Cargo.lock` теперь в git.
 - Шаблон потребителя качает архив по тому же ref, что и движок. Ставит его только после
   двух проверок: sha256 (целостность) и build provenance — attestation, подписанная этим
-  workflow (`gh attestation verify --signer-workflow`). sha256 из того же релиза доказывает
+  workflow на этом теге (`gh attestation verify --signer-workflow … --source-ref refs/tags/<тег>`, сборка с ветки отвергается). sha256 из того же релиза доказывает
   только целостность скачивания, происхождение доказывает подпись.
 - Право записи в релиз есть только у джоба `upload`: он не исполняет код репозитория и не
   использует сторонних actions. Сборка идёт с `contents: read`, toolchain — `rustup` из

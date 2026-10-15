@@ -169,8 +169,11 @@ jobs:
             echo "::warning::нет gh CLI — provenance архива не проверить, бинари не установлены, движок на JS-копиях"
             exit 0
           fi
+          # source-ref: подпись должна прийти из сборки ИМЕННО этого тега. Запуск того же
+          # workflow с ветки (с правленым файлом workflow) даёт attestation с ref ветки — отказ.
           if ! gh attestation verify "$D/$NAME" --repo Orange-hanter/ai-reviewer \
-               --signer-workflow Orange-hanter/ai-reviewer/.github/workflows/release-binaries.yml; then
+               --signer-workflow Orange-hanter/ai-reviewer/.github/workflows/release-binaries.yml \
+               --source-ref "refs/tags/$REF" --deny-self-hosted-runners; then
             echo "::error::provenance архива $NAME не подтверждена — бинари не установлены, движок на JS-копиях"
             exit 0
           fi

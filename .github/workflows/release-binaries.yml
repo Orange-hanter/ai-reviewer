@@ -5,16 +5,15 @@ name: Release binaries
 # чекаутит движок, сверяет sha256 и распаковывает в .ai-reviewer-engine/rust/bin.
 # Без архива (тег без ассетов, неизвестная платформа) движок работает на deprecated JS-копиях.
 #
-# Запуск: публикация GitHub-релиза или вручную с именем существующего тега.
+# Запуск: публикация GitHub-релиза или вручную, выбрав в «Use workflow from» сам ТЕГ
+# (не ветку). Имени тега во входных параметрах нет намеренно: запуск с ветки исполнял бы
+# файл workflow этой ветки, и attestation с source ref ветки шаблон потребителя отвергает
+# (`--source-ref refs/tags/<тег>`).
 
 on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Тег существующего релиза, например v0.6.0'
-        required: true
 
 # Сборка идёт без права записи. contents: write есть только у джоба upload: в нём не
 # исполняется ни код репозитория, ни сторонние actions. Сборщик бинарей, которые потом
@@ -37,15 +36,17 @@ jobs:
           - { target: linux-arm64, os: ubuntu-22.04-arm }
           - { target: darwin-arm64, os: macos-14 }
     env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      TAG: ${{ github.event.release.tag_name || github.ref_name }}
+      REF_TYPE: ${{ github.event_name == 'release' && 'tag' || github.ref_type }}
     steps:
       - name: Validate tag
         run: |
+          [ "$REF_TYPE" = tag ] || { echo "запускать только на теге, а не на ветке"; exit 1; }
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]] || { echo "invalid tag: $TAG"; exit 1; }
 
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.TAG }}
+          ref: refs/tags/${{ env.TAG }}
 
       - uses: actions/setup-node@v7
         with:
@@ -103,10 +104,12 @@ jobs:
       id-token: write       # подпись provenance (Sigstore)
       attestations: write   # запись attestation в репозиторий
     env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      TAG: ${{ github.event.release.tag_name || github.ref_name }}
+      REF_TYPE: ${{ github.event_name == 'release' && 'tag' || github.ref_type }}
     steps:
       - name: Validate tag
         run: |
+          [ "$REF_TYPE" = tag ] || { echo "запускать только на теге, а не на ветке"; exit 1; }
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]] || { echo "invalid tag: $TAG"; exit 1; }
 
       - uses: actions/download-artifact@v7

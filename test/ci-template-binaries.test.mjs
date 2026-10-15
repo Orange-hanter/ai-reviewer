@@ -42,6 +42,10 @@ test('provenance: релиз подписывает архивы, шаблон �
   const verify = dl.indexOf('gh attestation verify');
   assert.ok(verify > 0 && verify < dl.indexOf('tar -xzf'), 'распаковка только после проверки provenance');
   assert.match(dl, /--signer-workflow Orange-hanter\/ai-reviewer\/\.github\/workflows\/release-binaries\.yml/);
+  assert.match(dl, /--source-ref "refs\/tags\/\$REF"/, 'подпись только от сборки этого тега, не ветки');
+  assert.match(dl, /--deny-self-hosted-runners/);
+  assert.doesNotMatch(release, /inputs\.tag/, 'тег не задаётся входом dispatch — только ref запуска');
+  assert.match(release, /\[ "\$REF_TYPE" = tag \]/);
   assert.match(release, /actions\/attest-build-provenance@/);
   assert.match(release, /subject-path: dist\/\*\.tar\.gz/);
   // Право записи — только у джоба без кода репозитория (см. шапку workflow).
