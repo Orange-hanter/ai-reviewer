@@ -9,7 +9,7 @@ last_updated: 2026-10-13
 
 # 🧭 Project Navigator: ai-reviewer
 
-> 📊 Meta: `{"version": "0.5.1", "last_updated": "2026-10-13", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
+> 📊 Meta: `{"version": "0.6.0", "last_updated": "2026-10-15", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
 
 > L0 для агента. Истина по гейту — architecture. Журнал разработки — `docs/dev/journal.md`. RFC — `proposals/`.
 
