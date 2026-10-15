@@ -25,8 +25,10 @@ Rust. CI собирает Rust до `npm test`, поэтому юнит-тест
   `ai-reviewer-bins-<target>.tar.gz` и `.sha256`. Платформы: `linux-x64`, `linux-arm64`,
   `darwin-arm64`.
 - Шаблон `examples/ci/pr-review.yml` получил шаг `Download engine binaries`. Шаг качает
-  архив по тому же ref, что и движок, сверяет sha256 и распаковывает в `rust/bin`. Нет
-  архива или не совпал sha256 — предупреждение, движок работает на JS-копиях.
+  архив по тому же ref, что и движок, сверяет sha256 и build provenance (`gh attestation
+  verify --signer-workflow …/release-binaries.yml`), затем распаковывает в `rust/bin`.
+  Нет архива или `gh`, не прошла любая проверка — бинари не ставятся, движок работает на
+  JS-копиях.
 - Обёртки ищут бинари через `lib/rust-bin.mjs`: `AI_REVIEWER_RUST_BIN_DIR` →
   `rust/target/debug` → `rust/target/release` → `rust/bin`.
 - `rust/Cargo.lock` теперь в репозитории.

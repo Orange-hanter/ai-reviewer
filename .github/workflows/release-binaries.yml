@@ -99,7 +99,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write   # gh release upload
+      contents: write       # gh release upload
+      id-token: write       # подпись provenance (Sigstore)
+      attestations: write   # запись attestation в репозиторий
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
@@ -112,6 +114,14 @@ jobs:
           pattern: bins-*
           merge-multiple: true
           path: dist
+
+      # Provenance: sha256 рядом с архивом доказывает только целостность скачивания, а не
+      # происхождение. Attestation подписана OIDC-идентичностью ЭТОГО workflow — шаблон
+      # потребителя проверяет её через `gh attestation verify --signer-workflow` и без неё
+      # бинари не ставит.
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
 
       - name: Verify and upload
         env:

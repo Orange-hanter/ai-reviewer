@@ -37,6 +37,18 @@ test('шаблон потребителя: sha256 сверяется до рас
   assert.match(dl, /-C \.ai-reviewer-engine\/rust\/bin/, 'каталог, который ищет lib/rust-bin.mjs');
 });
 
+test('provenance: релиз подписывает архивы, шаблон без проверки подписи их не ставит', () => {
+  const dl = step(consumer, 'Download engine binaries');
+  const verify = dl.indexOf('gh attestation verify');
+  assert.ok(verify > 0 && verify < dl.indexOf('tar -xzf'), 'распаковка только после проверки provenance');
+  assert.match(dl, /--signer-workflow Orange-hanter\/ai-reviewer\/\.github\/workflows\/release-binaries\.yml/);
+  assert.match(release, /actions\/attest-build-provenance@/);
+  assert.match(release, /subject-path: dist\/\*\.tar\.gz/);
+  // Право записи — только у джоба без кода репозитория (см. шапку workflow).
+  const build = release.slice(release.indexOf('\n  build:'), release.indexOf('\n  upload:'));
+  assert.doesNotMatch(build, /contents: write|id-token: write/);
+});
+
 test('шаблон потребителя и релиз называют архив одинаково и знают одни платформы', () => {
   assert.match(consumer, /NAME="ai-reviewer-bins-\$T\.tar\.gz"/);
   assert.match(release, /NAME="ai-reviewer-bins-\$\{\{ matrix\.target \}\}\.tar\.gz"/);
