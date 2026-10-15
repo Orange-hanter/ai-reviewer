@@ -1,6 +1,6 @@
 {
   "name": "ai-reviewer",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "AI code review engine: MoA/consensus LLM pipeline, deterministic prescan, blast-radius, eval fixtures, GitHub feedback loop",
   "type": "module",
   "license": "UNLICENSED",
