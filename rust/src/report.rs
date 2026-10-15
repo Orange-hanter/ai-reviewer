@@ -250,6 +250,10 @@ fn regex_i(pattern: &str) -> regex::Regex {
 // publicErrorLabel (lib/util.mjs)
 // ---------------------------------------------------------------------------
 
+/// Метка исчерпанной квоты провайдера в sticky; по ней же build_llm_unavailable_summary
+/// меняет совет «перезапустите позже» на «пополните квоту или смените провайдера».
+pub const QUOTA_LABEL: &str = "квота провайдера исчерпана";
+
 /// Безопасная короткая метка ошибки для публичного sticky (publicErrorLabel):
 /// в PR уходит только категория; сырой текст остаётся в CI-логе.
 pub fn public_error_label(err: Option<&Value>) -> String {
@@ -269,6 +273,11 @@ pub fn public_error_label(err: Option<&Value>) -> String {
     }
     if regex_i("fetch failed|network|socket|ECONN|EAI_AGAIN|terminated").is_match(&m) {
         return "сеть".to_string();
+    }
+    // Маркер ставит chat() (rust/src/llm.rs, is_quota_exhausted) — раньше кода HTTP: «HTTP 429
+    // (rate limit)» звал бы перезапустить, а квоту перезапуск не вернёт.
+    if m.contains("квота провайдера исчерпана") {
+        return QUOTA_LABEL.to_string();
     }
     if let Some(caps) = regex_i("\\b([45]\\d{2})\\b").captures(&m) {
         let http = caps.get(1).map(|c| c.as_str()).unwrap_or("");
@@ -947,9 +956,16 @@ pub fn build_llm_unavailable_summary(
     };
     let prescan_section = format!("{blocker_section}{advisory_section}");
     let model_list = arr_or_empty(models)?.iter().map(|m| js_to_string(m)).collect::<Vec<_>>().join(", ");
+    // Квота кончилась — перезапуск ничего не даст, пока её не пополнят: совет другой
+    // (RFC 20, с 0.6.1; deprecated JS-копия этого различия не знает).
+    let retry_hint = if why.contains(QUOTA_LABEL) {
+        "Квота провайдера LLM исчерпана — перезапуск не поможет, пока её не пополнят или не сменят ключ/провайдера (`LLM_API_KEY`, `LLM_BASE_URL`)"
+    } else {
+        "Перезапустите job позже"
+    };
     let md = if llm_required {
         format!(
-            "{review_marker}\n## 🤖 Авто код-ревью\n\n⛔ ИИ-ревью недоступно ({why}).{prescan_section}\n\n<sub>Модели: {model_list}. Без LLM-ревью гейт не может подтвердить PR — merge заблокирован (fail-closed, `REVIEW_LLM_REQUIRED=1`).{} Перезапустите job позже; осознанное ослабление — `REVIEW_LLM_REQUIRED=0`. Детали — в логе CI job.</sub>",
+            "{review_marker}\n## 🤖 Авто код-ревью\n\n⛔ ИИ-ревью недоступно ({why}).{prescan_section}\n\n<sub>Модели: {model_list}. Без LLM-ревью гейт не может подтвердить PR — merge заблокирован (fail-closed, `REVIEW_LLM_REQUIRED=1`).{} {retry_hint}; осознанное ослабление — `REVIEW_LLM_REQUIRED=0`. Детали — в логе CI job.</sub>",
             if !blockers.is_empty() { " Prescan-находки также блокируют merge." } else { "" },
         )
     } else {

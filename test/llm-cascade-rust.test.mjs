@@ -92,3 +92,23 @@ test('chatJson: сбой каскада отдаёт флаги и не теря
     assert.equal(records.length, 1);
   } finally { srv.close(); }
 });
+
+test('квота провайдера: без ретраев, остальные вызовы клиента отказывают без сети', { skip }, async () => {
+  const weekly = '{"error":{"message":"you (x) have reached your weekly usage limit, upgrade for higher limits"}}';
+  const srv = await scriptedServer([[429, weekly], [200, sse('не должен понадобиться')]]);
+  const logs = [];
+  try {
+    const c = client(srv.base, logs, []);
+    await assert.rejects(
+      c.chatJson([{ role: 'user', content: 'x' }], 'm1'),
+      (e) => e.quota === true && /квота провайдера исчерпана/.test(e.message),
+    );
+    await assert.rejects(
+      c.chatText([{ role: 'user', content: 'x' }], 'm2'),
+      (e) => e.quota === true,
+    );
+    assert.equal(srv.seen.length, 1, 'второй вызов не ходил в сеть, первый — без ретраев');
+    assert.ok(logs.some((l) => /квота провайдера LLM исчерпана/.test(l)), logs.join('\n'));
+    assert.ok(!logs.some((l) => /429 → снижение параллелизма/.test(l)), 'квота не режет семафоры');
+  } finally { srv.close(); }
+});

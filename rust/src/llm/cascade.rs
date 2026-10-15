@@ -71,6 +71,10 @@ fn attempt(effort: &str, max_tokens: Option<u64>, json_mode: bool) -> Attempt {
 /// `step` — номер попытки, которая только что упала (0 — первая).
 pub fn next_attempt(kind: CascadeKind, step: usize, prev: &Attempt, failure: &Failure) -> Option<(Attempt, String)> {
     if let Failure::Llm(e) = failure {
+        if e.quota {
+            // Квота кончилась у провайдера, а не у попытки: другой effort её не вернёт.
+            return None;
+        }
         if prev.effort.as_deref() == Some("none") && is_mandatory_reasoning(e) {
             let max_tokens = prev.max_tokens.map(|n| n + MANDATORY_REASONING_EXTRA_TOKENS);
             return Some((
@@ -160,9 +164,9 @@ impl CascadeOutcome {
                 (true, out)
             }
             Err(f) => {
-                let (error, status, empty, networky, truncated, bad_escape) = match f {
-                    Failure::Llm(e) => (e.error.clone(), e.status, e.empty, e.networky, false, false),
-                    Failure::Json(e) => (e.message.clone(), None, false, false, e.truncated, e.bad_escape),
+                let (error, status, empty, networky, truncated, bad_escape, quota) = match f {
+                    Failure::Llm(e) => (e.error.clone(), e.status, e.empty, e.networky, false, false, e.quota),
+                    Failure::Json(e) => (e.message.clone(), None, false, false, e.truncated, e.bad_escape, false),
                 };
                 (
                     false,
@@ -173,6 +177,7 @@ impl CascadeOutcome {
                         "networky": networky,
                         "truncated": truncated,
                         "badEscape": bad_escape,
+                        "quota": quota,
                         "throttled": self.throttled,
                         "usages": self.usages,
                         "log": self.log,
@@ -288,7 +293,7 @@ mod tests {
     }
 
     fn err(status: Option<u16>, msg: &str, empty: bool) -> Result<ChatOutcome, LlmError> {
-        Err(LlmError { error: msg.into(), status, empty, networky: false, throttled: false })
+        Err(LlmError { error: msg.into(), status, empty, networky: false, throttled: false, quota: false })
     }
 
     const MANDATORY: &str =
@@ -343,7 +348,7 @@ mod tests {
         let failure = Failure::Json(JsonRepairError { message: "esc".into(), bad_escape: true, truncated: false });
         let (next, _) = next_attempt(CascadeKind::Json, 0, &attempt("low", Some(24000), true), &failure).unwrap();
         assert_eq!(next, attempt("none", Some(32000), false));
-        let mandatory = Failure::Llm(LlmError { error: MANDATORY.into(), status: Some(400), empty: false, networky: false, throttled: false });
+        let mandatory = Failure::Llm(LlmError { error: MANDATORY.into(), status: Some(400), empty: false, networky: false, throttled: false, quota: false });
         let (third, _) = next_attempt(CascadeKind::Json, 1, &next, &mandatory).unwrap();
         assert_eq!(third, attempt("low", Some(40000), false));
     }
@@ -419,8 +424,21 @@ mod tests {
     }
 
     #[test]
+    fn квота_не_ретраится_ни_одним_правилом() {
+        let req = base(CascadeKind::Prose, "none", 6000, false);
+        let quota = || -> Result<ChatOutcome, LlmError> {
+            Err(LlmError { error: "LLM 429 (квота провайдера исчерпана): weekly usage limit".into(), status: Some(429), empty: false, networky: false, throttled: false, quota: true })
+        };
+        let (out, seen) = run(&req, vec![quota()]);
+        assert_eq!(seen.len(), 1);
+        let (ok_flag, payload) = out.to_json(CascadeKind::Prose);
+        assert!(!ok_flag);
+        assert_eq!(payload["quota"], json!(true));
+    }
+
+    #[test]
     fn is_mandatory_reasoning_только_400() {
-        let e = |status, msg: &str| LlmError { error: msg.into(), status, empty: false, networky: false, throttled: false };
+        let e = |status, msg: &str| LlmError { error: msg.into(), status, empty: false, networky: false, throttled: false, quota: false };
         assert!(is_mandatory_reasoning(&e(Some(400), MANDATORY)));
         assert!(!is_mandatory_reasoning(&e(Some(500), MANDATORY)));
         assert!(!is_mandatory_reasoning(&e(Some(400), "LLM 400: bad request")));

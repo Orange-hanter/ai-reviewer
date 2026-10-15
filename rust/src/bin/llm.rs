@@ -63,7 +63,7 @@ fn run() -> Result<()> {
             );
             Ok(())
         }
-        Err(LlmError { error, status, empty, networky, throttled }) => {
+        Err(LlmError { error, status, empty, networky, throttled, quota }) => {
             eprintln!(
                 "{}",
                 json!({
@@ -72,6 +72,7 @@ fn run() -> Result<()> {
                     "empty": empty,
                     "networky": networky,
                     "throttled": throttled,
+                    "quota": quota,
                 })
             );
             std::process::exit(2);

@@ -13,6 +13,29 @@ audience: [next-session-agent, maintainers]
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
 
+## 2026-10-15 — первые боевые прогоны 0.6.0; Orakul → OpenRouter; квота провайдера
+
+**release-binaries:** первый реальный прогон на `v0.6.0` прошёл (3 платформы, upload). Архив
+`darwin-arm64` проверен вручную: sha256 сошёлся, `gh attestation verify` с `--source-ref
+refs/tags/v0.6.0` прошёл, с чужим тегом отвергнут.
+
+**Orakul (#602, #604):**
+- Пин `v0.4.0` → `v0.6.0`, добавлен шаг загрузки бинарей.
+- Раннер ревью `hermes-review-1` без `gh`, поэтому шаблон берёт пиненный `gh`
+  (ai-reviewer#49). Новый CI-джоб `consumer-binaries` проверяет этот путь на каждом прогоне.
+- Первый боевой прогон: бинари установлены. Ревью при этом упало на 429 «weekly usage limit»
+  Ollama Cloud, и при `REVIEW_LLM_REQUIRED=1` блокировался каждый PR. Поэтому Orakul
+  переведён на OpenRouter. Ростер по замеру:
+  - specialists `glm-5.3-flash` / `mimo-v2.6-flash` / `deepseek-v4.1-flash`;
+  - жюри `claude-haiku-5.5`;
+  - verifier `gpt-6-luna`;
+  - fallback `~deepseek/deepseek-flash-latest`.
+- Сквозной dry-run на OpenRouter с этим ростером на синтетическом кейсе: 165 с, 3 блока
+  (SQL, traversal, `reconcile`).
+
+**Квота (этот PR):** квотный 429 и 402 теперь отдельное состояние, без ретраев. Остальные
+вызовы прогона после первого такого ответа отказывают сразу.
+
 ## 2026-10-15 — 0.6.0
 
 **Сделано:** релиз `v0.6.0`: версия в `package.json`, бейдж и пример пина в README, пин
