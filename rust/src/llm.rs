@@ -81,11 +81,14 @@ pub struct LlmError {
     /// каскад бессмысленны, пока её не пополнят, — JS-обёртка после первой такой ошибки
     /// отказывает остальным вызовам этого провайдера сразу.
     pub quota: bool,
+    /// usage дошедшего, но непригодного ответа (пустой content) — его тоже выставили в счёт.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Value>,
 }
 
 impl LlmError {
     fn networky(message: impl Into<String>, throttled: bool) -> Self {
-        LlmError { error: message.into(), status: None, empty: false, networky: true, throttled, quota: false }
+        LlmError { error: message.into(), status: None, empty: false, networky: true, throttled, quota: false, usage: None }
     }
 }
 
@@ -270,7 +273,9 @@ pub enum SseReadError {
     /// Ошибка чтения/бюджета — JS-классификация: networky (ретрай, если бюджет остался).
     Io(String),
     /// Пустой content — флаг empty (ретрая на уровне chatRequest нет, fallback выше).
-    Empty { message: String },
+    /// usage — из финального chunk'а: пустой ответ оплачен (рассуждение — completion-токены),
+    /// и без него учёт цены не видит самые дорогие холостые вызовы.
+    Empty { message: String, usage: Option<Value> },
 }
 
 /// Результат parse_sse: сырые поля до финальных проверок readLlmSseContent.
@@ -309,6 +314,7 @@ pub fn parse_sse(read: impl Read, budget: &dyn Fn() -> bool) -> Result<RawSse, S
         };
         return Err(SseReadError::Empty {
             message: format!("пустой content (finish={}, reasoning={}симв)", finish, st.reasoning_len),
+            usage: st.usage.as_ref().and_then(normalize_usage),
         });
     }
     Ok(RawSse { content: trimmed.to_string(), usage: st.usage.as_ref().and_then(normalize_usage) })
@@ -408,6 +414,7 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
                     networky: false,
                     throttled,
                     quota: true,
+                    usage: None,
                 });
             }
             if status == 429 {
@@ -436,6 +443,7 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
                 networky: false,
                 throttled,
                 quota: false,
+                usage: None,
             });
         }
         let budget_fn = || t0.elapsed() < timeout;
@@ -451,7 +459,7 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
                 }
                 return Err(LlmError::networky(msg, throttled));
             }
-            Err(SseReadError::Empty { message }) => {
+            Err(SseReadError::Empty { message, usage }) => {
                 return Err(LlmError {
                     error: message,
                     status: None,
@@ -459,6 +467,7 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
                     networky: false,
                     throttled,
                     quota: false,
+                    usage,
                 });
             }
         }
