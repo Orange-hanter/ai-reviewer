@@ -77,12 +77,35 @@ pub struct LlmError {
     pub empty: bool,
     pub networky: bool,
     pub throttled: bool,
+    /// Квота провайдера исчерпана (402 или 429 «usage limit / quota / credits»): ретраи и
+    /// каскад бессмысленны, пока её не пополнят, — JS-обёртка после первой такой ошибки
+    /// отказывает остальным вызовам этого провайдера сразу.
+    pub quota: bool,
 }
 
 impl LlmError {
     fn networky(message: impl Into<String>, throttled: bool) -> Self {
-        LlmError { error: message.into(), status: None, empty: false, networky: true, throttled }
+        LlmError { error: message.into(), status: None, empty: false, networky: true, throttled, quota: false }
     }
+}
+
+/// Ответ провайдера про исчерпанную квоту, а не про темп запросов.
+///
+/// 402 — OpenRouter (кончились кредиты ключа или его лимит). 429 бывает двух видов: rate limit
+/// (ждать секунды — ретрай с backoff осмыслен) и квота (недельный лимит Ollama Cloud: «you have
+/// reached your weekly usage limit») — её ретраи только тратят тайм-бюджет и режут семафоры.
+/// Отличаем по тексту тела: у квоты в нём лимит, квота или кредиты.
+pub fn is_quota_exhausted(status: u16, body: &str) -> bool {
+    if status == 402 {
+        return true;
+    }
+    if status != 429 {
+        return false;
+    }
+    let b = body.to_lowercase();
+    ["usage limit", "quota", "credits", "credit limit", "insufficient balance", "insufficient funds", "key limit"]
+        .iter()
+        .any(|needle| b.contains(needle))
 }
 
 /// JS `\s` (String#trim): Unicode WhiteSpace ∪ LineTerminator ∪ U+FEFF, БЕЗ U+0085 (NEL).
@@ -376,6 +399,17 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
         if !res.status().is_success() {
             let retry_after = retry_after_of(&res);
             let body = res.text().unwrap_or_default();
+            if is_quota_exhausted(status, &body) {
+                // Не ретраим и не помечаем throttled: снижение параллелизма квоту не вернёт.
+                return Err(LlmError {
+                    error: format!("LLM {status} (квота провайдера исчерпана): {}", truncate_chars(&body, 400)),
+                    status: Some(status),
+                    empty: false,
+                    networky: false,
+                    throttled,
+                    quota: true,
+                });
+            }
             if status == 429 {
                 throttled = true;
             }
@@ -401,6 +435,7 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
                 empty: false,
                 networky: false,
                 throttled,
+                quota: false,
             });
         }
         let budget_fn = || t0.elapsed() < timeout;
@@ -423,6 +458,7 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
                     empty: true,
                     networky: false,
                     throttled,
+                    quota: false,
                 });
             }
         }

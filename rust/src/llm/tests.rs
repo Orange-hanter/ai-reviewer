@@ -375,6 +375,39 @@ fn chat_429_throttled_и_ретрай_с_retry_after() {
 }
 
 #[test]
+fn chat_429_недельная_квота_не_ретраится_и_не_режет_параллелизм() {
+    let body = br#"{"error":{"message":"you (x) have reached your weekly usage limit, upgrade for higher limits"}}"#;
+    let mut server = fake_server(vec![Some((429, vec![], body.to_vec()))], Duration::ZERO);
+    let err = chat(&base_req(&server.url)).unwrap_err();
+    assert!(err.quota, "квота опознана: {err:?}");
+    assert!(!err.throttled, "квота — не повод снижать параллелизм");
+    assert_eq!(err.status, Some(429));
+    assert!(err.error.contains("квота провайдера исчерпана"));
+    assert_eq!(server.requests.lock().unwrap().len(), 1, "без ретраев");
+    server.stop();
+}
+
+#[test]
+fn chat_402_openrouter_кредиты_кончились_это_квота() {
+    let body = br#"{"error":{"message":"Insufficient credits. Add more using https://openrouter.ai/settings/credits","code":402}}"#;
+    let mut server = fake_server(vec![Some((402, vec![], body.to_vec()))], Duration::ZERO);
+    let err = chat(&base_req(&server.url)).unwrap_err();
+    assert!(err.quota);
+    assert_eq!(server.requests.lock().unwrap().len(), 1);
+    server.stop();
+}
+
+#[test]
+fn is_quota_exhausted_отличает_квоту_от_rate_limit() {
+    use crate::llm::is_quota_exhausted;
+    assert!(is_quota_exhausted(402, ""));
+    assert!(is_quota_exhausted(429, "You have reached your weekly USAGE LIMIT"));
+    assert!(is_quota_exhausted(429, "Key limit exceeded"));
+    assert!(!is_quota_exhausted(429, "rate limited, retry later"));
+    assert!(!is_quota_exhausted(500, "quota"));
+}
+
+#[test]
 fn chat_400_stream_options_повтор_без_include_usage() {
     let mut server = fake_server(
         vec![
