@@ -27,7 +27,7 @@ jobs:
 
       - name: Rust build
         working-directory: rust
-        run: cargo build
+        run: cargo build --locked   # тот же Cargo.lock, по которому собираются бинари релиза
 
       - name: Unit tests (node:test)
         run: npm test

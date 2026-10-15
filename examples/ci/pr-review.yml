@@ -133,6 +133,39 @@ jobs:
           ref: ${{ steps.pin.outputs.ref }}
           path: .ai-reviewer-engine
 
+      # Готовые Rust-бинари движка (RFC 20): основная реализация каскада LLM, промптов и гейта.
+      # Архив берётся из релиза ТОГО ЖЕ тега, что и движок, и сверяется по sha256. Пин не тег,
+      # релиз без архива или платформа без сборки — предупреждение и deprecated JS-копии
+      # (инфра-сбой merge не блокирует). Несовпадение sha256 — бинари не ставятся вовсе:
+      # чужой код с секретами прогона не исполняется.
+      - name: Download engine binaries
+        if: steps.pin.outputs.ref != ''
+        env:
+          REF: ${{ steps.pin.outputs.ref }}   # уже провалидирован шагом pin
+        run: |
+          set -uo pipefail
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64) T=linux-x64 ;;
+            Linux-aarch64|Linux-arm64) T=linux-arm64 ;;
+            Darwin-arm64) T=darwin-arm64 ;;
+            *) echo "::warning::нет готовых бинарей ai-reviewer для $(uname -sm) — движок на JS-копиях"; exit 0 ;;
+          esac
+          NAME="ai-reviewer-bins-$T.tar.gz"
+          URL="https://github.com/Orange-hanter/ai-reviewer/releases/download/$REF"
+          D="$RUNNER_TEMP/ai-reviewer-bins"
+          mkdir -p "$D"
+          if ! curl -fsSL --retry 3 -o "$D/$NAME" "$URL/$NAME" || ! curl -fsSL --retry 3 -o "$D/$NAME.sha256" "$URL/$NAME.sha256"; then
+            echo "::warning::архива $NAME для ai-reviewer@$REF нет (пин не тег релиза?) — движок на JS-копиях"
+            exit 0
+          fi
+          if ! (cd "$D" && sha256sum -c "$NAME.sha256"); then
+            echo "::error::sha256 архива $NAME не совпал — бинари не установлены, движок на JS-копиях"
+            exit 0
+          fi
+          mkdir -p .ai-reviewer-engine/rust/bin
+          tar -xzf "$D/$NAME" -C .ai-reviewer-engine/rust/bin
+          echo "→ бинари ai-reviewer@$REF ($T) установлены"
+
       # БЕЗ continue-on-error: скрипт выходит 1 ТОЛЬКО на находках critical/major (REVIEW_BLOCK_ON)
       # внутри скрипта (die/throw), джоб зелёный, merge не блокируется.
       - name: Run AI review

@@ -125,8 +125,10 @@ majors (`source === BLAST_FINDING_SOURCE`) — soft: без verifier не бло
 
 `rust/` — порт части `lib/*.mjs` (diff, router, findings, engine, llm, prompt, specialists,
 verifier, report, github, export, actionability, metrics, config/profile, json, structure-*).
-JS-модуль остаётся обёрткой с тем же API: зовёт бинарь из `rust/target/debug/` (JSON на stdin),
-а без бинаря работает эталонный JS. `AI_REVIEWER_<MOD>_BIN` — путь к бинарю,
+JS-модуль остаётся обёрткой с тем же API: зовёт бинарь (JSON на stdin), найденный
+`lib/rust-bin.mjs` (`rust/target/debug` → `release` → `rust/bin` из архива релиза), а без
+бинаря работает эталонный JS. Новый путь к бинарю — только через `defaultRustBin`
+(`test/rust-bin.test.mjs` это держит). `AI_REVIEWER_<MOD>_BIN` — путь к бинарю,
 `AI_REVIEWER_<MOD>_FORCE_JS=1` — чистый JS. Оркестрация (`pipeline.mjs`, chunk-routing,
 specialist-merge, incremental) — только JS.
 
@@ -182,7 +184,10 @@ dry-run MoA, `wait: false` + поллинг по `jobId`, RFC 08–12) и `curso
 формату из `proposals/README.md`.
 
 Релиз: зелёный `npm run check`, секция в `CHANGELOG.md` (есть `## Unreleased`), версия в
-`package.json` и бейдж в README, пин в `examples/consumers/orakul/ai-reviewer-ref`, тег.
+`package.json` и бейдж в README, пин в `examples/consumers/orakul/ai-reviewer-ref`, тег,
+GitHub-релиз. Публикация релиза запускает `.github/workflows/release-binaries.yml`: он
+собирает бинари по `rust/Cargo.lock` и прикладывает архивы. Без них потребитель остаётся на
+JS-копиях, поэтому проверь, что ассеты появились.
 Потребитель подключает движок по пину `ops/ai-reviewer-ref`, читаемому из базовой ветки —
 код PR никогда не исполняется с секретами прогона. Breaking для потребителя: смена namespace
 маркеров, формата футера sticky, контрактов `swarm`/`export`/`structure`.

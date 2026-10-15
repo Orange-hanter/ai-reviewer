@@ -140,7 +140,21 @@ D traversal, E floating promise). Вызовы шли через `chatJson` с R
 
 ## Миграция
 
-**Блокер: потребитель бинарей не получает.** В пакет (`package.json` → `files`) каталог
+**Доставка бинарей (решено 2026-10-15: готовые бинари в релизе).**
+- `.github/workflows/release-binaries.yml` на публикацию релиза собирает `--release --locked`
+  под `linux-x64` (ubuntu-22.04 — ради glibc 2.35), `linux-arm64` и `darwin-arm64`.
+- Перед упаковкой он гоняет `npm test` на релизных бинарях, затем прикладывает к релизу
+  `ai-reviewer-bins-<target>.tar.gz` и `.sha256`. `rust/Cargo.lock` теперь в git.
+- Шаблон потребителя качает архив по тому же ref, что и движок, сверяет sha256 и
+  распаковывает в `.ai-reviewer-engine/rust/bin`.
+- Нет архива (пин не тег, старый релиз) или sha256 не совпал — предупреждение и
+  JS-копии; на гейт это не влияет.
+- Поиск бинарей собран в `lib/rust-bin.mjs`. B2 из аудита закрыт: раньше все 26 обёрток
+  искали только `rust/target/debug`.
+
+Ниже — состояние до этого решения.
+
+**Блокер (был): потребитель бинарей не получает.** В пакет (`package.json` → `files`) каталог
 `rust/` не входит, а `rust/target/` в `.gitignore`. Шаблон `examples/ci/pr-review.yml`
 клонирует движок и сразу запускает `node .ai-reviewer-engine/bin/pr-review.mjs`, шага с
 `cargo build` в нём нет. Резолверы ищут только `rust/target/debug/<mod>`. В итоге у

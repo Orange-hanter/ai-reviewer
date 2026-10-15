@@ -397,13 +397,23 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 
 ## Rust-бинари
 
-26 модулей `lib/*.mjs` — обёртки над Rust-бинарями `rust/target/debug/<bin>` с эталонной
-JS-копией внутри. Бинари собирает `cargo build` в `rust/`; в чистом клоне их нет, и всё
-работает на JS.
+26 модулей `lib/*.mjs` — обёртки над Rust-бинарями. С 0.6 Rust — основная реализация,
+JS-копии внутри обёрток deprecated (RFC 20). Откуда берутся бинари:
+
+- у потребителя — архив `ai-reviewer-bins-<target>.tar.gz` из релиза того же тега. Шаблон
+  `examples/ci/pr-review.yml` скачивает его, сверяет sha256 и распаковывает в
+  `rust/bin/`. Платформы: `linux-x64`, `linux-arm64`, `darwin-arm64`;
+- у разработчика — `cargo build` в `rust/`.
+
+Без бинарей (чистый клон, пин не на тег релиза) всё работает на JS-копиях, без новых правок.
+
+Путь по умолчанию (`lib/rust-bin.mjs`): берётся первый существующий из
+`$AI_REVIEWER_RUST_BIN_DIR` → `rust/target/debug` → `rust/target/release` → `rust/bin`.
 
 | Переменная | Смысл |
 |------------|-------|
-| `AI_REVIEWER_<MOD>_BIN` | Путь к бинарю вместо `rust/target/debug/<bin>` |
+| `AI_REVIEWER_RUST_BIN_DIR` | Каталог со всеми бинарями; проверяется первым |
+| `AI_REVIEWER_<MOD>_BIN` | Путь к бинарю одного модуля вместо пути по умолчанию |
 | `AI_REVIEWER_<MOD>_FORCE_JS` | `1` — чистый JS (паритетные прогоны, отладка); другие значения не действуют |
 
 Порядок: `FORCE_JS=1` → JS; иначе `_BIN` или путь по умолчанию; файла нет → JS. Бинарь есть,

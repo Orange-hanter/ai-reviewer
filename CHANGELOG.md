@@ -16,6 +16,23 @@ last_updated: 2026-09-10
 fallback'ом без бинаря и удаляются после аудита, что в них не осталось ничего, чего нет в
 Rust. CI собирает Rust до `npm test`, поэтому юнит-тесты идут по основной реализации.
 
+### Готовые Rust-бинари для потребителя
+
+До сих пор потребитель Rust не собирал. Каталога `rust/` нет в пакете, в шаблоне CI нет
+`cargo build`, поэтому у потребителя всегда работали JS-копии.
+
+- Workflow `release-binaries` при публикации релиза прикладывает к нему архивы
+  `ai-reviewer-bins-<target>.tar.gz` и `.sha256`. Платформы: `linux-x64`, `linux-arm64`,
+  `darwin-arm64`.
+- Шаблон `examples/ci/pr-review.yml` получил шаг `Download engine binaries`. Шаг качает
+  архив по тому же ref, что и движок, сверяет sha256 и распаковывает в `rust/bin`. Нет
+  архива или не совпал sha256 — предупреждение, движок работает на JS-копиях.
+- Обёртки ищут бинари через `lib/rust-bin.mjs`: `AI_REVIEWER_RUST_BIN_DIR` →
+  `rust/target/debug` → `rust/target/release` → `rust/bin`.
+- `rust/Cargo.lock` теперь в репозитории.
+- **Потребителю:** обновить свою копию шаблона (новый шаг) и пинить тег, а не SHA: архив
+  ищется по имени релиза.
+
 ### Каскад ретраев — в Rust, ретрай на «Reasoning is mandatory»
 
 Каскад `chatJson`/`chatText` переехал в бинарь `llm` (`rust/src/llm/cascade.rs`, поле

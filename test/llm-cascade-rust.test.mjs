@@ -12,10 +12,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { createLlmClient } from '../lib/llm.mjs';
+import { defaultRustBin } from '../lib/rust-bin.mjs';
 
-const BIN = fileURLToPath(new URL('../rust/target/debug/llm', import.meta.url));
+const BIN = defaultRustBin('llm');
 const MANDATORY = '{"error":{"message":"Reasoning is mandatory for this endpoint and cannot be disabled."}}';
 
 const sse = (text) => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`
@@ -49,7 +49,7 @@ function client(base, logs, records) {
 }
 
 const skip = !existsSync(BIN) || process.env.AI_REVIEWER_LLM_FORCE_JS === '1'
-  ? 'нет rust/target/debug/llm — сначала cargo build' : false;
+  ? 'нет бинаря llm (cargo build или архив релиза в rust/bin) — нечего проверять' : false;
 
 test('chatJson: пустой ответ → none → 400 mandatory → low с +8000 токенов', { skip }, async () => {
   const srv = await scriptedServer([[200, sseEmpty()], [400, MANDATORY], [200, sse('{"findings":[]}')]]);
