@@ -45,3 +45,39 @@ jobs:
       # «Долг слияния», пункт 2).
       - name: Parity JS ↔ Rust
         run: npm run check:parity
+
+  # Шаг «Download engine binaries» шаблона потребителя, исполненный КАК ЕСТЬ против последнего
+  # релиза движка (RFC 20). Шаблон и release-binaries связаны только именами и подписью —
+  # разойдутся, и потребитель молча останется на JS-копиях. Два прогона: с gh из образа и с
+  # «отсутствующим» gh — путь self-hosted раннера, где шаг берёт пиненный gh сам.
+  consumer-binaries:
+    name: Consumer template — engine binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Download step against the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REF="$(gh release view --json tagName -q .tagName)"
+          [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][A-Za-z0-9.]+)?$ ]] || { echo "invalid tag: $REF"; exit 1; }
+          export REF
+          node test/helpers/extract-step-run.mjs examples/ci/pr-review.yml "Download engine binaries" > "$RUNNER_TEMP/step.sh"
+          sed 's/command -v gh /command -v gh-not-installed /' "$RUNNER_TEMP/step.sh" > "$RUNNER_TEMP/step-no-gh.sh"
+          grep -q 'command -v gh-not-installed' "$RUNNER_TEMP/step-no-gh.sh" || { echo "подмена gh в шаге не сработала"; exit 1; }
+          for variant in step step-no-gh; do
+            echo "::group::$variant ($REF)"
+            rm -rf .ai-reviewer-engine "$RUNNER_TEMP/ai-reviewer-bins"
+            bash "$RUNNER_TEMP/$variant.sh" 2>&1 | tee "$RUNNER_TEMP/$variant.log"
+            echo "::endgroup::"
+            grep -q 'установлены' "$RUNNER_TEMP/$variant.log" || { echo "$variant: бинари не установлены"; exit 1; }
+            test -x .ai-reviewer-engine/rust/bin/llm || { echo "$variant: нет rust/bin/llm"; exit 1; }
+          done
+          grep -q 'взят gh' "$RUNNER_TEMP/step-no-gh.log" || { echo "без gh шаг не взял пиненный gh"; exit 1; }
