@@ -66,6 +66,11 @@ jobs:
       # Дымовой прогон тем, что потребитель реально запустит: npm test с бинарями ТОЛЬКО из
       # target/release (debug-сборки на этом раннере нет — обёртки найдут именно релизные).
       - name: Smoke — npm test на релизных бинарях
+        env:
+          # Пороги латентности (холодный старт MCP) — про CI-раннер, а не про бинари: на v0.6.1
+          # linux-arm64 сорвал handshake < 5 с (6.8 с) сразу после cargo build --release.
+          # Множитель, а не пропуск: зависание тест по-прежнему ловит (test/helpers/timing.mjs).
+          AI_REVIEWER_TEST_TIMING_SLACK: '3'
         run: npm test
 
       - name: Pack

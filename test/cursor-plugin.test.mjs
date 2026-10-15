@@ -10,6 +10,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { timingBudget } from './helpers/timing.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
 const PLUGIN = join(ROOT, 'cursor-plugin');
@@ -40,7 +41,7 @@ function frame(obj) {
   return Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]);
 }
 
-function spawnChild(command, args, env, { cwd = ROOT, writeHandshake = false, timeoutMs = 8000 } = {}) {
+function spawnChild(command, args, env, { cwd = ROOT, writeHandshake = false, timeoutMs = timingBudget(8000) } = {}) {
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const child = spawn(command, args, {
@@ -83,11 +84,11 @@ function spawnChild(command, args, env, { cwd = ROOT, writeHandshake = false, ti
 }
 
 function spawnHandshake(command, args, env, cwd = ROOT) {
-  return spawnChild(command, args, env, { cwd, writeHandshake: true, timeoutMs: 8000 });
+  return spawnChild(command, args, env, { cwd, writeHandshake: true, timeoutMs: timingBudget(8000) });
 }
 
 function spawnFailFast(command, args, env, cwd) {
-  return spawnChild(command, args, env, { cwd, writeHandshake: false, timeoutMs: 4000 });
+  return spawnChild(command, args, env, { cwd, writeHandshake: false, timeoutMs: timingBudget(4000) });
 }
 
 async function isolatedPlugin({ engineRoot } = {}) {
@@ -191,7 +192,7 @@ test('P-configure: initialize + tools/list через абсолютный node,
     OLLAMA_API_KEY: '',
   });
   assert.equal(result.code, 0, result.stderr);
-  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.ok(result.ms < timingBudget(5000), `handshake ${result.ms}ms`);
   assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer');
   const names = result.messages[1].result.tools.map((tool) => tool.name);
   assert.ok(names.includes('review_route'));
@@ -226,7 +227,7 @@ test('P-engine-install: .engine-root, пустой AI_REVIEWER_ROOT, PATH без
     HOME,
   }, dir);
   assert.equal(result.code, 0, result.stderr);
-  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.ok(result.ms < timingBudget(5000), `handshake ${result.ms}ms`);
   assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer');
   const names = result.messages[1].result.tools.map((tool) => tool.name);
   assert.ok(names.includes('review_route'));
@@ -241,7 +242,7 @@ test('плейсхолдеры в env резолвятся через .engine-ro
     HOME,
   }, dir);
   assert.equal(result.code, 0, result.stderr);
-  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.ok(result.ms < timingBudget(5000), `handshake ${result.ms}ms`);
   assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer');
 });
 
@@ -265,7 +266,7 @@ test('fail-fast: нет engine и нет .engine-root → exit ≠ 0', async () 
     HOME,
   }, dir);
   assert.notEqual(result.code, 0);
-  assert.ok(result.ms < 2000, `fail-fast ${result.ms}ms`);
+  assert.ok(result.ms < timingBudget(2000), `fail-fast ${result.ms}ms`);
   assert.match(result.stderr, /AI_REVIEWER_ROOT/);
   assert.match(result.stderr, /install-local/);
 });
@@ -279,7 +280,7 @@ test('fail-fast: битый REVIEW_MCP_ROOT → exit ≠ 0', async () => {
     HOME,
   }, dir);
   assert.notEqual(result.code, 0);
-  assert.ok(result.ms < 2000, `fail-fast ${result.ms}ms`);
+  assert.ok(result.ms < timingBudget(2000), `fail-fast ${result.ms}ms`);
   assert.match(result.stderr, /REVIEW_MCP_ROOT/);
 });
 
@@ -355,7 +356,7 @@ test('абсолютный лаунчер: handshake из чужого cwd (не
     HOME,
   }, alien);
   assert.equal(result.code, 0, result.stderr);
-  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.ok(result.ms < timingBudget(5000), `handshake ${result.ms}ms`);
   const names = result.messages[1].result.tools.map((tool) => tool.name);
   assert.ok(names.includes('review_route'));
 });
@@ -398,7 +399,7 @@ test('git-шаблон $HOME: handshake из чужого cwd после install
     HOME: home,
   }, alien);
   assert.equal(result.code, 0, result.stderr);
-  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.ok(result.ms < timingBudget(5000), `handshake ${result.ms}ms`);
   const names = result.messages[1].result.tools.map((tool) => tool.name);
   assert.ok(names.includes('review_route'));
 });
@@ -411,7 +412,7 @@ test('structure handshake: tools/list без Rust/пайплайна', async () 
     HOME,
   });
   assert.equal(result.code, 0, result.stderr);
-  assert.ok(result.ms < 5000, `handshake ${result.ms}ms`);
+  assert.ok(result.ms < timingBudget(5000), `handshake ${result.ms}ms`);
   assert.equal(result.messages[0].result.serverInfo.name, 'ai-reviewer-structure');
   const names = result.messages[1].result.tools.map((tool) => tool.name);
   assert.ok(names.includes('structure_context'));
