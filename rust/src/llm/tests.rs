@@ -121,7 +121,7 @@ fn sse_пустой_content_пустая_ошибка_с_finish_и_reasoning() {
     let err = parse_sse(Chunky { data: stream.as_bytes(), chunk: 64 }, &ok_budget).unwrap_err();
     match err {
         // reasoning "думаю😀" = 5 BMP-символов + 1 не-BMP (2 UTF-16 юнита) = 7 — как JS .length.
-        SseReadError::Empty { message } => assert_eq!(message, "пустой content (finish=stop, reasoning=7симв)"),
+        SseReadError::Empty { message, .. } => assert_eq!(message, "пустой content (finish=stop, reasoning=7симв)"),
         other => panic!("ожидалась Empty, получено: {other:?}"),
     }
 }

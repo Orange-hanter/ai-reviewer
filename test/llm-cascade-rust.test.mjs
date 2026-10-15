@@ -80,6 +80,24 @@ test('chatText: пустой ответ → none → 400 mandatory → low', { s
   } finally { srv.close(); }
 });
 
+test('chatText: пустой ответ с usage учитывается в цене, причина — в логе', { skip }, async () => {
+  const emptyPaid = `data: ${JSON.stringify({ choices: [{ delta: { reasoning: 'думаю' }, finish_reason: 'length' }] })}\n\n`
+    + `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 16000, completion_tokens: 6000, total_tokens: 22000 } })}\n\n`
+    + 'data: [DONE]\n\n';
+  const srv = await scriptedServer([[200, emptyPaid], [200, sse('ответ')]]);
+  const logs = [];
+  const usages = [];
+  try {
+    const text = await client(srv.base, logs, []).chatText([{ role: 'user', content: 'x' }], 'deepseek', {
+      onUsage: (u) => usages.push(u),
+    });
+    assert.equal(text, 'ответ');
+    assert.equal(usages.length, 2, 'холостой вызов тоже оплачен');
+    assert.equal(usages[0].completion_tokens, 6000);
+    assert.ok(logs.some((l) => /content пуст на effort=low \(пустой content \(finish=length/.test(l)), logs.join('\n'));
+  } finally { srv.close(); }
+});
+
 test('chatJson: сбой каскада отдаёт флаги и не теряет usage неразобранного ответа', { skip }, async () => {
   const srv = await scriptedServer([[200, sse('просто текст без JSON')]]);
   const records = [];

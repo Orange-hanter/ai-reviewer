@@ -91,9 +91,12 @@ pub fn next_attempt(kind: CascadeKind, step: usize, prev: &Attempt, failure: &Fa
     }
     let first_effort = prev.effort.as_deref().unwrap_or("low");
     match (kind, failure) {
+        // Пустой ответ на low — почти всегда рассуждение съело весь max_tokens (finish=length).
+        // Больший бюджет не помогает: замер 2026-10-16 на чанке 49 КБ — deepseek-v4.1-flash
+        // съедает и 6000, и 14000 (RFC 20, § 5). Остаётся effort=none; причина — в логе.
         (CascadeKind::Prose, Failure::Llm(e)) if e.empty => Some((
             attempt("none", prev.max_tokens, false),
-            format!("advisor content пуст на effort={first_effort} → effort=none"),
+            format!("advisor content пуст на effort={first_effort} ({}) → effort=none", e.error),
         )),
         (CascadeKind::Prose, _) => None,
         (CascadeKind::Json, Failure::Llm(e)) if e.empty => Some((
@@ -241,6 +244,10 @@ pub fn run_cascade_with(
             }
             Err(e) => {
                 throttled |= e.throttled;
+                // Пустой ответ оплачен так же, как полный: рассуждение — completion-токены.
+                if let Some(u) = e.usage.clone() {
+                    usages.push(u);
+                }
                 Err(Failure::Llm(e))
             }
         };
@@ -293,7 +300,7 @@ mod tests {
     }
 
     fn err(status: Option<u16>, msg: &str, empty: bool) -> Result<ChatOutcome, LlmError> {
-        Err(LlmError { error: msg.into(), status, empty, networky: false, throttled: false, quota: false })
+        Err(LlmError { error: msg.into(), status, empty, networky: false, throttled: false, quota: false, usage: None })
     }
 
     const MANDATORY: &str =
@@ -348,7 +355,7 @@ mod tests {
         let failure = Failure::Json(JsonRepairError { message: "esc".into(), bad_escape: true, truncated: false });
         let (next, _) = next_attempt(CascadeKind::Json, 0, &attempt("low", Some(24000), true), &failure).unwrap();
         assert_eq!(next, attempt("none", Some(32000), false));
-        let mandatory = Failure::Llm(LlmError { error: MANDATORY.into(), status: Some(400), empty: false, networky: false, throttled: false, quota: false });
+        let mandatory = Failure::Llm(LlmError { error: MANDATORY.into(), status: Some(400), empty: false, networky: false, throttled: false, quota: false, usage: None });
         let (third, _) = next_attempt(CascadeKind::Json, 1, &next, &mandatory).unwrap();
         assert_eq!(third, attempt("low", Some(40000), false));
     }
@@ -427,7 +434,7 @@ mod tests {
     fn квота_не_ретраится_ни_одним_правилом() {
         let req = base(CascadeKind::Prose, "none", 6000, false);
         let quota = || -> Result<ChatOutcome, LlmError> {
-            Err(LlmError { error: "LLM 429 (квота провайдера исчерпана): weekly usage limit".into(), status: Some(429), empty: false, networky: false, throttled: false, quota: true })
+            Err(LlmError { error: "LLM 429 (квота провайдера исчерпана): weekly usage limit".into(), status: Some(429), empty: false, networky: false, throttled: false, quota: true, usage: None })
         };
         let (out, seen) = run(&req, vec![quota()]);
         assert_eq!(seen.len(), 1);
@@ -437,8 +444,24 @@ mod tests {
     }
 
     #[test]
+    fn пустой_ответ_оплачен_и_его_usage_учтён() {
+        let req = base(CascadeKind::Prose, "low", 6000, false);
+        let empty_paid = || -> Result<ChatOutcome, LlmError> {
+            Err(LlmError {
+                error: "пустой content (finish=length, reasoning=24000симв)".into(),
+                status: None, empty: true, networky: false, throttled: false, quota: false,
+                usage: Some(json!({"prompt_tokens": 16000, "completion_tokens": 6000, "total_tokens": 22000})),
+            })
+        };
+        let (out, _) = run(&req, vec![empty_paid(), ok("текст")]);
+        assert_eq!(out.usages.len(), 2, "холостой вызов тоже в учёте цены");
+        assert_eq!(out.usages[0]["completion_tokens"], json!(6000));
+        assert!(out.log[0].contains("finish=length"), "причина пустого ответа видна в логе: {:?}", out.log);
+    }
+
+    #[test]
     fn is_mandatory_reasoning_только_400() {
-        let e = |status, msg: &str| LlmError { error: msg.into(), status, empty: false, networky: false, throttled: false, quota: false };
+        let e = |status, msg: &str| LlmError { error: msg.into(), status, empty: false, networky: false, throttled: false, quota: false, usage: None };
         assert!(is_mandatory_reasoning(&e(Some(400), MANDATORY)));
         assert!(!is_mandatory_reasoning(&e(Some(500), MANDATORY)));
         assert!(!is_mandatory_reasoning(&e(Some(400), "LLM 400: bad request")));
