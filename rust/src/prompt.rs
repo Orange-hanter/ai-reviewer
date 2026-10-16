@@ -455,7 +455,7 @@ fn aggregator_output_format() -> String {
         r#"<output_format>
 Respond with a single JSON object inside a ```json fence and no text around it:
 {{
-  "summary": "one sentence: the overall verdict",
+  "summary": "one sentence: what this part of the change does",
   "findings": [
     {{
       "file": "path as in the diff",
@@ -472,6 +472,9 @@ Respond with a single JSON object inside a ```json fence and no text around it:
 - line: exactly the number from the '123:' prefix of the annotated diff line; 0 when the finding is
   not about one line.
 - quote: proves the issue; a critical or major finding without a quote is discarded.
+- summary describes the change, not its quality: do not say whether it is safe, has blocking issues
+  or is ready to merge. That verdict is the gate's: it is reached after the verifier, over every part
+  of the PR, and a verdict written here contradicts it whenever another part blocks.
 - summary, title and body are in Russian: the readers are Russian-speaking developers. Keep code,
   identifiers and file paths as they are.
 - At most {AGGREGATOR_MAX_ITEMS} findings, strongest first; the specialists already capped theirs at {SPECIALIST_MAX_ITEMS} each, so
@@ -1284,6 +1287,17 @@ mod tests {
             assert!(stack.is_empty(), "незакрытые теги {stack:?}");
             assert!(!s.contains("\n\n\n"), "висячая пустая строка в:\n{s}");
         }
+    }
+
+    /// Summary жюри — описание изменения, а не вердикт: вердикт выносит гейт после verifier'а
+    /// по всем частям PR, и вердикт одной части противоречил бы блоку из другой (0.6.3).
+    #[test]
+    fn aggregator_summary_is_a_description_not_a_verdict() {
+        let args = json!({"annotated": "d", "blastBlocks": [], "pr": {"number": 1, "title": "t"}, "fileContents": "", "priorFindings": []});
+        let system = build_messages(&args, &ctx()).unwrap()[0]["content"].as_str().unwrap().to_string();
+        assert!(system.contains(r#""summary": "one sentence: what this part of the change does""#));
+        assert!(!system.contains("overall verdict"));
+        assert!(system.contains("summary describes the change, not its quality"));
     }
 
     #[test]
