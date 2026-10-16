@@ -63,10 +63,22 @@ const j = (x) => JSON.parse(JSON.stringify(x));
 let compared = 0;
 const failures = [];
 
+/**
+ * Ключи, которые с 0.6.2 есть только в Rust (RFC 20, § 6): deprecated JS-копия конфига их не
+ * считает и не получит. Срезаются с rust-стороны перед сравнением — остальное сверяется как раньше.
+ */
+const RUST_OWNED_OLLAMA_KEYS = ['modelSettings', 'modelSettingsErrors'];
+function stripRustOwned(x) {
+  if (!x || typeof x !== 'object' || !x.ollama || typeof x.ollama !== 'object') return x;
+  const ollama = { ...x.ollama };
+  for (const k of RUST_OWNED_OLLAMA_KEYS) delete ollama[k];
+  return { ...x, ollama };
+}
+
 function compare(label, jsResult, rustResult) {
   compared += 1;
   try {
-    assert.deepEqual(rustResult, jsResult);
+    assert.deepEqual(stripRustOwned(rustResult), jsResult);
   } catch (e) {
     failures.push({
       label,

@@ -57,6 +57,10 @@ pub struct ChatRequest {
     pub timeout_ms: u64,
     #[serde(rename = "includeUsage")]
     pub include_usage: bool,
+    /// Маршрутизация провайдеров OpenRouter из LLM_MODEL_SETTINGS[model].provider —
+    /// уходит в тело запроса как есть (RFC 20, § 6).
+    #[serde(default)]
+    pub provider: Option<Value>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -343,6 +347,9 @@ fn build_payload(req: &ChatRequest, include_usage: bool) -> Value {
     }
     if req.json_mode {
         m.insert("response_format".to_string(), json!({ "type": "json_object" }));
+    }
+    if let Some(p) = req.provider.as_ref().filter(|p| p.is_object()) {
+        m.insert("provider".to_string(), p.clone());
     }
     Value::Object(m)
 }
