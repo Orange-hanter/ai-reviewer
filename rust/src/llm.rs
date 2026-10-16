@@ -347,7 +347,7 @@ fn build_payload(req: &ChatRequest, include_usage: bool) -> Value {
     Value::Object(m)
 }
 
-fn truncate_chars(s: &str, max: usize) -> String {
+pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
     let count = s.chars().count();
     if count <= max {
         return s.to_string();
@@ -357,7 +357,7 @@ fn truncate_chars(s: &str, max: usize) -> String {
     format!("{kept}…")
 }
 
-fn retry_after_of(res: &Response) -> Option<String> {
+pub(crate) fn retry_after_of(res: &Response) -> Option<String> {
     res.headers()
         .get("retry-after")
         .and_then(|h| h.to_str().ok())
@@ -475,6 +475,7 @@ pub fn chat(req: &ChatRequest) -> Result<ChatOutcome, LlmError> {
 }
 
 pub mod cascade;
+pub mod decide;
 
 #[cfg(test)]
 mod tests;

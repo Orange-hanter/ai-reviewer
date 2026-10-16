@@ -17,6 +17,13 @@
 //!           "throttled","usages","log"} в stderr.
 //! `log` — строки для лога обёртки, `usages` — usage каждого дошедшего ответа (учёт цены).
 //!
+//! Режим decision (RFC 21): во входе есть `"decide": true` — вызов decision-модели
+//! (rust/src/llm/decide.rs), эндпоинт `<base>/decisions`, не chat/completions.
+//!   вход  → {"decide","url","key","model","state","question":{name,instructions,choices:[{value,description}]},
+//!            "permutations","httpRetries","timeoutMs","maxStateChars"}
+//!   выход → {"answer","truncated","usage","latencyMs","calls","servedModel","throttled"}
+//!   сбой  → exit 2 + {"error","status","quota","throttled","networky","calls","usage"} в stderr.
+//!
 //! Семафоры намеренно в JS-обёртке (lib/llm.mjs): бинарь — одноразовый процесс на
 //! запрос, сквозное состояние семафоров живёт только в JS.
 
@@ -26,6 +33,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 
 use ai_reviewer::llm::cascade::{run_cascade, CascadeRequest};
+use ai_reviewer::llm::decide::{decide, DecideRequest};
 use ai_reviewer::llm::{chat, ChatRequest, LlmError};
 
 fn main() {
@@ -39,6 +47,19 @@ fn run() -> Result<()> {
     let mut input = String::new();
     std::io::stdin().read_to_string(&mut input).context("чтение stdin")?;
     let raw: serde_json::Value = serde_json::from_str(&input).context("вход должен быть JSON")?;
+    if raw.get("decide").is_some() {
+        let req: DecideRequest = serde_json::from_value(raw).context("вход должен быть DecideRequest JSON")?;
+        match decide(&req) {
+            Ok(out) => {
+                println!("{}", serde_json::to_string(&out).expect("сериализация результата"));
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!("{}", serde_json::to_string(&err).expect("сериализация ошибки"));
+                std::process::exit(2);
+            }
+        }
+    }
     if raw.get("cascade").is_some() {
         let req: CascadeRequest = serde_json::from_value(raw).context("вход должен быть CascadeRequest JSON")?;
         let (ok, payload) = run_cascade(&req).to_json(req.cascade);

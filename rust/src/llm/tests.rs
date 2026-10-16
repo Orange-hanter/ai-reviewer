@@ -499,3 +499,82 @@ fn chat_пустой_content_пустая_ошибка() {
     assert_eq!(err.error, "пустой content (finish=stop, reasoning=0симв)");
     server.stop();
 }
+
+// --- decide (RFC 21): перестановки отдельными вызовами, ретраи, квота ---
+
+fn decide_req(url: &str, permutations: u32) -> super::decide::DecideRequest {
+    serde_json::from_value(json!({
+        "url": url, "key": "k", "model": "m/d", "state": "находка",
+        "question": {"name": "fp", "instructions": "i", "choices": [
+            {"value": "real", "description": "настоящий"},
+            {"value": "fp", "description": "ложный"},
+        ]},
+        "permutations": permutations, "httpRetries": 2, "timeoutMs": 10_000,
+    }))
+    .unwrap()
+}
+
+fn decide_ok(real: f64, fp: f64) -> Option<(u16, Vec<(String, String)>, Vec<u8>)> {
+    let body = json!({
+        "model": "m/d-20261009",
+        "answers": {"fp": {"type": "choice", "choice": "real", "probabilities": {"fp": fp, "real": real}, "confidence": 0.5}},
+        "usage": {"input_tokens": 100, "output_tokens": 1, "cost": 0.00001},
+    });
+    Some((200, vec![], body.to_string().into_bytes()))
+}
+
+#[test]
+fn decide_две_перестановки_два_вызова_и_свод() {
+    let mut server = fake_server(vec![decide_ok(0.8, 0.2), decide_ok(0.6, 0.4)], Duration::ZERO);
+    let out = super::decide::decide(&decide_req(&server.url, 2)).unwrap();
+    assert_eq!(out.calls, 2);
+    assert_eq!(out.answer["argmax"], "real");
+    assert_eq!(out.answer["flip"], false);
+    assert!((out.answer["probabilities"]["real"].as_f64().unwrap() - 0.7).abs() < 1e-12);
+    assert!((out.answer["tvMax"].as_f64().unwrap() - 0.2).abs() < 1e-12);
+    assert_eq!(out.usage["prompt_tokens"].as_f64(), Some(200.0));
+    assert!((out.usage["cost"].as_f64().unwrap() - 0.00002).abs() < 1e-15);
+    assert_eq!(out.served_model.as_deref(), Some("m/d-20261009"));
+    let reqs = server.requests.lock().unwrap().clone();
+    let order = |r: &str| -> Vec<String> {
+        payload_of(r)["questions"]["fp"]["criteria"].as_object().unwrap().keys().cloned().collect()
+    };
+    assert_eq!(order(&reqs[0]), ["real", "fp"]);
+    assert_eq!(order(&reqs[1]), ["fp", "real"], "второй вызов — сдвинутый порядок");
+    assert!(reqs[0].contains("Bearer k"));
+    server.stop();
+}
+
+#[test]
+fn decide_429_ретраится_throttled() {
+    let mut server = fake_server(
+        vec![Some((429, vec![("retry-after".to_string(), "0".to_string())], b"rate limited".to_vec())), decide_ok(0.9, 0.1)],
+        Duration::ZERO,
+    );
+    let out = super::decide::decide(&decide_req(&server.url, 1)).unwrap();
+    assert!(out.throttled);
+    assert_eq!(out.calls, 2);
+    server.stop();
+}
+
+#[test]
+fn decide_402_квота_без_ретрая_с_usage_дошедших() {
+    let body = br#"{"error":{"message":"Insufficient credits","code":402}}"#;
+    let mut server = fake_server(vec![decide_ok(0.9, 0.1), Some((402, vec![], body.to_vec()))], Duration::ZERO);
+    let err = super::decide::decide(&decide_req(&server.url, 2)).unwrap_err();
+    assert!(err.quota);
+    assert_eq!(err.status, Some(402));
+    assert_eq!(err.calls, 2);
+    assert_eq!(err.usage["prompt_tokens"].as_f64(), Some(100.0), "первая перестановка уже в счёте");
+    server.stop();
+}
+
+#[test]
+fn decide_400_схемы_не_ретраится() {
+    let mut server = fake_server(vec![Some((400, vec![], b"invalid_type".to_vec()))], Duration::ZERO);
+    let err = super::decide::decide(&decide_req(&server.url, 1)).unwrap_err();
+    assert!(!err.quota);
+    assert_eq!(err.status, Some(400));
+    assert_eq!(err.calls, 1);
+    server.stop();
+}
