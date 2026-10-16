@@ -227,7 +227,13 @@ function summarize(model, rows) {
   const savings = chOk.filter((r) => r.item.deterministic === 'jury' && r.res.perm.argmax === 'single').length;
 
   const lat = rows.flatMap((r) => r.res.latency);
-  const cal = labeled.length >= 4 ? looTemperatureEce(scores, ys) : null;
+  // Калибровка по одному классу бессмысленна: температура уходит в край сетки.
+  const bothClasses = ys.some(Boolean) && ys.some((y) => !y);
+  const cal = labeled.length >= 4 && bothClasses ? looTemperatureEce(scores, ys) : null;
+  // Бинарное согласие на FP-метках: модель отдаёт p(real) < 0.5. Определено и без положительных.
+  const fpOnly = labeled.filter((r) => r.item.label === 'fp');
+  const fpRecognized = fpOnly.length
+    ? fpOnly.filter((r) => (pRealOf(r.res.perm.probabilities) ?? 1) < 0.5).length / fpOnly.length : null;
   return {
     model, items: rows.length, fpItems: fp.length, chunkItems: ch.length, calls, errorRate: calls ? errs / calls : null,
     noise: {
@@ -236,7 +242,7 @@ function summarize(model, rows) {
     },
     order: { flipRate: flips.length ? flips.filter(Boolean).length / flips.length : null, tvMedian: quantile(orderTv, 0.5) },
     q1: {
-      labeled: labeled.length, positives: ys.filter(Boolean).length, auc: aucVal, aucCi,
+      labeled: labeled.length, positives: ys.filter(Boolean).length, auc: aucVal, aucCi, fpRecognized,
       familyLabeled: famLabeled.length, familyAccuracy: famAcc,
       regexRows: regexRows.length, regexKappa, regexFpRate,
       calibration: cal,
@@ -291,6 +297,7 @@ function markdown(report) {
   row('Порядок: доля flip', (s) => fmt(s.order.flipRate, 3));
   row('Порядок: медиана TV перестановок', (s) => fmt(s.order.tvMedian, 3));
   row('Q1: AUC p(real), размечено (полож.)', (s) => `${fmt(s.q1.auc, 2)} ${fmtCi(s.q1.aucCi)} n=${s.q1.labeled} (${s.q1.positives})`);
+  row('Q1: размеченные FP с p(real) < 0.5', (s) => fmt(s.q1.fpRecognized, 2));
   row('Q1: точность семейства (справочно)', (s) => `${fmt(s.q1.familyAccuracy, 2)} n=${s.q1.familyLabeled}`);
   row('Q1: κ с регекс-семейством', (s) => `${fmt(s.q1.regexKappa, 2)} n=${s.q1.regexRows}`);
   row('Q1: регекс-FP, которые модель тоже считает FP', (s) => fmt(s.q1.regexFpRate, 2));
