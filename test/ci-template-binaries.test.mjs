@@ -80,6 +80,17 @@ test('шаблон потребителя и релиз называют арх�
   assert.deepEqual(known, targets, 'платформы шаблона = матрица релиза');
 });
 
+test('релиз: дымовой npm test с запасом по таймерам, а не без таймерных тестов', async () => {
+  const smoke = release.slice(release.indexOf('- name: Smoke'), release.indexOf('- name: Pack'));
+  assert.match(smoke, /AI_REVIEWER_TEST_TIMING_SLACK: '\d+'/, 'v0.6.1: handshake 6.8 с на arm-раннере сорвал релиз');
+  assert.match(smoke, /run: npm test$/m, 'тесты не фильтруются — только множитель порогов');
+  const { timingBudget } = await import('./helpers/timing.mjs');
+  assert.equal(timingBudget(5000, {}), 5000);
+  assert.equal(timingBudget(5000, { AI_REVIEWER_TEST_TIMING_SLACK: '3' }), 15000);
+  assert.equal(timingBudget(5000, { AI_REVIEWER_TEST_TIMING_SLACK: '0.5' }), 5000, 'множитель < 1 не ужесточает порог');
+  assert.equal(timingBudget(5000, { AI_REVIEWER_TEST_TIMING_SLACK: 'x' }), 5000);
+});
+
 test('релиз пакует каждый бинарь из rust/src/bin и собирает по Cargo.lock', () => {
   assert.match(release, /for src in rust\/src\/bin\/\*\.rs/, 'состав архива = все [[bin]] крейта');
   assert.match(release, /cargo build --release --locked/);
