@@ -197,6 +197,17 @@ const envCases = [
     REVIEW_HTTP_RETRIES: 5, REVIEW_TEMPERATURE: 0.5, REVIEW_SPECIALISTS: true, REVIEW_VERIFIER: false,
   }, CLI_A],
 
+  // Decision-модели (RFC 21): только `shadow` включает, остальное — off.
+  ['decision shadow + overrides', {
+    REVIEW_DECISION: ' Shadow ', REVIEW_DECISION_BASE_URL: 'https://x.test/api/', REVIEW_DECISION_MODEL: ' m/d ',
+    REVIEW_DECISION_PERMUTATIONS: '3.7', REVIEW_DECISION_TIMEOUT_MS: '5000', REVIEW_DECISION_MAX_CALLS: '7',
+    REVIEW_DECISION_CONCURRENCY: '1', REVIEW_DECISION_QUESTIONS: 'chunk, junk,fp',
+  }, CLI_A],
+  ['decision junk mode → off, key chain', { REVIEW_DECISION: 'on', OPENROUTER_API_KEY: ' or ', LLM_API_KEY: 'llm' }, CLI_A],
+  ['decision own key wins, empty questions → default', {
+    REVIEW_DECISION_API_KEY: 'own', OPENROUTER_API_KEY: 'or', REVIEW_DECISION_QUESTIONS: '', REVIEW_DECISION_PERMUTATIONS: '0.5',
+  }, CLI_A],
+
   // Prescan / ast-grep.
   ['prescan off', { REVIEW_PRESCAN: '0' }, CLI_A],
   ['prescan block off', { REVIEW_PRESCAN_BLOCK: 'no' }, CLI_A],

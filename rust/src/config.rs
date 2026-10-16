@@ -23,6 +23,9 @@ pub const DEFAULT_MOA_AGGREGATOR: &str = "minimax-m3";
 pub const DEFAULT_REVIEW_VERIFIER_MODEL: &str = "deepseek-v4-pro";
 pub const DEFAULT_OLLAMA_MODELS_FALLBACK: &str = "deepseek-v4.1-flash";
 pub const DEFAULT_STRUCTURE_TRUST_TIER: &str = "trusted_local";
+/// Decision-модели (RFC 21): эндпоинт `<base>/decisions` OpenRouter, не chat/completions.
+pub const DEFAULT_DECISION_BASE_URL: &str = "https://openrouter.ai/api/alpha";
+pub const DEFAULT_DECISION_MODEL: &str = "microsoft/microsoft-decision-1";
 pub const SPECIALIST_ROLES: [&str; 3] = ["security", "correctness", "architecture"];
 /// Вес сигнала `verified` из ACTIONABILITY_SIGNALS (lib/actionability.mjs): на него
 /// опускается порог допуска к verifier'у. Дублируется числом с JS-стороной
@@ -768,6 +771,36 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "symbolCards": env_flag(env, "REVIEW_VERIFIER_SYMBOL_CARDS", false),
         }),
     );
+    // Decision-модели в shadow (RFC 21): вердикты только в obs, гейт и вывод не трогают.
+    // Любое значение REVIEW_DECISION, кроме `shadow`, — выключено: опечатка не включает
+    // платные вызовы. Эндпоинт не chat/completions, поэтому база своя, а не LLM_BASE_URL.
+    out.insert(
+        "decision".into(),
+        json!({
+            "mode": if or_env(env, "REVIEW_DECISION", "off").trim().eq_ignore_ascii_case("shadow") {
+                "shadow"
+            } else {
+                "off"
+            },
+            "base": strip_trailing_slash(&or_env(
+                env,
+                "REVIEW_DECISION_BASE_URL",
+                DEFAULT_DECISION_BASE_URL,
+            )),
+            "key": first_or(env, &["REVIEW_DECISION_API_KEY", "OPENROUTER_API_KEY", "LLM_API_KEY"], "")
+                .trim()
+                .to_string(),
+            "model": or_env(env, "REVIEW_DECISION_MODEL", DEFAULT_DECISION_MODEL).trim().to_string(),
+            "permutations": num_json(num_env(env, "REVIEW_DECISION_PERMUTATIONS", 2.0).floor().max(1.0)),
+            "timeoutMs": num_json(num_env(env, "REVIEW_DECISION_TIMEOUT_MS", 20_000.0)),
+            "maxCalls": num_json(num_env(env, "REVIEW_DECISION_MAX_CALLS", 40.0)),
+            "concurrency": num_json(num_env(env, "REVIEW_DECISION_CONCURRENCY", 2.0)),
+            "questions": split_csv(&or_env(env, "REVIEW_DECISION_QUESTIONS", "fp,chunk"))
+                .into_iter()
+                .filter(|q| q == "fp" || q == "chunk")
+                .collect::<Vec<_>>(),
+        }),
+    );
     out.insert("router".into(), json!({ "enabled": router_enabled }));
     out.insert(
         "specialists".into(),
@@ -1216,6 +1249,32 @@ mod tests {
         let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
         assert_eq!(parts["ollama"]["aggregatorEffort"], "none", "trim как у REVIEW_REASONING_EFFORT");
         assert_eq!(parts["verifier"]["contextMargin"], 20);
+    }
+
+    #[test]
+    fn load_decision_defaults_and_mode() {
+        let parts = load_review_config_parts(&env(&[]), &profile_bits(&default_profile()));
+        assert_eq!(parts["decision"]["mode"], "off");
+        assert_eq!(parts["decision"]["base"], DEFAULT_DECISION_BASE_URL);
+        assert_eq!(parts["decision"]["permutations"], 2);
+        assert_eq!(parts["decision"]["questions"], json!(["fp", "chunk"]));
+
+        // Включает только `shadow`: «on»/«1» — не режим, платные вызовы не начинаются.
+        for (raw, want) in [(" Shadow ", "shadow"), ("on", "off"), ("1", "off")] {
+            let parts = load_review_config_parts(&env(&[("REVIEW_DECISION", raw)]), &profile_bits(&default_profile()));
+            assert_eq!(parts["decision"]["mode"], want, "REVIEW_DECISION={raw:?}");
+        }
+
+        let e = env(&[
+            ("OPENROUTER_API_KEY", "or"),
+            ("LLM_API_KEY", "llm"),
+            ("REVIEW_DECISION_QUESTIONS", "chunk,junk"),
+            ("REVIEW_DECISION_PERMUTATIONS", "0.5"),
+        ]);
+        let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(parts["decision"]["key"], "or", "OpenRouter-ключ раньше общего LLM");
+        assert_eq!(parts["decision"]["questions"], json!(["chunk"]));
+        assert_eq!(parts["decision"]["permutations"], 1);
     }
 
     #[test]

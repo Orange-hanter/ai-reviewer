@@ -137,6 +137,26 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_VERIFIER_SYMBOL_CARDS` | `0` | Карточки символов ([RFC 14](../proposals/14-symbol-cards.md), решение 4) во входе verifier'а: карточки файлов кандидатов, тем же отбором и с теми же лимитами, что у advisors и жюри. Без них верная находка «вызов не совпадает с сигнатурой» verifier'у недоказуема и не становится блокером; с ними verifier может подтвердить ложную интерпретацию сигнатуры — поэтому выключено до gold ×3. Включённый флаг входит в отпечаток конфигурации инкрементального прогона |
 | `REVIEW_VERIFIER_STRICT` | `1` | Нет вердикта → находка понижается до minor. Сбой verifier'а (исключение, ни одного валидного вердикта, тайм-бюджет) — находки уровня блока получают `verifierStatus: unavailable`, исход прогона — по `REVIEW_LLM_REQUIRED` (RFC 18). `0` — находка без вердикта остаётся как есть, сбой verifier'а гейт не трогает |
 
+## Decision-модели (эксперимент, shadow)
+
+Замер [RFC 21](../proposals/21-decision-models-shadow.md): decision-модель (закрытый набор
+вариантов → вероятность каждого) классифицирует находку по семействам FP и чанк по риску.
+Вердикты попадают только в события observability `decision_*`; гейт, sticky, inline, export и
+футер от флага не зависят. В отпечаток конфигурации инкрементального прогона секция не входит.
+Без Rust-бинаря `llm` shadow пишет одно `decision_error` и молчит.
+
+| Переменная | Default | Описание |
+|------------|---------|----------|
+| `REVIEW_DECISION` | `off` | `shadow` — включить; любое другое значение — выключено. Без `REVIEW_OBSERVABILITY` вызовов нет: вердикты некуда писать |
+| `REVIEW_DECISION_BASE_URL` | `https://openrouter.ai/api/alpha` | База эндпоинта `<base>/decisions` (не chat/completions, поэтому не `LLM_BASE_URL`) |
+| `REVIEW_DECISION_API_KEY` | `OPENROUTER_API_KEY` → `LLM_API_KEY` | Отдельный ключ рекомендован: общий конкурирует с прогоном за rate-limit |
+| `REVIEW_DECISION_MODEL` | `microsoft/microsoft-decision-1` | Также проверена `openai/gpt-6-luna-decisions` ([проба](probe-decisions-2026-10-16.md)) |
+| `REVIEW_DECISION_PERMUTATIONS` | `2` | Сколько порядков вариантов опрашивать (отдельными вызовами); ответ — среднее, расхождение пишется как `flip`/`tvMax` |
+| `REVIEW_DECISION_TIMEOUT_MS` | `20000` | Таймаут вызова; столько же прогон ждёт хвост shadow перед `run_end` |
+| `REVIEW_DECISION_MAX_CALLS` | `40` | Потолок HTTP-вызовов на прогон, перестановки считаются |
+| `REVIEW_DECISION_CONCURRENCY` | `2` | Параллельных вызовов |
+| `REVIEW_DECISION_QUESTIONS` | `fp,chunk` | Какие вопросы задавать: `fp` — семейство FP находки, `chunk` — нужно ли чанку жюри |
+
 ## Инкрементальный прогон
 
 Не ревьюить заново файлы, чей **вход для модели** (секция диффа + приложенный контекст) не
