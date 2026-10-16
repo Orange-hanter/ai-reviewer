@@ -40,9 +40,9 @@ async function scriptedServer(responses) {
   return { seen, base: `http://127.0.0.1:${server.address().port}`, close: () => server.close() };
 }
 
-function client(base, logs, records) {
+function client(base, logs, records, ollama = {}) {
   return createLlmClient({
-    ollama: { base, key: 'k', jsonMode: true, seed: 7, requestTimeoutMs: 20_000 },
+    ollama: { base, key: 'k', jsonMode: true, seed: 7, requestTimeoutMs: 20_000, ...ollama },
     moa: { refMaxTokens: 6000, refTemp: 0.3 },
     httpRetries: 0,
   }, (...a) => logs.push(a.join(' ')), { costTracker: { record: (u) => records.push(u) } });
@@ -128,5 +128,31 @@ test('квота провайдера: без ретраев, остальные
     assert.equal(srv.seen.length, 1, 'второй вызов не ходил в сеть, первый — без ретраев');
     assert.ok(logs.some((l) => /квота провайдера LLM исчерпана/.test(l)), logs.join('\n'));
     assert.ok(!logs.some((l) => /429 → снижение параллелизма/.test(l)), 'квота не режет семафоры');
+  } finally { srv.close(); }
+});
+
+test('LLM_MODEL_SETTINGS: effort, jsonEffort, maxTokens и provider — свои у каждой модели', { skip }, async () => {
+  const srv = await scriptedServer([[200, sse('текст')], [200, sse('{"findings":[]}')], [200, sse('текст')]]);
+  const logs = [];
+  try {
+    const c = client(srv.base, logs, [], {
+      modelSettings: {
+        'deepseek/deepseek-v4.1-flash': { effort: 'none', maxTokens: 4000, provider: { ignore: ['OpenInference'] } },
+        'z-ai/glm-5.3-flash': { effort: 'low', jsonEffort: 'medium' },
+      },
+      modelSettingsErrors: ['LLM_MODEL_SETTINGS[x]: неизвестное поле «efort»'],
+    });
+    await c.chatText([{ role: 'user', content: 'x' }], 'deepseek/deepseek-v4.1-flash');
+    await c.chatJson([{ role: 'user', content: 'x' }], 'z-ai/glm-5.3-flash');
+    await c.chatText([{ role: 'user', content: 'x' }], 'other/model');
+    const [ds, glm, other] = srv.seen;
+    assert.equal(ds.reasoning_effort, 'none');
+    assert.equal(ds.max_tokens, 4000);
+    assert.deepEqual(ds.provider, { ignore: ['OpenInference'] });
+    assert.equal(glm.reasoning_effort, 'medium', 'jsonEffort главнее effort для JSON-вызовов');
+    assert.equal(glm.provider, undefined);
+    assert.equal(other.reasoning_effort, 'low', 'модель без настроек — прежнее поведение');
+    assert.equal(other.max_tokens, 6000);
+    assert.ok(logs.some((l) => /неизвестное поле «efort»/.test(l)), 'ошибки разбора видны в логе');
   } finally { srv.close(); }
 });

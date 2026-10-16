@@ -328,6 +328,7 @@ fn base_req(url: &str) -> ChatRequest {
         http_retries: 3,
         timeout_ms: 240_000,
         include_usage: true,
+        provider: None,
     }
 }
 
