@@ -1552,8 +1552,30 @@ test('emitBlastRadiusFindings: cross-community без смены layerDirs', () 
   assert.equal(findings[0].file, 'app/other.ts');
   assert.equal(findings[0].blastCrossCommunity, true);
   assert.equal(findings[0].confidence, 0.9);
-  assert.ok(findings[0].body.includes('community'));
+  assert.ok(findings[0].body.includes('другой кластер графа зависимостей'));
+  assert.ok(!findings[0].body.includes('[EXTRACTED]'), 'метка ребра — словами, не тегом');
   resetProfile();
+});
+
+test('emitBlastRadiusFindings: caller-узел с именем файла не дублирует путь', () => {
+  setProfile({ layout: { appDir: 'app/', layerDirs: ['server', 'shared', 'client'] } });
+  try {
+    const blocks = [
+      '- `canWriteType` → 2 зависимостей вне диффа: '
+        + '`AccessPanel.tsx` @ app/client/src/AccessPanel.tsx:6 [imports_from][EXTRACTED], '
+        + '`StockTab/index.tsx` @ app/client/src/tabs/StockTab/index.tsx:9 [calls][EXTRACTED]',
+    ];
+    const findings = emitBlastRadiusFindings(blocks, ['app/shared/access.ts'], { symbols: ['canWriteType'] });
+    assert.equal(findings.length, 2, findings);
+    for (const f of findings) {
+      assert.ok(f.title.includes('`canWriteType`'), f.title);
+      assert.ok(!f.body.includes('.tsx'), `имя файла не повторяется в теле: ${f.body}`);
+    }
+    assert.match(findings.find((f) => f.line === 6).body, /импортирует `canWriteType`,/);
+    assert.match(findings.find((f) => f.line === 9).body, /вызывает `canWriteType`,/);
+  } finally {
+    resetProfile();
+  }
 });
 
 test('fp-patterns: softblast-typedef + graphify-path-norm speculation', async () => {
