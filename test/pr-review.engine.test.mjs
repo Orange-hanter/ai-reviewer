@@ -514,7 +514,9 @@ test('summary агрегата: docs-чанк идёт первым, но обз
     'Walkthrough не должен открываться обзором plan-документа, когда в PR есть код');
 });
 
-test('summary агрегата: без единого кодового чанка — прежнее поведение (первое непустое)', async () => {
+// С 0.6.3 обзор — описания до трёх частей подряд, а не summary одной (pickAggregateSummary):
+// summary одного чанка выдавалось за обзор всего PR и противоречило блоку из другого.
+test('summary агрегата: без единого кодового чанка — описания всех частей по порядку', async () => {
   const engine = createReviewEngine(MOA_CFG, {
     ollama: SUMMARY_OLLAMA, prompt: SUMMARY_PROMPT, log: () => {}, observability: null,
   });
@@ -522,10 +524,10 @@ test('summary агрегата: без единого кодового чанк�
     summaryChunk('docs', ['docs/a.md']),
     summaryChunk('fixtures', ['fixtures/a.json']),
   ], routingCtx);
-  assert.equal(res.summary, 'обзор: docs');
+  assert.equal(res.summary, 'обзор: docs обзор: fixtures');
 });
 
-test('summary агрегата: маршрутизация выключена — выбор не меняется', async () => {
+test('summary агрегата: маршрутизация выключена — все чанки равны, описания по порядку', async () => {
   const cfg = { ...MOA_CFG, limits: { ...MOA_CFG.limits, chunkRouting: false } };
   const engine = createReviewEngine(cfg, {
     ollama: SUMMARY_OLLAMA, prompt: SUMMARY_PROMPT, log: () => {}, observability: null,
@@ -534,7 +536,7 @@ test('summary агрегата: маршрутизация выключена �
     summaryChunk('docs', ['docs/a.md']),
     summaryChunk('code', ['lib/engine.mjs']),
   ], routingCtx);
-  assert.equal(res.summary, 'обзор: docs', 'без маршрутизации все чанки равны — первое непустое');
+  assert.equal(res.summary, 'обзор: docs обзор: code', 'без маршрутизации все чанки равны — описания по порядку');
 });
 
 test('summary агрегата: пустой обзор кодового чанка не съедает содержательный', async () => {
