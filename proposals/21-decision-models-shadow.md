@@ -78,15 +78,18 @@ $0.04–0.10 за 1M входа, 0.4–0.6 с на тёплом вызове.
    `_PERMUTATIONS`, `_TIMEOUT_MS`, `_MAX_CALLS`, `_CONCURRENCY`, `_QUESTIONS`), см.
    `docs/configuration.md`. Ключ: `REVIEW_DECISION_API_KEY` → `OPENROUTER_API_KEY` →
    `LLM_API_KEY`.
-3. **`lib/decision.mjs`** — варианты Q1/Q2 с описаниями, таблица `FP_FAMILY_BY_PATTERN_ID`
-   (все id пакетного jsonl → семейство или `other_fp`), построители входа, клиент с лимитом
-   параллелизма, бюджетом вызовов и circuit breaker на квоте, свой учёт цены.
-4. **`bin/pr-review-decision-eval.mjs`** — корпус из `fixtures/` и gold-прогонов, метки из
-   gold meta (`mustFindLocations` → `real`, `mustNotFindTitles` и блокеры в `type: clean` →
-   `fp`), отчёт по каждой модели: согласие с метками (AUC `p(real)` с бутстрап-ДИ), шум
-   повтора, смещение порядка (отдельно от шума), κ между моделями, совпадение с регексом, Q2
-   против `chunkNeedsSpecialists`, латентность, цена. Результат — `docs/decision-stage0-<дата>.md`
-   и решение go/no-go здесь.
+3. **Rust `decision`** (`rust/src/decision.rs`, бинарь `decision`) — варианты Q1/Q2 с
+   описаниями, таблица `FP_FAMILY_BY_PATTERN_ID` (все id пакетного jsonl → семейство или
+   `other_fp`), построители входа. **`lib/decision.mjs`** — только оркестрация, которую зовёт
+   pipeline.mjs: клиент с лимитом параллелизма, бюджетом вызовов и circuit breaker на квоте,
+   свой учёт цены, shadow. JS-копий логики нет (решение владельца уходить от JS).
+4. **Замер** — метрики и отчёт в Rust (`rust/src/decision_eval.rs`, op `report`): согласие с
+   метками (AUC `p(real)` с бутстрап-ДИ), шум повтора, смещение порядка (отдельно от шума),
+   κ между моделями, совпадение с регексом, Q2 против `chunkNeedsSpecialists`, латентность,
+   цена. Тонкий сборщик `bin/pr-review-decision-eval.mjs` остаётся на JS, потому что корпус
+   зависит от непортированного JS (FP-регексы с lookahead, gold-fetch, chunk-routing): метки
+   из gold meta (`mustFindLocations` → `real`, `mustNotFindTitles` и блокеры в `type: clean` →
+   `fp`). Результат — `docs/decision-stage0-<дата>.md` и решение go/no-go здесь.
 
 ### Этап 1 — shadow в пайплайне (после go)
 

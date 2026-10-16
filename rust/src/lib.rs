@@ -10,6 +10,8 @@
 
 pub mod actionability;
 pub mod config;
+pub mod decision;
+pub mod decision_eval;
 pub mod diff;
 pub mod engine;
 pub mod export;

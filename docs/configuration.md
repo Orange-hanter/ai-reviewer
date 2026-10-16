@@ -441,7 +441,7 @@ JS-копии внутри обёрток deprecated (RFC 20). Откуда бе
 скрыла бы регрессию Rust-кода. `LLM` и `GITHUB` уходят в JS и тогда, когда `fetch` подменён
 (тесты, DI).
 
-`<MOD>` (24 префикса; `<bin>` — он же в нижнем регистре, кроме оговорённых):
+`<MOD>` (25 префиксов; `<bin>` — он же в нижнем регистре, кроме оговорённых):
 
 | `<MOD>` | Модули |
 |---------|--------|
@@ -451,5 +451,6 @@ JS-копии внутри обёрток deprecated (RFC 20). Откуда бе
 | `JSON_REPAIR` | `lib/json.mjs` |
 | `STRUCTURE_{ASSESSMENTS,EVIDENCE,GRAPHIFY,LCOV,MCP,MUTATION,PROTOCOL,TESTS}` | `lib/structure-<x>.mjs` |
 | `SCIP` | `lib/structure-scip.mjs`, бинарь `structure_scip` |
+| `DECISION` | `lib/decision.mjs`, `bin/pr-review-decision-eval.mjs` (RFC 21). Только `_BIN`: JS-копии нет, без бинаря shadow молчит, а замер не запускается |
 
 Пример: `AI_REVIEWER_JSON_REPAIR_FORCE_JS=1`.
