@@ -27,6 +27,7 @@ import { buildSummary, buildRouterSummary, buildLlmUnavailableSummary } from './
 import { buildReviewJson, writeReviewExports } from './lib/export.mjs';
 import { parseTrustedAuthors } from './lib/feedback.mjs';
 import { buildTriageContext, runAutoTriage } from './lib/triage.mjs';
+import { createDecisionClient, createDecisionShadow } from './lib/decision.mjs';
 import {
   fileInputHashes, configFingerprint, readIncrementalState, writeIncrementalState,
   planIncremental, markCarried, formatIncrementalNote,
@@ -395,8 +396,13 @@ async function notifyTelegram(cfg, log, { pr, counts, total, htmlUrl, reason }) 
  * FP-фильтр → beforeResolve → resolveBlockers: единый путь для fail-closed и основного pipeline.
  * Возвращает findings, clusters, blockers, список снятых FP-паттернами находок и результат beforeResolve.
  */
-export async function runGateResolution({ findings: inputFindings, changedPaths, gate, prescanCfg, patternsFile, repoIndex, log, beforeResolve }) {
+export async function runGateResolution({ findings: inputFindings, changedPaths, gate, prescanCfg, patternsFile, repoIndex, log, beforeResolve, onBeforeFp }) {
   const beforeFp = inputFindings;
+  // Наблюдатель до FP-фильтра (shadow decision-моделей, RFC 21): видит находки, но ничего не
+  // возвращает в гейт; его сбой прогон не трогает.
+  if (onBeforeFp) {
+    try { onBeforeFp(beforeFp); } catch (e) { log(`onBeforeFp: ${e?.message || e}`); }
+  }
   const beforeFpCount = beforeFp.length;
   const afterFp = filterFalsePositiveFindings(beforeFp, changedPaths, log, { patternsFile, repoIndex });
   const afterFpCount = afterFp.length;
@@ -476,6 +482,18 @@ export function createReviewPipeline(cfg, deps = {}) {
 
     const obs = createObservability(cfg, { log });
     let finalObs = { exitCode: 0 };
+    // Decision-модели в shadow (RFC 21): вердикты — только события obs `decision_*`, вывод и
+    // гейт от них не зависят. Без observability вызовов нет: вердикты некуда писать. Свой
+    // costTracker: общий печатается в sticky и менял бы его байты.
+    const shadowOn = cfg.decision?.mode === 'shadow';
+    if (shadowOn && !obs.enabled) log('decision shadow: observability выключена — вызовов decision-модели нет');
+    const shadow = shadowOn && obs.enabled
+      ? createDecisionShadow({
+        cfg, obs, log,
+        decider: deps.decider ?? createDecisionClient(cfg, { costTracker: createCostTracker(cfg.cost?.priceMap) }),
+        ...(deps.decisionOps ? { ops: deps.decisionOps } : {}),
+      })
+      : null;
 
     try {
       if (!oCfg.key) die('нет LLM API key (задайте LLM_API_KEY или OLLAMA_API_KEY)');
@@ -836,6 +854,11 @@ export function createReviewPipeline(cfg, deps = {}) {
       // ниже он не поднимает, иначе «ничего не поменялось» блокировало бы merge.
       const nothingToReview = incrementalPlan.mode === 'incremental' && incrementalPlan.reviewPaths.size === 0;
       if (nothingToReview) log('инкрементальность: изменившихся файлов нет — LLM не вызывается');
+      // Q2 shadow (RFC 21) — параллельно engine, без ожидания. Маршрут выключен — контекста нет,
+      // детерминированный вердикт тогда «jury» для всех чанков, как в planCodeChunks.
+      if (shadow && !nothingToReview) {
+        shadow.onChunks(chunks, limits.chunkRouting === false ? null : { fileClass, sensitive: cfg.profile?.layout?.sensitive || null });
+      }
       const reviews = nothingToReview ? [] : await engine.reviewAllModels(chunks, {
         // changedPaths, а не готовая секция: карту PR («что в этом чанке, что ревьюится
         // отдельно») движок рисует под каждый чанк сам. changedFilesSection остаётся для
@@ -901,6 +924,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         const gateResolution = await runGateResolution({
           findings: allFindings, changedPaths, gate, prescanCfg: cfg.prescan,
           patternsFile: cfg.feedback?.patternsFile, repoIndex, log,
+          onBeforeFp: shadow ? (fs) => shadow.onFindings(fs, { changedPaths, patternsFile: cfg.feedback?.patternsFile, diffSections }) : undefined,
         });
         allFindings = gateResolution.findings;
         // Отпечатки до экспорта: артефакт этой ветки (LLM-аутедж, находки только от prescan)
@@ -1005,6 +1029,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       const gateResolution = await runGateResolution({
         findings: allFindings, changedPaths, gate, prescanCfg: cfg.prescan,
         patternsFile: cfg.feedback?.patternsFile, repoIndex, log,
+        onBeforeFp: shadow ? (fs) => shadow.onFindings(fs, { changedPaths, patternsFile: cfg.feedback?.patternsFile, diffSections }) : undefined,
         beforeResolve: async (fpFilteredFindings) => {
           let currentFindings = fpFilteredFindings;
 
@@ -1232,6 +1257,8 @@ export function createReviewPipeline(cfg, deps = {}) {
       };
       throw e;
     } finally {
+      // Хвост shadow — не дольше таймаута вызова: прогон не ждёт decision-модель дольше этого.
+      if (shadow) await shadow.drain(cfg.decision.timeoutMs);
       await finishObs(obs, finalObs);
     }
   }

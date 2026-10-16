@@ -999,3 +999,110 @@ test('engine: индексы чанков, упавших у модели, до�
   assert.deepEqual(results[0].failedChunks, [1]);
   assert.deepEqual(results[0].skippedChunkIndexes, []);
 });
+
+// --- Decision-модели в shadow (RFC 21): вердикты только в obs, вывод байт в байт как без них ---
+
+/** Операции бинаря `decision` без бинаря: форма та же, содержимое неважно для инвариантов. */
+const decisionOpsStub = (op, args = {}) => {
+  if (op === 'questions') {
+    const q = (name) => ({ name, instructions: 'i', choices: [{ value: 'a', description: 'd' }, { value: 'b', description: 'd' }] });
+    return { fp: q('fp_family'), chunk: q('chunk_route') };
+  }
+  if (op === 'fpStates') return args.items.map(() => ({ state: 'S', regexFamily: null }));
+  if (op === 'chunkStates') return args.chunks.map(() => 'C');
+  throw new Error(`op ${op}`);
+};
+
+function mkDecider(mode) {
+  const calls = [];
+  return {
+    calls,
+    model: 'm/d', permutations: 1,
+    stats: () => ({ calls: calls.length, budgetHit: false, quotaHit: false, errors: 0, costUsd: 0, tokens: 0 }),
+    decide: async (state, q) => {
+      calls.push(q.name);
+      if (mode === 'throws') throw new Error('decider упал');
+      if (mode === 'hangs') return new Promise(() => {});
+      return { answer: { probabilities: { a: 0.9, b: 0.1 }, argmax: 'a', flip: false, tvMax: 0 }, latencyMs: 1, servedModel: 'm/d-1' };
+    },
+  };
+}
+
+async function runShadowCase({ decision, deciderMode = 'answers', reviews = [criticalReview] }) {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-decision-'));
+  const decider = mkDecider(deciderMode);
+  try {
+    const { code, calls } = await runPipeline({
+      diff: CODE_DIFF, reviews, observabilityDir: dir,
+      env: { REVIEW_DECISION: decision, REVIEW_DECISION_TIMEOUT_MS: '200' },
+      mutateDeps: (deps) => { deps.decider = decider; deps.decisionOps = decisionOpsStub; },
+    });
+    const events = (await readFile(join(dir, 'pr-review-runs.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    return { code, calls, events, decider };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('decision shadow: sticky, inline и exit code совпадают с off — при ответе, исключении и зависании decider', async () => {
+  const off = await runShadowCase({ decision: 'off' });
+  assert.equal(off.decider.calls.length, 0, 'off — ни одного вызова');
+  assert.ok(!off.events.some((e) => String(e.type).startsWith('decision_')));
+  for (const mode of ['answers', 'throws', 'hangs']) {
+    const on = await runShadowCase({ decision: 'shadow', deciderMode: mode });
+    assert.ok(on.decider.calls.length > 0, `${mode}: shadow спросил модель`);
+    assert.equal(on.code, off.code, `${mode}: exit code`);
+    assert.deepEqual(on.calls.upsertSticky, off.calls.upsertSticky, `${mode}: sticky байт в байт`);
+    assert.deepEqual(on.calls.postReview, off.calls.postReview, `${mode}: inline байт в байт`);
+  }
+});
+
+test('decision shadow: decision_fp на каждую находку до FP-фильтра, decision_chunk на чанк, сводка в конце', async () => {
+  const fpReview = {
+    ...criticalReview,
+    findings: [
+      criticalReview.findings[0],
+      // Снимается FP-фильтром (file-absent-in-diff) — shadow обязан увидеть её ДО фильтра.
+      { file: 'foo.ts', line: 2, severity: 'major', title: 'foo.ts не в PR', body: 'файл foo.ts отсутствует в PR', confidence: 0.9, model: 'm1' },
+    ],
+  };
+  const { events } = await runShadowCase({ decision: 'shadow', reviews: [fpReview] });
+  const fp = events.filter((e) => e.type === 'decision_fp');
+  assert.equal(fp.length, 2, 'обе находки, включая снятую фильтром');
+  assert.ok(fp.some((e) => e.regexPatternId === 'file-absent-in-diff'), 'регекс-вердикт рядом с вердиктом модели');
+  assert.ok(events.filter((e) => e.type === 'decision_chunk').length >= 1);
+  const sumIdx = events.findIndex((e) => e.type === 'decision_summary');
+  assert.ok(sumIdx >= 0 && sumIdx < events.findIndex((e) => e.type === 'run_end'), 'сводка до run_end');
+});
+
+test('decision shadow: без observability decision-модель не вызывается', async () => {
+  const decider = mkDecider('answers');
+  await runPipeline({
+    diff: CODE_DIFF, reviews: [criticalReview], env: { REVIEW_DECISION: 'shadow' },
+    mutateDeps: (deps) => { deps.decider = decider; deps.decisionOps = decisionOpsStub; },
+  });
+  assert.equal(decider.calls.length, 0);
+});
+
+test('runGateResolution: onBeforeFp видит находки до FP-фильтра, его исключение гейт не трогает', async () => {
+  const findings = [
+    { file: 'foo.ts', line: 3, severity: 'critical', title: 'баг', body: 'b', confidence: 0.9, model: 'm1' },
+    { file: 'foo.ts', line: 2, severity: 'major', title: 'foo.ts не в PR', body: 'файл foo.ts отсутствует в PR', confidence: 0.9, model: 'm1' },
+  ];
+  const cfg = loadReviewConfig({ ...ENV }, { dryRun: true });
+  const base = { findings, changedPaths: ['foo.ts'], gate: cfg.gate, prescanCfg: cfg.prescan, log: () => {} };
+  let seen = null;
+  const watched = await runGateResolution({ ...base, onBeforeFp: (fs) => { seen = fs.length; } });
+  assert.equal(seen, 2);
+  const throwing = await runGateResolution({ ...base, onBeforeFp: () => { throw new Error('boom'); } });
+  const plain = await runGateResolution(base);
+  assert.equal(watched.afterFpCount, plain.afterFpCount);
+  assert.deepEqual(throwing.blockers.map((b) => b.title), plain.blockers.map((b) => b.title));
+});
+
+test('decision shadow: секция decision не входит в отпечаток конфигурации инкрементального прогона', async () => {
+  const { configFingerprint } = await import('../lib/incremental.mjs');
+  const off = loadReviewConfig({ ...ENV, REVIEW_DECISION: 'off' }, { dryRun: true });
+  const on = loadReviewConfig({ ...ENV, REVIEW_DECISION: 'shadow', REVIEW_DECISION_MODEL: 'x/y' }, { dryRun: true });
+  assert.equal(configFingerprint(on), configFingerprint(off));
+});

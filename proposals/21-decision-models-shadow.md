@@ -155,6 +155,20 @@ $0.04–0.10 за 1M входа, 0.4–0.6 с на тёплом вызове.
 `real` все 24 gold-находки → для Q1 бесполезна. **Этап 1 открыт для Decision-1**; влияние на
 вывод на этих данных не решается.
 
+## Этап 1 (2026-10-16): shadow в пайплайне
+
+`REVIEW_DECISION=shadow` при включённой observability. Хуки: `onBeforeFp` в
+`runGateResolution` (обе ветки — основная и fail-closed), `shadow.onChunks` рядом с
+`engine.reviewAllModels` без ожидания, `shadow.drain(timeoutMs)` в `finally` до `run_end`.
+Свой costTracker. Тесты (`test/pr-review.pipeline.test.mjs`): sticky, inline и exit code
+байт в байт как при `off` при ответе, исключении и зависании decider; события до
+FP-фильтра; без observability — ни одного вызова; `configFingerprint` не зависит от секции.
+Живой прогон gold-кейса `fp-regen-double-changelog-bump`: 3 вопроса, 6 вызовов, $0.0012,
+ошибок нет.
+
+Выход из этапа 1 (основание для RFC 22) — по критериям выше: ≥ 30 реальных прогонов или
+gold × 3, затем разметка находок до FP-фильтра.
+
 ## Оценка
 
 Этап 0: проба API (сделана), Rust `decide` + конфиг — 1 день, `lib/decision.mjs` и инструмент

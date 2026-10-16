@@ -21,8 +21,12 @@ Decision-модель отвечает на вопрос с закрытым н�
 - Новая секция конфига `decision` (`REVIEW_DECISION*`, по умолчанию выключено).
 - Новый Rust-бинарь `decision`: вопросы, таблица семейств FP, построители входа, метрики и
   отчёт замера. JS-копий нет.
-- `lib/decision.mjs` — только оркестрация shadow (в пайплайн пока не подключён);
-  `bin/pr-review-decision-eval.mjs` — сборщик корпуса для офлайн-замера.
+- `lib/decision.mjs` — только оркестрация shadow. `REVIEW_DECISION=shadow` (при включённой
+  observability) подключает его к пайплайну: находки спрашиваются до FP-фильтра, чанки —
+  параллельно engine. Вердикты пишутся только в события `decision_fp`, `decision_chunk`,
+  `decision_error` и `decision_summary`. Sticky, inline, export и exit code от флага не
+  зависят, это держат тесты.
+- `bin/pr-review-decision-eval.mjs` — сборщик корпуса для офлайн-замера.
 - `pr-review-gold` получил флаг `--export-dir`.
 
 ### Исправлено — пустой ответ модели теперь в учёте цены, причина видна в логе
