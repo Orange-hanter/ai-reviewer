@@ -24,6 +24,10 @@ const onlyIdx = process.argv.indexOf('--case');
 const only = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : null;
 const jsonlIdx = process.argv.indexOf('--jsonl');
 const jsonlPath = jsonlIdx >= 0 ? resolve(process.cwd(), process.argv[jsonlIdx + 1]) : null;
+// Export JSON каждого кейса в <dir>/<id>/: футер sticky несёт находки без полного текста,
+// а офлайн-замеру decision-моделей (RFC 21) нужно тело находки.
+const exportIdx = process.argv.indexOf('--export-dir');
+const exportDir = exportIdx >= 0 ? resolve(process.cwd(), process.argv[exportIdx + 1]) : null;
 
 let graphIndexCache;
 /** Индекс graph.json (REVIEW_GOLD_GRAPH или GRAPH) — один раз на прогон; нет файла → null. */
@@ -92,7 +96,12 @@ async function runCase(id) {
     ...(process.env.REVIEW_GOLD_OBSERVABILITY_DIR
       ? { REVIEW_OBSERVABILITY: '1', REVIEW_OBSERVABILITY_DIR: resolve(process.cwd(), process.env.REVIEW_GOLD_OBSERVABILITY_DIR) }
       : { REVIEW_OBSERVABILITY: '0' }),
-    REVIEW_EXPORT: '0',
+    ...(exportDir
+      ? {
+        REVIEW_EXPORT: '1', REVIEW_EXPORT_DRY_RUN: '1', REVIEW_EXPORT_JSON: '1', REVIEW_EXPORT_SARIF: '0',
+        REVIEW_EXPORT_DIR: join(exportDir, id),
+      }
+      : { REVIEW_EXPORT: '0' }),
     REVIEW_AUTO_TRIAGE: '0',
   };
   const cfg = loadReviewConfig(env, { dryRun: true, diffFile: diff.path, repo: '', prNumber: 0 });
