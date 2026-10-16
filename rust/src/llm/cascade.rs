@@ -90,6 +90,12 @@ pub fn next_attempt(kind: CascadeKind, step: usize, prev: &Attempt, failure: &Fa
         return None;
     }
     let first_effort = prev.effort.as_deref().unwrap_or("low");
+    // Модель, настроенная сразу на effort=none (LLM_MODEL_SETTINGS), получила бы «повтор»
+    // с теми же параметрами — тот же счёт за тот же ответ. Такой повтор не делаем.
+    first_step_rule(kind, prev, failure, first_effort).filter(|(next, _)| next != prev)
+}
+
+fn first_step_rule(kind: CascadeKind, prev: &Attempt, failure: &Failure, first_effort: &str) -> Option<(Attempt, String)> {
     match (kind, failure) {
         // Пустой ответ на low — почти всегда рассуждение съело весь max_tokens (finish=length).
         // Больший бюджет не помогает: замер 2026-10-16 на чанке 49 КБ — deepseek-v4.1-flash
@@ -290,6 +296,7 @@ mod tests {
                 http_retries: 0,
                 timeout_ms: 1000,
                 include_usage: true,
+                provider: None,
             },
             cascade: kind,
         }
@@ -457,6 +464,18 @@ mod tests {
         assert_eq!(out.usages.len(), 2, "холостой вызов тоже в учёте цены");
         assert_eq!(out.usages[0]["completion_tokens"], json!(6000));
         assert!(out.log[0].contains("finish=length"), "причина пустого ответа видна в логе: {:?}", out.log);
+    }
+
+    #[test]
+    fn effort_none_с_первой_попытки_не_повторяется_тем_же_запросом() {
+        let req = base(CascadeKind::Prose, "none", 6000, false);
+        let (out, seen) = run(&req, vec![err(None, "пусто", true)]);
+        assert_eq!(seen.len(), 1, "повтор на none с теми же параметрами бессмыслен");
+        assert!(out.result.is_err());
+        // JSON: пустой ответ на none/24000 — тот же запрос, тоже без повтора.
+        let req = base(CascadeKind::Json, "none", 24000, true);
+        let (_, seen) = run(&req, vec![err(None, "пусто", true)]);
+        assert_eq!(seen.len(), 1);
     }
 
     #[test]

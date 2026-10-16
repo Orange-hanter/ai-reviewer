@@ -181,6 +181,75 @@ fn parse_price_map(env: &Map<String, Value>) -> Value {
 }
 
 /// JS `s.replace(/\/$/, '')` — ровно один завершающий слэш.
+/// Допустимые значения effort в индивидуальных настройках модели.
+const MODEL_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high"];
+
+/// LLM_MODEL_SETTINGS — индивидуальные настройки моделей (RFC 20, § 6): JSON-объект
+/// `{ "<model>": { "effort", "jsonEffort", "maxTokens", "provider" } }`.
+///
+/// Модели ведут себя по-разному при одних и тех же параметрах: deepseek-v4.1-flash на
+/// effort=low уходит в рассуждение до конца бюджета и отдаёт пустой ответ, а glm-5.3-flash
+/// без рассуждения отвечает 400. Глобальные REVIEW_REASONING_EFFORT и
+/// REVIEW_AGGREGATOR_REASONING_EFFORT такие модели в одном ростере не совмещают.
+///
+/// Разбор строгий по полям и мягкий по входу: неизвестное поле, недопустимое значение или
+/// битый JSON не роняют конфиг, а попадают в `errors` — их пишет в лог клиент LLM. Иначе
+/// опечатка в имени поля молча возвращала бы поведение по умолчанию.
+pub fn parse_model_settings(raw: Option<&str>) -> (Value, Vec<String>) {
+    let mut out = Map::new();
+    let mut errors = Vec::new();
+    let raw = match raw.map(str::trim) {
+        None | Some("") => return (Value::Object(out), errors),
+        Some(r) => r,
+    };
+    let parsed: Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(e) => {
+            errors.push(format!("LLM_MODEL_SETTINGS: не JSON ({e})"));
+            return (Value::Object(out), errors);
+        }
+    };
+    let Some(obj) = parsed.as_object() else {
+        errors.push("LLM_MODEL_SETTINGS: ожидался объект { модель: настройки }".to_string());
+        return (Value::Object(out), errors);
+    };
+    for (model, settings) in obj {
+        let Some(s) = settings.as_object() else {
+            errors.push(format!("LLM_MODEL_SETTINGS[{model}]: ожидался объект"));
+            continue;
+        };
+        let mut clean = Map::new();
+        for (k, v) in s {
+            match k.as_str() {
+                "effort" | "jsonEffort" => match v.as_str().map(str::trim) {
+                    Some(e) if MODEL_EFFORTS.contains(&e) => {
+                        clean.insert(k.clone(), json!(e));
+                    }
+                    _ => errors.push(format!("LLM_MODEL_SETTINGS[{model}].{k}: одно из {}", MODEL_EFFORTS.join("|"))),
+                },
+                "maxTokens" => match v.as_f64() {
+                    Some(n) if n.is_finite() && n >= 1.0 && n.fract() == 0.0 => {
+                        clean.insert(k.clone(), json!(n as u64));
+                    }
+                    _ => errors.push(format!("LLM_MODEL_SETTINGS[{model}].maxTokens: целое ≥ 1")),
+                },
+                // Маршрутизация провайдеров OpenRouter (order / ignore / quantizations /
+                // allow_fallbacks …) — уходит в тело запроса как есть.
+                "provider" => {
+                    if v.is_object() {
+                        clean.insert(k.clone(), v.clone());
+                    } else {
+                        errors.push(format!("LLM_MODEL_SETTINGS[{model}].provider: ожидался объект"));
+                    }
+                }
+                other => errors.push(format!("LLM_MODEL_SETTINGS[{model}]: неизвестное поле «{other}»")),
+            }
+        }
+        out.insert(model.clone(), Value::Object(clean));
+    }
+    (Value::Object(out), errors)
+}
+
 fn strip_trailing_slash(s: &str) -> String {
     s.strip_suffix('/').unwrap_or(s).to_string()
 }
@@ -675,6 +744,7 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
         "llm".into(),
         json!({ "key": llm_key, "base": llm_base }),
     );
+    let (model_settings, model_settings_errors) = parse_model_settings(env_str(env, "LLM_MODEL_SETTINGS").as_deref());
     out.insert(
         "ollama".into(),
         json!({
@@ -695,6 +765,8 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "aggregatorEffort": or_env(env, "REVIEW_AGGREGATOR_REASONING_EFFORT", "low").trim(),
             "providerConcurrency": num_json(num_env(env, "REVIEW_PROVIDER_CONCURRENCY", 12.0)),
             "providerPerModel": num_json(num_env(env, "REVIEW_PROVIDER_PER_MODEL", 6.0)),
+            "modelSettings": model_settings,
+            "modelSettingsErrors": model_settings_errors,
         }),
     );
     out.insert(
@@ -1208,6 +1280,8 @@ mod tests {
     fn load_new_token_knobs_defaults() {
         let parts = load_review_config_parts(&env(&[]), &profile_bits(&default_profile()));
         assert_eq!(parts["ollama"]["aggregatorEffort"], "low");
+        assert_eq!(parts["ollama"]["modelSettings"], json!({}));
+        assert_eq!(parts["ollama"]["modelSettingsErrors"], json!([]));
         assert_eq!(parts["verifier"]["contextMargin"], 80);
         let e = env(&[
             ("REVIEW_AGGREGATOR_REASONING_EFFORT", " none "),
@@ -1346,5 +1420,23 @@ mod tests {
         let e = env(&[("REVIEW_MODE", "consensus"), ("OLLAMA_MODELS", "deepseek-v4.1-flash,m9")]);
         let parts = load_review_config_parts(&e, &profile_bits(&default_profile()));
         assert_eq!(parts["models"]["fallback"], json!([]));
+    }
+
+    #[test]
+    fn model_settings_разбор_и_ошибки() {
+        let (v, errs) = parse_model_settings(Some(r#"{
+            "deepseek/deepseek-v4.1-flash": {"effort": "none", "provider": {"ignore": ["OpenInference"]}},
+            "z-ai/glm-5.3-flash": {"effort": "low", "jsonEffort": "medium", "maxTokens": 8000},
+            "x/typo": {"efort": "none", "maxTokens": 0, "effort": "max"}
+        }"#));
+        assert_eq!(v["deepseek/deepseek-v4.1-flash"], json!({"effort": "none", "provider": {"ignore": ["OpenInference"]}}));
+        assert_eq!(v["z-ai/glm-5.3-flash"], json!({"effort": "low", "jsonEffort": "medium", "maxTokens": 8000}));
+        assert_eq!(v["x/typo"], json!({}), "недопустимое не попадает в настройки");
+        assert_eq!(errs.len(), 3, "{errs:?}");
+        assert!(errs.iter().any(|e| e.contains("неизвестное поле «efort»")));
+        let (v, errs) = parse_model_settings(Some("не json"));
+        assert_eq!(v, json!({}));
+        assert!(errs[0].contains("не JSON"));
+        assert_eq!(parse_model_settings(Some("  ")).0, json!({}));
     }
 }

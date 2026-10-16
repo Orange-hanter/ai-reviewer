@@ -212,7 +212,7 @@ const PROSE_ITEM_FORMAT: &str = r#"- [severity] `file:line` — title: what brea
 const SPECIALIST_FOCUS: &[(&str, &str)] = &[
     ("security", "Security: injection, authentication and access-control (RBAC) bypass, IDOR, data leaks, secrets in\ncode, unsafe deserialization, SSRF, path traversal. Logic bugs without a security impact belong to\nanother specialist."),
     ("correctness", "Correctness: logic bugs, races, null and edge cases, wrong rounding of money or quantities, off-by-one,\nbroken error handling, half-done decoding of an external format (a quoted, escaped or encoded value is\nrecognised and sliced out, but the escapes inside it are never decoded back), regressions visible in\nthe diff or context. Security-only issues and architecture belong to other specialists."),
-    ("architecture", "Architecture: this project's module and layer boundaries, forbidden imports, duplicates of the\nproject's canonical primitives (see the project rules), contract changes that break callers listed\nin the blast-radius. Pure security issues and local bugs belong to other specialists."),
+    ("architecture", "Architecture: how the change fits the system, not single lines. Look for:\n- this project's module and layer boundaries and forbidden imports (see the project rules);\n- duplicates of the project's canonical primitives instead of reusing them;\n- contract changes (signature, return shape, error behaviour, access rules) that break callers listed\n  in the blast-radius or callers visible in the diff;\n- state with an unbounded or unclear lifetime: module-level caches and maps that only grow, global\n  singletons, data kept across requests or tenants;\n- resources without a lifecycle: connections, files, timers or subscriptions that are opened and\n  never closed or cancelled;\n- I/O, network or environment access placed in a layer that should be pure, or read at import time;\n- asynchronous work started without an owner: promises nobody awaits, background tasks with no\n  error path.\nPure security issues and single-line logic bugs belong to other specialists."),
 ];
 
 fn specialist_focus(role: &str) -> &'static str {
@@ -715,11 +715,16 @@ For each candidate decide using only the diff, the attached file context (window
 candidate lines), the declarations of called symbols and the blast-radius, when present:
 - verified — the defect is real: you can point to the line and trace the input or state that makes
   it fail in the shown code;
-- rejected — a false positive: speculative, contradicted by the shown code, already handled nearby,
-  or its proof depends on code that is not shown;
+- rejected — a false positive: speculative, contradicted by the shown code, or already handled
+  nearby;
 - downgrade — real, but not merge-blocking; set severity to minor or nit.
-A claim that something is missing, undefined or never called is not proven while the relevant code
-may sit behind a «… (lines N–M not shown)» marker or in another part of the PR.
+A defect inside the shown code is proven by that code. Do not reject it because its callers or the
+origin of its inputs are not shown: parameters of an exported function, request fields and other
+external data may carry any value, so string-built SQL, an unchecked file path or a non-constant-time
+secret comparison is a defect on its own.
+Code that is not shown matters only for claims about that code: a claim that something is missing,
+undefined, never called or handled nowhere is not proven while the relevant code may sit behind a
+«… (lines N–M not shown)» marker or in another part of the PR.
 </decision>"#;
 
 const VERIFIER_OUTPUT: &str = r#"<output_format>
