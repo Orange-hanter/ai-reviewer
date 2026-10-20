@@ -68,11 +68,19 @@ const failures = [];
  * считает и не получит. Срезаются с rust-стороны перед сравнением — остальное сверяется как раньше.
  */
 const RUST_OWNED_OLLAMA_KEYS = ['modelSettings', 'modelSettingsErrors'];
+const RUST_OWNED_VERIFIER_KEYS = ['fallbackModel'];
 function stripRustOwned(x) {
-  if (!x || typeof x !== 'object' || !x.ollama || typeof x.ollama !== 'object') return x;
-  const ollama = { ...x.ollama };
-  for (const k of RUST_OWNED_OLLAMA_KEYS) delete ollama[k];
-  return { ...x, ollama };
+  if (!x || typeof x !== 'object') return x;
+  const out = { ...x };
+  if (x.ollama && typeof x.ollama === 'object') {
+    out.ollama = { ...x.ollama };
+    for (const k of RUST_OWNED_OLLAMA_KEYS) delete out.ollama[k];
+  }
+  if (x.verifier && typeof x.verifier === 'object') {
+    out.verifier = { ...x.verifier };
+    for (const k of RUST_OWNED_VERIFIER_KEYS) delete out.verifier[k];
+  }
+  return out;
 }
 
 function compare(label, jsResult, rustResult) {

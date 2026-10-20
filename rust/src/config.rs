@@ -671,6 +671,10 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
     };
     let verifier_enabled = env_flag(env, "REVIEW_VERIFIER", true);
     let verifier_model = or_env(env, "REVIEW_VERIFIER_MODEL", DEFAULT_REVIEW_VERIFIER_MODEL).trim().to_string();
+    let verifier_fallback_model = {
+        let f = or_env(env, "REVIEW_VERIFIER_FALLBACK_MODEL", "").trim().to_string();
+        if f == verifier_model { String::new() } else { f }
+    };
     let verifier_temp = nn_nonnegative(env, "REVIEW_VERIFIER_TEMPERATURE", 0.2);
     let router_enabled = env_flag(env, "REVIEW_ROUTER", true);
     let prescan_enabled = env_flag(env, "REVIEW_PRESCAN", true);
@@ -828,6 +832,10 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
         json!({
             "enabled": verifier_enabled,
             "model": verifier_model,
+            // Запасная модель verifier'а (RFC 20, § 7): сбой основной — тот же батч уходит ей,
+            // а не в «verifier недоступен» (RFC 18 — degraded-блок при REVIEW_LLM_REQUIRED=1).
+            // Пусто или совпадает с основной — запасной нет.
+            "fallbackModel": verifier_fallback_model,
             "maxCandidates": num_json(num_env(env, "REVIEW_VERIFIER_MAX", 12.0)),
             // Блокеры сверх капа одного вызова — следующими батчами, а не молча в minor (RFC 17).
             "maxBatches": num_json(num_env(env, "REVIEW_VERIFIER_BATCHES", 3.0)),
@@ -1283,6 +1291,13 @@ mod tests {
         assert_eq!(parts["ollama"]["modelSettings"], json!({}));
         assert_eq!(parts["ollama"]["modelSettingsErrors"], json!([]));
         assert_eq!(parts["verifier"]["contextMargin"], 80);
+        assert_eq!(parts["verifier"]["fallbackModel"], "");
+        let e = env(&[("REVIEW_VERIFIER_MODEL", "a/free:free"), ("REVIEW_VERIFIER_FALLBACK_MODEL", " b/pro ")]);
+        let p = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(p["verifier"]["fallbackModel"], "b/pro");
+        let e = env(&[("REVIEW_VERIFIER_MODEL", "same"), ("REVIEW_VERIFIER_FALLBACK_MODEL", "same")]);
+        let p = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(p["verifier"]["fallbackModel"], "", "запасная = основная — запасной нет");
         let e = env(&[
             ("REVIEW_AGGREGATOR_REASONING_EFFORT", " none "),
             ("REVIEW_VERIFIER_CONTEXT_MARGIN", "20"),

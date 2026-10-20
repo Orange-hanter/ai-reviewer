@@ -399,6 +399,14 @@ fn chat_402_openrouter_кредиты_кончились_это_квота() {
 }
 
 #[test]
+fn quota_scope_free_модель_отдельно_от_ключа() {
+    use crate::llm::quota_scope;
+    assert_eq!(quota_scope("minimax/minimax-m3.1-flash:free", "LLM 429 (квота провайдера исчерпана): x"), "model");
+    assert_eq!(quota_scope("some/model", "Rate limit exceeded: free-models-per-day. Add 10 credits"), "model");
+    assert_eq!(quota_scope("deepseek/deepseek-v4.1-flash", "LLM 402 (квота провайдера исчерпана): Insufficient credits"), "key");
+}
+
+#[test]
 fn is_quota_exhausted_отличает_квоту_от_rate_limit() {
     use crate::llm::is_quota_exhausted;
     assert!(is_quota_exhausted(402, ""));
