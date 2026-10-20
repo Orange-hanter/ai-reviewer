@@ -210,6 +210,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_GRAPHIFY_DROP_AMBIGUOUS` | `1` | `0`/`false`/`no`/`off` — оставлять AMBIGUOUS-рёбра в blast |
 | `REVIEW_BLAST_REQUIRED` | `0` | `1` — blast-radius не посчитан (нет/не читается `graph.json`, все запросы `affected` упали) → exit 1 до LLM, sticky с причиной (fail-closed). Шаблон `examples/ci/pr-review.yml` ставит `1` |
 | `REVIEW_BLAST_VERIFY` | `0` | Проверка blast-находок verifier'ом ([RFC 21](../proposals/21-blast-verification.md)): `0` — прежнее поведение (в `moa` strict-refutation понижает blast-находку до minor, merge она не блокирует); `shadow` — refutation её не понижает, verifier судит её с окном файла вызывающего кода, но гейт не блокирует: событие `blast_would_block`; `1` — блокирует после `verified`. `1`/`true`/`on`, `0`/`false`/`off` — как у прочих флагов, иное значение → `0` |
+| `REVIEW_BLAST_VERIFY_MARGIN` | `20` | ±строк вокруг строки вызова в файле вне PR, которое verifier получает для blast-кандидата. Файл читается с той же защитой, что файлы PR (symlink наружу, бинарь — отказ); не прочитан → находка `minor`, `verifierStatus: unverified`, verifier её не получает |
 
 Нет графа → blast-radius пустой, ревью продолжается (при `REVIEW_BLAST_REQUIRED=1` — блок).
 Устаревший граф (`graph_stale`), неразрешённые символы и «зависимых нет» сбоем не считаются.

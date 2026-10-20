@@ -763,6 +763,56 @@ const advisoryMinorReview = () => ({
 });
 
 /** Прогон с перехватом того, что реально ушло в engine.verifyFindings. */
+// RFC 21: blast-находка о caller'е вне PR. foo.ts меняется в CODE_DIFF, lib/caller.ts — нет.
+const BLAST_BLOCK = '- `foo` → 1 зависимостей вне диффа: `useFoo()` @ lib/caller.ts:5 [calls][EXTRACTED] cross-community';
+const blastGraphify = { buildBlastRadius: async () => [BLAST_BLOCK] };
+const CALLER_ENTRY = `### lib/caller.ts\n\`\`\`\n${Array.from({ length: 60 }, (_, i) => (i === 4 ? 'useFoo(1, 2);' : `// ${i + 1}`)).join('\n')}\n\`\`\``;
+const emptyReview = () => ({ model: 'm1', summary: '', verdict: 'comment', findings: [] });
+
+async function runBlastVerify({ env = {}, readOutsideFile, verdict = 'verified' } = {}) {
+  const seen = [];
+  const reads = [];
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF,
+    reviews: [emptyReview()],
+    graphify: blastGraphify,
+    verifyFindings: async (candidates, ctx) => {
+      seen.push({ candidates: candidates.map((c) => ({ file: c.file, source: c.source })), ctx });
+      return candidates.map((_, i) => ({ candidateIndex: i, decision: verdict, reason: 'r' }));
+    },
+    env: { REVIEW_VERIFIER: '1', ...env },
+    mutateDeps: (deps) => {
+      deps.readOutsideFile = async (path) => { reads.push(path); return readOutsideFile ? readOutsideFile(path) : null; };
+    },
+  });
+  return { code, calls, seen, reads };
+}
+
+test('blast-verify (RFC 21): verifier видит окно файла вызывающего кода и хунк символа', async () => {
+  const { seen, reads } = await runBlastVerify({
+    env: { REVIEW_BLAST_VERIFY: '1' },
+    readOutsideFile: async () => CALLER_ENTRY,
+  });
+  assert.deepEqual(reads, ['lib/caller.ts'], 'файл вне PR прочитан один раз');
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].candidates, [{ file: 'lib/caller.ts', source: 'blast-radius' }]);
+  assert.ok(seen[0].ctx.fileContents.includes('useFoo(1, 2);'), 'строка вызова в контексте verifier\'а');
+  assert.ok(seen[0].ctx.annotated.includes('export function foo()'), 'хунк, где меняется символ');
+});
+
+test('blast-verify (RFC 21): файл вызывающего кода не прочитан → minor/unverified, verifier его не получает', async () => {
+  const { code, seen, reads, calls } = await runBlastVerify({ env: { REVIEW_BLAST_VERIFY: '1' } });
+  assert.deepEqual(reads, ['lib/caller.ts']);
+  assert.equal(seen.length, 0, 'без доказательства кандидат не занимает слот verifier\'а');
+  assert.equal(code, 0, 'merge не блокируется');
+  assert.ok(!calls.upsertSticky[0].includes('Merge заблокирован'));
+});
+
+test('blast-verify (RFC 21): REVIEW_BLAST_VERIFY=0 — файлы вне PR не читаются', async () => {
+  const { reads } = await runBlastVerify({ readOutsideFile: async () => CALLER_ENTRY });
+  assert.deepEqual(reads, [], 'при 0 нынешнее поведение без лишнего чтения');
+});
+
 async function runWithVerifierSpy(env) {
   const seen = [];
   const { code, calls } = await runPipeline({

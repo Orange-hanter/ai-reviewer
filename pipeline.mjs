@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
-import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths, collectDeletedPaths } from './lib/diff.mjs';
+import { parseDiff, collectBlastSymbols, readChangedFiles, readOutsideFile, buildChunks, collectAddedPaths, collectDeletedPaths } from './lib/diff.mjs';
 import { createLlmClient } from './lib/llm.mjs';
 import { createCostTracker, efficiencyMetrics } from './lib/cost.mjs';
 import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
@@ -173,10 +173,35 @@ function markVerifierUnavailable(findings, pending, reason, log, obs) {
 async function runVerifierStage(allFindings, {
   engine, gate, verifier, deadline, contentMap, annotated, blastBlocks, pr, changedFilesSection,
   actionability, actionabilityCtx, files, symbolCardsByPath = null, limits = {},
+  readOutside = null,
 }, log, obs) {
   const empty = { findings: allFindings, stats: null, unavailable: null };
   if (!verifier.enabled) return empty;
   const isBlockTier = (f) => gate.blockOn.includes(f.severity) && !f.prescan;
+  // RFC 21: blast-кандидат судится по строке вызова, а файл вызова — вне PR. Читаем до
+  // отбора: нечитаемый файл — нет доказательства, такой кандидат не занимает слот verifier'а.
+  const outside = new Map();
+  if (gate.blastVerify !== '0' && readOutside) {
+    const blastFiles = new Set(allFindings
+      .filter((f) => f.source === BLAST_FINDING_SOURCE && isBlockTier(f) && f.file && !contentMap.has(f.file))
+      .map((f) => f.file));
+    for (const path of blastFiles) {
+      const entry = await readOutside(path).catch(() => null);
+      if (entry) outside.set(path, entry);
+    }
+    let unreadable = 0;
+    for (const f of allFindings) {
+      if (f.source !== BLAST_FINDING_SOURCE || !isBlockTier(f) || !blastFiles.has(f.file) || outside.has(f.file)) continue;
+      f.severity = 'minor';
+      f.verifierStatus = 'unverified';
+      f.verifierReason = 'файл вызывающего кода не прочитан — несовместимость не проверить, понижено до minor';
+      unreadable++;
+    }
+    if (blastFiles.size) {
+      log(`verifier: файлов вызывающего кода вне PR прочитано ${outside.size} из ${blastFiles.size}${unreadable ? `, ${unreadable} blast-находок → minor (unverified)` : ''}`);
+      obs.logEvent('verifier_blast_callers', { files: blastFiles.size, read: outside.size, unreadable });
+    }
+  }
   // Сбой судит только strict-режим verifier'а: при REVIEW_VERIFIER_STRICT=0 находка без
   // вердикта и так остаётся как есть — потребитель выбрал доверять агрегатору.
   const unavailable = (pending, reason) => (verifier.strictBlocks && pending.length
@@ -245,13 +270,19 @@ async function runVerifierStage(allFindings, {
     // Verifier получает только файлы/секции диффа с кандидатами, а не весь PR —
     // иначе на большом PR это самый жирный промпт пайплайна.
     const candFiles = new Set(batch.map((c) => c.file).filter(Boolean));
+    // Blast-кандидат: его файл вне диффа, а доказательство смены контракта — в хунке, где
+    // меняется его символ. Секции с этим именем идут verifier'у вместе с секциями кандидатов.
+    const blastSymbols = batch.filter((c) => c.source === BLAST_FINDING_SOURCE && c.blastSymbol)
+      .map((c) => c.blastSymbol);
     // …и не файлы целиком, а окна ±contextMargin вокруг строк кандидатов: verifier смотрит
     // одну-две строки на файл, а платил за 1500 строк — причём другой моделью, то есть без
     // шанса переиспользовать кэш префикса advisor'ов (lib/context-window.mjs).
-    const ctxWindow = buildVerifierFileContents(contentMap, batch, { margin: verifier.contextMargin });
+    const ctxWindow = buildVerifierFileContents(contentMap, batch, {
+      margin: verifier.contextMargin, outside, outsideMargin: verifier.blastCallerMargin ?? 20,
+    });
     const fileContents = ctxWindow.text;
     const sections = [...extractFileDiffSections(annotated).entries()]
-      .filter(([p]) => candFiles.has(p))
+      .filter(([p, s]) => candFiles.has(p) || blastSymbols.some((sym) => s.includes(sym)))
       .map(([, s]) => s);
     const annotatedScoped = sections.length ? sections.join('\n') : annotated;
     const tag = batches.length > 1 ? ` [батч ${i + 1}/${batches.length}]` : '';
@@ -424,6 +455,8 @@ export function createReviewPipeline(cfg, deps = {}) {
   const prescan = deps.prescan ?? createPrescanRunner(cfg, { log });
   const telegramNotifier = deps.notifyTelegram ?? notifyTelegram;
   const repoFiles = deps.repoFiles ?? (() => listRepoFiles());
+  // Файл вызывающего кода blast-кандидата (RFC 21) — вне PR, читается отдельно от contentMap.
+  const readOutside = deps.readOutsideFile ?? ((path) => readOutsideFile(path, log));
   // Строки файла рабочего дерева для карточек символов (RFC 14); в тестах — подмена.
   const readLines = deps.readLines ?? createLineReader();
 
@@ -1030,6 +1063,7 @@ export function createReviewPipeline(cfg, deps = {}) {
                 files,
                 symbolCardsByPath: symbolCards?.byPath ?? null,
                 limits,
+                readOutside,
               }, log, obs)
             : { findings: currentFindings, stats: null, unavailable: null };
           currentFindings = verifierStage.findings;
