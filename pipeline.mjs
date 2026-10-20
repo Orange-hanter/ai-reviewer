@@ -375,6 +375,16 @@ async function runVerifierStage(allFindings, {
   }
   applied.stats.batches = batchesSent;
   log(`verifier итог: verified=${applied.stats.verified} rejected=${applied.stats.rejected} downgraded=${applied.stats.downgraded} missing=${applied.stats.missing}`);
+  // RFC 21: вердикты по источнику — blast-находки судятся по другому правилу, и замер
+  // shadow-режима читает именно их.
+  const bySource = {};
+  for (const f of sent) {
+    const src = f.source === BLAST_FINDING_SOURCE ? BLAST_FINDING_SOURCE : 'llm';
+    const st = f.verifierStatus || 'none';
+    bySource[src] = bySource[src] || {};
+    bySource[src][st] = (bySource[src][st] || 0) + 1;
+  }
+  applied.stats.bySource = bySource;
   obs.logEvent('verifier', applied.stats);
   logFindingsStage(obs, 'after_verifier', applied.findings);
   return { findings: applied.findings, stats: applied.stats, unavailable: tailUnavailable };
@@ -1088,6 +1098,17 @@ export function createReviewPipeline(cfg, deps = {}) {
       // Δ-блоку и артефакту экспорта: все трое обязаны показывать одну величину.
       attachFingerprints(allFindings, files);
       const blockerClusters = gateResolution.clusters.filter((g) => g.some((f) => f.consensusBlock));
+      // RFC 21, shadow: что blast-находки заблокировали бы — материал для замера перед дефолтом.
+      const blastWouldBlock = allFindings.filter((f) => f.wouldBlockBlast);
+      if (blastWouldBlock.length) {
+        log(`blast-verify shadow: ${blastWouldBlock.length} blast-находок заблокировали бы merge (REVIEW_BLAST_VERIFY=shadow)`);
+        for (const f of blastWouldBlock) {
+          obs.logEvent('blast_would_block', {
+            file: f.file, line: f.line, title: String(f.title || '').slice(0, 200),
+            verifierReason: String(f.verifierReason || '').slice(0, 300),
+          });
+        }
+      }
       const blockers = gateResolution.blockers;
       const fpRemoved = gateResolution.fpRemoved;
       const refutationStats = gateResolution.refutationStats;

@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { writeFile, readFile, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { defaultRustBin } from '../lib/rust-bin.mjs';
 
 const { createReviewPipeline, loadReviewConfig, runGateResolution, MARKERS } = await import('../index.mjs');
 
@@ -367,7 +369,7 @@ test('export R9: fp/verifierStatus/actionabilityScore в артефакте, fp 
       env: { REVIEW_EXPORT: '1', REVIEW_EXPORT_DIR: exportDir, REVIEW_VERIFIER: '1' },
     });
     const payload = JSON.parse(await readFile(join(exportDir, 'orakul-ai-review.json'), 'utf8'));
-    assert.equal(payload.version, 2, 'версия артефакта поднята вместе с полями');
+    assert.equal(payload.version, 3, 'версия артефакта поднята вместе с полями');
 
     const blocker = payload.findings.find((f) => f.severity === 'critical');
     assert.ok(blocker.fp, 'отпечаток кода в артефакте');
@@ -769,16 +771,20 @@ const blastGraphify = { buildBlastRadius: async () => [BLAST_BLOCK] };
 const CALLER_ENTRY = `### lib/caller.ts\n\`\`\`\n${Array.from({ length: 60 }, (_, i) => (i === 4 ? 'useFoo(1, 2);' : `// ${i + 1}`)).join('\n')}\n\`\`\``;
 const emptyReview = () => ({ model: 'm1', summary: '', verdict: 'comment', findings: [] });
 
-async function runBlastVerify({ env = {}, readOutsideFile, verdict = 'verified' } = {}) {
+async function runBlastVerify({ env = {}, readOutsideFile, verdict = 'verified', verdicts, observabilityDir = '' } = {}) {
   const seen = [];
   const reads = [];
   const { code, calls } = await runPipeline({
     diff: CODE_DIFF,
     reviews: [emptyReview()],
     graphify: blastGraphify,
+    observabilityDir,
     verifyFindings: async (candidates, ctx) => {
       seen.push({ candidates: candidates.map((c) => ({ file: c.file, source: c.source })), ctx });
-      return candidates.map((_, i) => ({ candidateIndex: i, decision: verdict, reason: 'r' }));
+      if (verdicts) return verdicts(candidates);
+      return candidates.map((_, i) => ({
+        candidateIndex: i, decision: verdict, reason: 'r', ...(verdict === 'downgrade' ? { severity: 'minor' } : {}),
+      }));
     },
     env: { REVIEW_VERIFIER: '1', ...env },
     mutateDeps: (deps) => {
@@ -811,6 +817,80 @@ test('blast-verify (RFC 21): файл вызывающего кода не пр�
 test('blast-verify (RFC 21): REVIEW_BLAST_VERIFY=0 — файлы вне PR не читаются', async () => {
   const { reads } = await runBlastVerify({ readOutsideFile: async () => CALLER_ENTRY });
   assert.deepEqual(reads, [], 'при 0 нынешнее поведение без лишнего чтения');
+});
+
+// RFC 21, поток целиком в moa (как в CI-шаблоне): refutation, отбор, verifier, гейт.
+// Пропуск blast-находки refutation'ом и shadow-гейт — rust-owned (RFC 20): без бинарей
+// deprecated JS-копия ведёт себя как до RFC 21, и проверять здесь нечего.
+const RUST_GATE_BINS = ['specialists', 'verifier', 'findings'];
+const skipNoRust = RUST_GATE_BINS.some((m) => !existsSync(defaultRustBin(m)))
+  ? 'нет Rust-бинарей specialists/verifier/findings (cargo build) — поведение RFC 21 rust-owned' : false;
+const MOA = { REVIEW_MODE: 'moa' };
+const withCaller = async () => CALLER_ENTRY;
+
+test('blast-verify moa: REVIEW_BLAST_VERIFY=1 + verified → merge заблокирован', { skip: skipNoRust }, async () => {
+  const { code, seen, calls } = await runBlastVerify({
+    env: { ...MOA, REVIEW_BLAST_VERIFY: '1' }, readOutsideFile: withCaller,
+  });
+  assert.equal(seen.length, 1, 'refutation не понизил blast-находку — она дошла до verifier\'а');
+  assert.equal(code, 1);
+  assert.ok(calls.upsertSticky[0].includes('Merge заблокирован'));
+});
+
+test('blast-verify moa: REVIEW_BLAST_VERIFY=1 + rejected → находка снята, exit 0', { skip: skipNoRust }, async () => {
+  const { code, calls } = await runBlastVerify({
+    env: { ...MOA, REVIEW_BLAST_VERIFY: '1' }, readOutsideFile: withCaller, verdict: 'rejected',
+  });
+  assert.equal(code, 0);
+  assert.ok(!calls.upsertSticky[0].includes('Код вне PR зависит от'), 'отклонённая находка не в отчёте');
+});
+
+test('blast-verify moa: REVIEW_BLAST_VERIFY=1 + downgrade → minor, exit 0', { skip: skipNoRust }, async () => {
+  const { code, calls } = await runBlastVerify({
+    env: { ...MOA, REVIEW_BLAST_VERIFY: '1' }, readOutsideFile: withCaller, verdict: 'downgrade',
+  });
+  assert.equal(code, 0);
+  assert.ok(!calls.upsertSticky[0].includes('Merge заблокирован'));
+});
+
+test('blast-verify moa: пустой ответ verifier\'а — сбой по RFC 18, а не тихий блок по графу', { skip: skipNoRust }, async () => {
+  const opts = { readOutsideFile: withCaller, verdicts: () => [] };
+  const failOpen = await runBlastVerify({ env: { ...MOA, REVIEW_BLAST_VERIFY: '1', REVIEW_LLM_REQUIRED: '0' }, ...opts });
+  assert.equal(failOpen.code, 0, 'REVIEW_LLM_REQUIRED=0 — fail-open');
+  const failClosed = await runBlastVerify({ env: { ...MOA, REVIEW_BLAST_VERIFY: '1' }, ...opts });
+  assert.equal(failClosed.code, 1, 'REVIEW_LLM_REQUIRED=1 (дефолт) — degraded-блок до перезапуска');
+});
+
+test('blast-verify moa: файл вызывающего кода не прочитан → unverified, exit 0', { skip: skipNoRust }, async () => {
+  const { code, seen } = await runBlastVerify({ env: { ...MOA, REVIEW_BLAST_VERIFY: '1' } });
+  assert.equal(seen.length, 0);
+  assert.equal(code, 0);
+});
+
+test('blast-verify moa: shadow + verified → exit 0 и событие blast_would_block', { skip: skipNoRust }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-blast-shadow-'));
+  try {
+    const { code, seen } = await runBlastVerify({
+      env: { ...MOA, REVIEW_BLAST_VERIFY: 'shadow' }, readOutsideFile: withCaller, observabilityDir: dir,
+    });
+    assert.equal(seen.length, 1, 'в shadow verifier судит так же');
+    assert.equal(code, 0, 'но гейт не блокирует');
+    const records = (await readFile(join(dir, 'pr-review-runs.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    const would = records.filter((r) => r.type === 'blast_would_block');
+    assert.equal(would.length, 1);
+    assert.equal(would[0].file, 'lib/caller.ts');
+    const verifier = records.find((r) => r.type === 'verifier');
+    assert.deepEqual(verifier.bySource, { 'blast-radius': { verified: 1 } });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('blast-verify moa: REVIEW_BLAST_VERIFY=0 — прежнее поведение: refutation понижает, verifier её не видит', { skip: skipNoRust }, async () => {
+  const { code, seen, reads } = await runBlastVerify({ env: { ...MOA }, readOutsideFile: withCaller });
+  assert.equal(seen.length, 0, 'до verifier\'а blast-находка не доходит');
+  assert.deepEqual(reads, []);
+  assert.equal(code, 0);
 });
 
 async function runWithVerifierSpy(env) {

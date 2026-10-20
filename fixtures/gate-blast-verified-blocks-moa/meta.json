@@ -1,0 +1,16 @@
+{
+  "id": "gate-blast-verified-blocks-moa",
+  "description": "RFC 21: blast-находка о вызове вне PR в strict-refutation (как в moa) не понижается за отсутствие advisorClaims, verifier подтверждает несовместимость — merge блокируется. Без REVIEW_BLAST_VERIFY refutation понизил бы её до minor и блока не было бы. LLM-находка с advisorClaims нужна, чтобы refutation вообще запустился",
+  "gate": {
+    "consensusMin": 1,
+    "blastVerify": "1"
+  },
+  "requiresRust": true,
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "titles": [
+      "Код вне PR зависит от `parseLimits` — проверьте совместимость"
+    ]
+  }
+}

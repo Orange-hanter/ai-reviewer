@@ -312,11 +312,11 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_PRICE_JSON` | — | Цены моделей `{"<model>":{"in":$/1M,"out":$/1M}}`; ключ `*` или `default` — для остальных моделей. Задан → в `efficiencyMetrics` события `run_end` появляется `cost_usd`; битый JSON ≡ не задано |
 | `REVIEW_REASONING_STICKY` | `1` | Секция reasoning в sticky |
 
-### Поля артефакта (`version: 2`)
+### Поля артефакта (`version: 3`)
 
 Артефакт `<toolName>.json` — машинный вывод прогона для внешнего потребителя
 (cod-doc ingest, оркестратор swarm); собирается в [`lib/export.mjs`](../lib/export.mjs),
-`EXPORT_VERSION = 2`. Необязательные поля (`router`, `verdict`, `llmFailed`, `fp`, `prescan`…) без значения
+`EXPORT_VERSION = 3`. Необязательные поля (`router`, `verdict`, `llmFailed`, `fp`, `prescan`…) без значения
 в JSON отсутствуют, а не пустые.
 
 Верхний уровень:
@@ -334,7 +334,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `counts`, `total` | Число находок по severity и всего |
 | `findings`, `blockers` | Находки, формат ниже |
 | `reasoning` | Выдержки рассуждений advisors |
-| `verifier`, `refutation` | Статистика Pass B и refutation |
+| `verifier`, `refutation` | Статистика Pass B и refutation; `verifier.bySource` — вердикты отдельно по `blast-radius` и `llm` (RFC 21), `refutation.skippedBlast` — blast-находки, которые refutation пропустил |
 | `blast` | `{symbols_total, symbols_resolved, affected_nonempty, graph_status, skip_reason, affected_files, confidence, cross_community}` |
 | `swarm` | Контракт для оркестратора — [swarm.md](swarm.md) |
 | `prescan` | `{findings, scanned, skipped, byTool, error}` |
@@ -349,6 +349,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `verifierStatus` | `verified` / `rejected` / `downgraded` / `unverified` / `overflow` — вердикт Pass B |
 | `actionabilityScore` | Сумма весов сигналов доказуемости; есть у **каждой** находки |
 | `actionabilityPromoted` | Advisory, поднятая в строку по доказуемости (не блокер) |
+| `wouldBlockBlast` | v3: blast-находка, которую гейт заблокировал бы, но `REVIEW_BLAST_VERIFY=shadow` (RFC 21); то же — событие `blast_would_block` в JSONL observability |
 | `prescan`, `consensusBlock`, `refutationStatus`, `advisorClaims` | Откуда находка и что с ней сделали жюри и линтеры; элемент `advisorClaims` — `{role, status, reason}` (`reason` ≤ 200) |
 
 Версия артефакта растёт и на аддитивных изменениях, поэтому потребитель обязан сверять её
