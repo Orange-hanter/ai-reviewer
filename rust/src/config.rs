@@ -121,6 +121,20 @@ pub fn env_flag(env: &Map<String, Value>, key: &str, default_on: bool) -> bool {
     }
 }
 
+/// Трёхзначный режим `0` | `shadow` | `1` (порт envMode из lib/util.mjs): `shadow`
+/// буквально, остальное — по правилам env_flag, нераспознанное → def.
+pub fn env_mode(env: &Map<String, Value>, key: &str, def: &str) -> String {
+    let Some(raw) = env_str(env, key) else { return def.to_string() };
+    let v = raw.trim().to_lowercase();
+    match v.as_str() {
+        "" => def.to_string(),
+        "shadow" => "shadow".to_string(),
+        "0" | "false" | "no" | "off" => "0".to_string(),
+        "1" | "true" | "yes" | "on" => "1".to_string(),
+        _ => def.to_string(),
+    }
+}
+
 /// `a || b` над env-строкой: пустая строка (JS falsy) → def.
 fn or_env(env: &Map<String, Value>, key: &str, def: &str) -> String {
     match env_str(env, key) {
@@ -800,6 +814,7 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "confidenceMin": num_json(confidence_min),
             "llmRequired": env_flag(env, "REVIEW_LLM_REQUIRED", true),
             "blastRequired": env_flag(env, "REVIEW_BLAST_REQUIRED", false),
+            "blastVerify": env_mode(env, "REVIEW_BLAST_VERIFY", "0"),
             "strict": strict,
             "requireQuote": require_quote,
         }),
@@ -1034,6 +1049,19 @@ mod tests {
             "appDir": profile.pointer("/layout/appDir").cloned().unwrap_or(Value::Null),
             "paths": profile.get("paths").cloned().unwrap_or(Value::Null),
         })
+    }
+
+    #[test]
+    fn env_mode_semantics() {
+        let e = env(&[
+            ("S", " Shadow "), ("ON", "yes"), ("OFF", "off"), ("J", "junk"), ("E", ""),
+        ]);
+        assert_eq!(env_mode(&e, "S", "0"), "shadow");
+        assert_eq!(env_mode(&e, "ON", "0"), "1");
+        assert_eq!(env_mode(&e, "OFF", "1"), "0");
+        assert_eq!(env_mode(&e, "J", "0"), "0", "junk → def");
+        assert_eq!(env_mode(&e, "E", "1"), "1", "пусто → def");
+        assert_eq!(env_mode(&e, "MISSING", "0"), "0");
     }
 
     #[test]

@@ -1012,7 +1012,9 @@ export function createReviewPipeline(cfg, deps = {}) {
           // чтобы fail-closed и fall-through пути вели себя симметрично.
           let refutationStats = null;
           if (specialists.enabled && ok.length) {
-            const applied = applyRefutation(currentFindings, log, { strict: true, blockOn: gate.blockOn });
+            const applied = applyRefutation(currentFindings, log, {
+              strict: true, blockOn: gate.blockOn, skipBlast: gate.blastVerify !== '0',
+            });
             currentFindings = applied.findings;
             refutationStats = applied.stats;
             log(`refutation R5: ${formatRefutationLog(refutationStats)}`);
