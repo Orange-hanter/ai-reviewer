@@ -13,6 +13,20 @@ audience: [next-session-agent, maintainers]
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
 
+## 2026-10-21 — RFC 21: живая проверка verifier'а на blast-кандидате
+
+**Что:** `VERIFIER_BLAST_CANDIDATE_RULE` + окно файла вызывающего кода (BLV-004/005) на модели
+verifier'а из CI-шаблона (`deepseek-v4-pro`). Один blast-кандидат: `api/config.ts:4` вызывает
+`parseLimits(env.LIMITS ?? '1,10', true)`; два диффа `lib/limits.ts`, каждый дважды.
+
+| Дифф | Ожидание | Вердикты |
+|------|----------|----------|
+| сигнатура `(raw, strict)` → объект опций `{ raw, strict? }` | verified, обе строки в reason | verified ×2, в reason `lib/limits.ts:1` и `api/config.ts:4` |
+| добавлен необязательный `sep = ','` | rejected или downgrade | rejected ×2: «необязательный параметр со значением по умолчанию, вызов совместим» |
+
+Выборка — 4 вызова на одном синтетическом кейсе: это проверка, что правило читается моделью
+так, как написано, а не замер ложных блоков. Замер — BLV-007 (gold, shadow).
+
 ## 2026-10-21 — RFC 21 принят
 
 **Решение:** [RFC 21](../../proposals/21-blast-verification.md) «Проверка blast-находок» принят
