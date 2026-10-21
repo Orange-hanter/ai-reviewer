@@ -28,15 +28,18 @@ last_updated: 2026-09-10
   кавычках, `---`, `?`, флоу-маппинг, якорь/алиас, `<<`, вложение под незнакомым ключом,
   кавычки внутри значения), даёт null → защищается каталог конфига и любой YAML PR. Раньше
   такие строки пропускались, и `"ruleDirs":` уводил каталоги правил из-под защиты.
-- **Встроенный skip уже.** Source map — только `*.{js,mjs,cjs,jsx,ts,tsx,css}.map` (голый
-  `*.map` — nginx-карты, данные — уходит моделям и не инертен для `reviewSkip`). Lockfile —
-  только npm/yarn/pnpm, и КАЖДОЕ значение их добавленных строк (ключи yarn, `version`,
-  `requires`, не только `resolved`) декодируется как у менеджера пакетов и классифицируется:
+- **Встроенный skip — только source map** `*.{js,mjs,cjs,jsx,ts,tsx,css}.map` (голый
+  `*.map` — nginx-карты, данные — уходит моделям и не инертен для `reviewSkip`). **Lockfile
+  уходят моделям**, как до `reviewSkip`; скрыть их может только `reviewSkip` доверенного
+  профиля. Маршрут PR не менялся (PR из одних lockfile — skip). Добавочно в npm/yarn/pnpm
+  lockfile КАЖДОЕ значение добавленных строк (ключи yarn, `version`, `requires`, не только
+  `resolved`) декодируется как у менеджера пакетов и классифицируется с начала значения или
+  после `name@` (URL в середине, нераскодированная строка, управляющий символ — fail-closed):
   https вне `registry.npmjs.org`, `registry.yarnpkg.com` и env `REVIEW_LOCKFILE_REGISTRIES`,
   `http:`, иные схемы, git/`github:`-подобные спецификации, `file:`/`link:` вне репозитория, а
   fail-closed — обратный слэш, `%`, userinfo, порт, непарная кавычка — дают детерминированную
-  находку major (prescan, `ruleId: lockfile-foreign-registry`). Она отменяет router skip/light. `composer.lock`/`Cargo.lock`/`poetry.lock`/`Gemfile.lock` проверки не
-  имеют и снова уходят моделям.
+  находку major (prescan, `ruleId: lockfile-foreign-registry`). Она отменяет router skip/light.
+  Пробел в этой проверке ничего не прячет: lockfile видят и модели.
 
 **Для потребителя:** добавить в env шага ревью
 `REVIEW_BASE_REF: ${{ github.event.pull_request.base.sha || format('refs/remotes/origin/{0}', github.base_ref || 'main') }}`
@@ -64,8 +67,8 @@ PR. Теперь тот же батч уходит запасной модели
   у статистики verifier'а — `bySource`. Аддитивно; потребитель, сверяющий версию на
   «известна ли», а не на равенство, ничего не замечает.
 - Новое необязательное поле профиля `layout.reviewSkip` (действует при
-  `REVIEW_PROFILE_TRUSTED=1`); без него меняется одно — общеизвестные lockfile и `*.map`
-  больше не уходят моделям в PR с кодом (ниже).
+  `REVIEW_PROFILE_TRUSTED=1`); без него меняется одно — source map JS/TS/CSS больше не
+  уходят моделям в PR с кодом (ниже; lockfile — уходят, см. раздел «Безопасность» выше).
 - Формат футера sticky, namespace маркеров, контракты `swarm` / `structure` — без изменений.
 
 ### Добавлено — проверка blast-находок verifier'ом ([RFC 21](proposals/21-blast-verification.md))
@@ -98,7 +101,8 @@ YAML, читало отступы через границу чанка и на �
   уходит — маршрут PR по-прежнему считает его skip, но вход LLM по одному имени не сужается;
 - trust gate: `reviewSkip` применяется только при `REVIEW_PROFILE_TRUSTED=1` (профиль взят
   из base-ветки; шаг — в `examples/ci/pr-review.yml`), без флага игнорируется со строкой в логе;
-- встроенный skip сужает вход LLM только для общеизвестных lockfile (по имени) и `*.map`;
+- встроенный skip сужает вход LLM только для source map JS/TS/CSS (после security-ревью;
+  lockfile уходят моделям);
 - allowlist инертных файлов (и для доверенного профиля): lockfile, `*.map`, `md`/`mdx`/`rst`,
   данные `json`/`yaml` — кроме dotfile, каталогов CI/IDE/инфраструктуры, инструкций агентам и
   конфигов сборки; код по расширению, `.github/`, пин движка `ai-reviewer-ref`, всё, что читает

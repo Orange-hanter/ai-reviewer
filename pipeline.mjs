@@ -616,8 +616,8 @@ export function createReviewPipeline(cfg, deps = {}) {
       });
       obs.logEvent('router', { route: route.route, reason: route.reason, files: route.files?.map((f) => f.class) });
 
-      // Источники пакетов в lockfile — детерминированно, не моделью: lockfile во вход LLM не
-      // идёт (встроенный skip), а смена реестра в нём — подмена зависимости. Находки — в
+      // Источники пакетов в lockfile — ещё и детерминированно (добавочно к LLM: смену реестра
+      // в тысячах строк модель пропустит, а это подмена зависимости). Находки — в
       // форме prescan, дальше по тому же пути (гейт, inline, sticky). Считаются ДО маршрута:
       // PR из одного lockfile — route skip, и находка обязана отменить короткий путь.
       const lockfileFindings = scanLockfileRegistries(diff, { registries: cfg.lockfile?.registries || [] });

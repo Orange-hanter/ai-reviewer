@@ -1113,13 +1113,21 @@ test('инкрементально: файл упавшей части PR рев
 // моделям уходит только код. Регрессия Orakul: куски 26k-строчного OpenAPI YAML жюри читало
 // с отступами через границу чанка и на каждом прогоне поднимало блокирующий major.
 const SKIP_YAML = 'docs/08-technical/openapi/orakul-api.yaml';
+// Встроенный skip — только настоящие source map (lockfile уходят моделям).
+const MAP_DIFF = `diff --git a/dist/app.js.map b/dist/app.js.map
+--- a/dist/app.js.map
++++ b/dist/app.js.map
+@@ -1,1 +1,1 @@
+-{}
++{"version":3}
+`;
 const SKIP_ONLY_DIFF = `diff --git a/${SKIP_YAML} b/${SKIP_YAML}
 --- a/${SKIP_YAML}
 +++ b/${SKIP_YAML}
 @@ -1,1 +1,2 @@
  paths:
 +  /x: {}
-${LOCK_DIFF}`;
+${MAP_DIFF}`;
 
 // reviewSkip применяется только к профилю из base-ветки (REVIEW_PROFILE_TRUSTED=1).
 // sgconfig reference-профиля (ops/pr-review/…) в этом репозитории нет — без override защита
@@ -1146,12 +1154,12 @@ test('pipeline: профиль не помечен доверенным — revi
       deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
     },
   });
-  assert.deepEqual(chunks.flatMap((c) => c.paths).sort(), ['foo.ts', SKIP_YAML].sort(), 'lockfile снят встроенным skip, YAML — нет');
+  assert.deepEqual(chunks.flatMap((c) => c.paths).sort(), ['foo.ts', SKIP_YAML].sort(), 'source map снят встроенным skip, YAML — нет');
   assert.ok(logs.some((l) => l.includes('reviewSkip ignored: profile not marked trusted (REVIEW_PROFILE_TRUSTED)')), logs.join('\n'));
   assert.ok(calls.upsertSticky.at(-1).includes('Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 1 файл(ов)'));
 });
 
-test('pipeline: skip-пути (reviewSkip профиля + lockfile) не уходят в чанки, видны в sticky', async () => {
+test('pipeline: skip-пути (reviewSkip профиля + source map) не уходят в чанки, видны в sticky', async () => {
   let chunks = null;
   const blind = {
     model: 'm1', summary: 'ок', verdict: 'changes_requested',
@@ -1169,7 +1177,7 @@ test('pipeline: skip-пути (reviewSkip профиля + lockfile) не ухо
   const llmText = chunks.map((c) => c.annotated).join('\n');
   assert.ok(llmText.includes('diff --git a/foo.ts'), 'код ушёл в чанк');
   assert.ok(!llmText.includes(SKIP_YAML), 'reviewSkip-путь в чанк не попал');
-  assert.ok(!llmText.includes('package-lock.json'), 'lockfile в чанк не попал');
+  assert.ok(!llmText.includes('dist/app.js.map'), 'source map в чанк не попал');
   assert.deepEqual(chunks.flatMap((c) => c.paths), ['foo.ts']);
   assert.equal(code, 0, 'находка модели о невиденном файле снята — блока нет');
   const sticky = calls.upsertSticky.at(-1);
@@ -1177,8 +1185,8 @@ test('pipeline: skip-пути (reviewSkip профиля + lockfile) не ухо
   assert.ok(sticky.includes(`\`${SKIP_YAML}\``));
 });
 
-// Lockfile не уходит моделям (встроенный skip), а PR из одного lockfile — route skip. Смена
-// реестра в нём — подмена зависимости: детерминированная находка отменяет короткий путь.
+// PR из одного lockfile — route skip (как до #62). Смена реестра в нём — подмена зависимости:
+// детерминированная находка отменяет короткий путь, и lockfile уходит и моделям.
 const EVIL_LOCK_DIFF = `diff --git a/package-lock.json b/package-lock.json
 --- a/package-lock.json
 +++ b/package-lock.json
@@ -1197,7 +1205,7 @@ test('pipeline: lockfile с пакетом из чужого реестра — 
   });
   // major одного источника, как major eslint: в отчёте, блок — по REVIEW_BLOCK_SINGLE
   assert.equal(code, 0);
-  assert.equal(calls.engineRuns, 0, 'моделям читать нечего — lockfile в skip');
+  assert.equal(calls.engineRuns, 1, 'router skip отменён — lockfile уходит моделям');
   const sticky = calls.upsertSticky.at(-1);
   assert.ok(sticky.includes('lockfile: пакет ставится не из разрешённого реестра — evil.example.com'), sticky);
   assert.ok(logs.some((l) => l.includes('router skip отменён')), logs.join('\n'));
@@ -1209,6 +1217,24 @@ test('pipeline: lockfile с пакетом из чужого реестра — 
   // хост из REVIEW_LOCKFILE_REGISTRIES разрешён
   const allowed = await runPipeline({ diff: EVIL_LOCK_DIFF, reviews: [okEmpty('m1')], env: { REVIEW_LOCKFILE_REGISTRIES: 'evil.example.com' } });
   assert.ok(!allowed.calls.upsertSticky.at(-1).includes('lockfile: пакет'));
+});
+
+test('pipeline: lockfile уходит моделям — встроенный skip его не снимает, проверка реестров добавочная', async () => {
+  let chunks = null;
+  const { calls } = await runPipeline({
+    diff: CODE_DIFF + LOCK_DIFF, reviews: [okEmpty('m1')],
+    mutateDeps: (deps) => {
+      const orig = deps.engine.reviewAllModels;
+      deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
+    },
+  });
+  assert.deepEqual(chunks.flatMap((c) => c.paths).sort(), ['foo.ts', 'package-lock.json']);
+  assert.ok(chunks.map((c) => c.annotated).join('\n').includes('diff --git a/package-lock.json'), 'дифф lockfile в чанке');
+  assert.ok(!calls.upsertSticky.at(-1).includes('Не ревьюились моделями'));
+  // маршрут PR — как на main до #62: PR из одного lockfile без находок — router skip
+  const only = await runPipeline({ diff: LOCK_DIFF, reviews: [okEmpty('m1')] });
+  assert.equal(only.calls.engineRuns, 0);
+  assert.ok(only.calls.upsertSticky.at(-1).includes('роутер классифицировал PR как `skip`'));
 });
 
 test('pipeline: REVIEW_PROFILE_TRUSTED=1 без REVIEW_BASE_REF — доверие снято, reviewSkip не применяется', async () => {

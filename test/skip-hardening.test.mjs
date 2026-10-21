@@ -43,18 +43,22 @@ test('parseSgconfigDirs: настоящие конфиги разбираютс�
   assert.deepEqual(parseSgconfigDirs('customLanguages:\n  mojo:\n    libraryPath: m.so\nruleDirs: [r]\n'), ['r']);
 });
 
-test('встроенный skip: только source map JS/TS/CSS и проверяемые lockfile', () => {
-  for (const p of ['dist/app.js.map', 'x.min.js.map', 'a.mjs.map', 'b.cjs.map', 'c.jsx.map', 'd.ts.map', 'e.tsx.map', 'f.CSS.MAP',
-    'package-lock.json', 'app/yarn.lock', 'pnpm-lock.yaml']) {
+test('встроенный skip: только source map JS/TS/CSS, lockfile уходят моделям', () => {
+  for (const p of ['dist/app.js.map', 'x.min.js.map', 'a.mjs.map', 'b.cjs.map', 'c.jsx.map', 'd.ts.map', 'e.tsx.map', 'f.CSS.MAP']) {
     assert.equal(isBuiltInSkipPath(p), true, p);
   }
-  for (const p of ['nginx/routes.map', 'conf/site.map', 'a.map', 'data/x.json.map', 'Cargo.lock', 'poetry.lock', 'Gemfile.lock', 'composer.lock']) {
+  for (const p of ['nginx/routes.map', 'conf/site.map', 'a.map', 'data/x.json.map',
+    'package-lock.json', 'app/yarn.lock', 'pnpm-lock.yaml', 'Cargo.lock', 'poetry.lock', 'Gemfile.lock', 'composer.lock']) {
     assert.equal(isBuiltInSkipPath(p), false, p);
   }
   assert.equal(isInertPath('nginx/routes.map'), false, 'голый *.map не инертен и под reviewSkip');
   assert.equal(isInertPath('dist/app.js.map'), true);
-  assert.equal(isInertPath('Cargo.lock'), true, 'непроверяемый lockfile скрывает только доверенный reviewSkip');
-  assert.deepEqual(collectReviewSkipped(['nginx/routes.map', 'Cargo.lock', 'dist/a.css.map']).builtIn, ['dist/a.css.map']);
+  for (const p of ['package-lock.json', 'app/yarn.lock', 'Cargo.lock']) {
+    assert.equal(isInertPath(p), true, `${p}: скрыть может только reviewSkip доверенного профиля`);
+  }
+  assert.deepEqual(collectReviewSkipped(['nginx/routes.map', 'package-lock.json', 'Cargo.lock', 'dist/a.css.map']).builtIn, ['dist/a.css.map']);
+  assert.deepEqual(collectReviewSkipped(['package-lock.json', 'yarn.lock'], { reviewSkip: /(?:^|\/)(?:package-lock\.json|yarn\.lock)$/, trusted: true }).byProfile,
+    ['package-lock.json', 'yarn.lock']);
 });
 
 const lockSection = (path, added, removed = []) => `diff --git a/${path} b/${path}
@@ -134,9 +138,20 @@ test('scanLockfileRegistries: значения декодируются как �
     ['yarn.lock', '"left-pad@^1.3.0", left-pad@npm:1.3.0:', null],
     ['pnpm-lock.yaml', '  /left-pad@1.3.0:', null],
     ['package-lock.json', '"integrity": "sha512-abc+/=",', null],
-    // funding — ссылки на донаты, но только строка ровно такой формы
-    ['package-lock.json', '"url": "https://github.com/sponsors/x"', null],
+    // funding — ссылки на донаты; `url`/`type` пропускаются ТОЛЬКО внутри записи funding
+    ['package-lock.json', '"url": "https://evil.example/x.tgz"', 'не из разрешённого реестра — evil.example'],
     ['package-lock.json', '"funding": "https://opencollective.com/x",', null],
+    // строка в кавычках не декодируется / управляющий символ — fail-closed
+    ['package-lock.json', '"resolved": "https://registry.npmjs.org\u0001/x.tgz",', `${NOT_RESOLVED} — строка не декодируется`],
+    ['package-lock.json', '"x": "a\tb",', `${NOT_RESOLVED} — строка не декодируется`],
+    ['pnpm-lock.yaml', '    resolution: {tarball: https://registry.npmjs.org\u007f/x.tgz}', `${NOT_RESOLVED} — управляющий символ`],
+    ['yarn.lock', "  resolved 'https://registry.npmjs.org\u0002/x.tgz'", `${NOT_RESOLVED} — управляющий символ`],
+    // спецификация — с начала значения или после name@; URL в середине — неоднозначность
+    ['package-lock.json', '"resolved": "registry.npmjs.org/x#https://evil.example/y.tgz",', `${NOT_RESOLVED} — URL не в начале`],
+    ['package-lock.json', '"x": "left-pad@npm:https://evil.example/y.tgz",', `${NOT_RESOLVED} — URL не в начале`],
+    ['package-lock.json', '"x": "git@github.com:org/repo.git#https://registry.npmjs.org/a.tgz",', 'из git/хостинга кода — git@host:path'],
+    ['package-lock.json', '"x": "github:org/repo#https://registry.npmjs.org/a.tgz",', 'из git/хостинга кода — github:'],
+    ['package-lock.json', '"x": "@s/p@https://registry.npmjs.org/@s/p/-/p-1.0.0.tgz",', null],
     ['package-lock.json', '"url": "https://github.com/sponsors/x", "resolved": "https://evil.example/y.tgz"', 'не из разрешённого реестра — evil.example'],
   ];
   for (const [file, line, want] of cases) {

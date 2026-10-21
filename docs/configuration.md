@@ -180,9 +180,9 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 профиля его не меняет.
 
 Skip-класс работает и внутри full-маршрута, но вход LLM сужают только двое:
-- встроенный skip — npm/yarn/pnpm lockfile (по имени; их источники пакетов проверяет
-  детерминированная проверка реестров) и source map JS/TS/CSS; прочий класс skip
-  (`dist/`, `*.generated.*`, `*.lock`) решает лишь маршрут;
+- встроенный skip — только source map JS/TS/CSS; lockfile уходят моделям (источники
+  пакетов в npm/yarn/pnpm lockfile ещё и проверяются детерминированно, добавочно), прочий
+  класс skip (lockfile, `dist/`, `*.generated.*`, `*.lock`) решает лишь маршрут;
 - `layout.reviewSkip` профиля — **только при `REVIEW_PROFILE_TRUSTED=1` и `REVIEW_BASE_REF`**,
   без них он игнорируется (строка в логе).
 
