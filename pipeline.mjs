@@ -397,6 +397,17 @@ async function runVerifierStage(allFindings, {
   }
   applied.stats.bySource = bySource;
   obs.logEvent('verifier', applied.stats);
+  // RFC 21: по blast-находкам — что именно судил verifier и почему. Материал замера: без
+  // строки и причины «rejected» нельзя отличить честный отказ от окна мимо вызова.
+  const blastSent = sent.filter((f) => f.source === BLAST_FINDING_SOURCE);
+  if (blastSent.length) {
+    obs.logEvent('verifier_blast_verdicts', {
+      verdicts: blastSent.map((f) => ({
+        file: f.file, line: f.line, graphLine: f.blastGraphLine ?? null, symbol: f.blastSymbol || null,
+        status: f.verifierStatus || 'none', reason: String(f.verifierReason || '').slice(0, 300),
+      })),
+    });
+  }
   logFindingsStage(obs, 'after_verifier', applied.findings);
   return { findings: applied.findings, stats: applied.stats, unavailable: tailUnavailable };
 }
@@ -642,7 +653,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       }
       // Freshness измеряем даже если diff не содержит экспортов: иначе `graph_fresh`
       // был бы неизвестен именно в тех review-plans, где blast-radius пустой.
-      const blastResult = await graphify.buildBlastRadius(symbols);
+      const blastResult = await graphify.buildBlastRadius(symbols, { changedPaths });
       const { blocks: blastBlocks, metrics: blastMetrics, graphIndex } = normalizeBlastRadius(blastResult, symbols);
       log(`prep parallel: ${Date.now() - prepT0}мс (graphify+files+prior+prescan)`);
       // REVIEW_BLAST_REQUIRED: без code graph гейт не видит callers вне диффа → fail-closed
