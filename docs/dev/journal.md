@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-10-15
+last_updated: 2026-10-21
 audience: [next-session-agent, maintainers]
 ---
 
@@ -12,6 +12,17 @@ audience: [next-session-agent, maintainers]
 
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
+
+## 2026-10-21 — 0.6.4
+
+**Сделано:** релиз `v0.6.4`. Новое поле профиля `layout.reviewSkip`. Lockfile/generated и пути
+из него больше не уходят в LLM-чанки PR с кодом. Причина — Orakul: куски 26k-строчного OpenAPI
+YAML жюри читало с отступами через границу чанка и каждый прогон поднимало блокирующий major.
+- Фильтр стоит в pipeline между инкрементальным планом и `buildChunks`. Prescan, blast-radius
+  и карта PR skip-пути видят: изменение минимальное, и absence-claims о них по-прежнему
+  запрещены картой.
+- Регекс профиля компилирует JS. В Rust-роутер уходит готовый список `skipPaths`, поэтому
+  второго диалекта регексов нет.
 
 ## 2026-10-16 — 0.6.3
 
