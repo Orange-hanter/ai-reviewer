@@ -102,5 +102,5 @@ export {
   applyStructureWaivers, triageStructureFindings,
 } from './lib/structure-drift.mjs';
 export { decideAutoTriage, buildTriageContext, runAutoTriage, findingLocationKey as triageLocationKey } from './lib/triage.mjs';
-export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog, collectReviewSkipped, formatReviewSkippedNote, isCodePath, reviewSkipProtection } from './lib/router.mjs';
+export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog, collectReviewSkipped, formatReviewSkippedNote, isCodePath, reviewSkipProtection, isInertPath, collectProfileProtected } from './lib/router.mjs';
 export { createReviewPipeline, runGateResolution, runReview, PipelineSoftFail } from './pipeline.mjs';

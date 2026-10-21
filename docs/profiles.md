@@ -115,16 +115,34 @@ TS/JS в корне репозитория, блок правил проекта
 ## `layout.reviewSkip` и доверие
 
 В потребителе профиль приходит из checkout'а PR, то есть его пишет автор PR. Поэтому
-`reviewSkip` (и встроенный skip-класс по имени файла) **никогда** не исключает из входа
-моделей:
+`reviewSkip` и встроенный skip-класс работают по **allowlist**: из входа моделей можно убрать
+только инертный файл.
 
-| Путь | Почему |
-|------|--------|
-| исходник по расширению (`ts`/`tsx`/`js`/`mjs`/`cjs`/`py`/`rs`/`go`/… — регексы `LOGIC`/`CODE` роутера) | там живёт поведение; `x.generated.ts` и `dist/foo.js` тоже |
-| всё под `.github/` | workflows, actions, CODEOWNERS |
-| пин движка `ai-reviewer-ref` (в любом каталоге) | им выбирается версия гейта |
-| сам профиль: файл `REVIEW_PROFILE` / найденный автопоиском, `.ai-reviewer.json`, `ai-reviewer.config.json` | иначе профиль прятал бы собственную правку |
-| пути, совпавшие с `layout.sensitive` | объявленная зона повышенной цены ошибки |
+| Инертно (skip допустим) | Пример |
+|-------------------------|--------|
+| lockfile | `package-lock.json`, `pnpm-lock.yaml`, `Cargo.lock`, `*.lock` |
+| source map | `*.map`, `*.min.js.map` |
+| текст документации | `*.md`, `*.mdx`, `*.rst`, `*.txt` |
+| данные `json`/`yaml`/`yml` | `openapi.json`, `orakul-api.yaml`, `i18n/ru.json` |
+
+Данные не считаются инертными, если это конфиг сборки, CI или инструментов. По имени файла:
+`package.json`, `tsconfig*.json`, `jsconfig*.json`, `*.config.json`, `.eslintrc*`,
+`.prettierrc*`, `docker-compose*.yml`, `compose*.yml`, `openapitools.json`, `renovate.json`,
+`vercel.json`, `netlify.json`/`.yml`, `.gitlab-ci.yml`, `azure-pipelines.yml`,
+`bitbucket-pipelines.yml`, `action.yml`, `Chart.yaml`, `values*.yaml`. По каталогу: `.github/`,
+`.circleci/`, `.husky/`, `k8s/`, `helm/`, `charts/`. Всё прочее (shell, SQL, `Dockerfile`,
+`Makefile`, `.tf`, `.toml`, `.env*`, `ini`, код) не исключается никогда, что бы ни говорил
+паттерн. Причина в логе — `not-inert`.
+
+Сверх allowlist инертный файл тоже не исключается, если это:
+
+| Путь | Причина | Почему |
+|------|---------|--------|
+| исходник по расширению (`ts`/`tsx`/`js`/`mjs`/`cjs`/`py`/`rs`/`go`/… — регексы `LOGIC`/`CODE` роутера) | `code` | там живёт поведение; `x.generated.ts` и `dist/foo.js` тоже |
+| всё под `.github/` | `.github` | workflows, actions, CODEOWNERS |
+| пин движка `ai-reviewer-ref` (в любом каталоге) | `engine-pin` | им выбирается версия гейта |
+| всё, что читает активный профиль, путём от корня репозитория: файл профиля (`REVIEW_PROFILE` / автопоиск), `.ai-reviewer.json`, `ai-reviewer.config.json`, `repoRulesFile` (от каталога профиля), `AGENTS.md`/`agents.md` рядом с профилем и в корне, `paths.fpPatterns`, `paths.fpMarkdown`, `paths.feedbackLog`, `paths.astgrepConfig` и весь его каталог (ruleDirs читает сам ast-grep). Учитываются и значения из env (`REVIEW_FP_PATTERNS`, `REVIEW_ASTGREP_CONFIG`…) | `profile` | иначе профиль прятал бы собственную правку и правку своих правил |
+| пути, совпавшие с `layout.sensitive` | `sensitive` | объявленная зона повышенной цены ошибки |
 
 Совпадение с защищённым путём просто не применяется: файл ревьюится как обычно, его прошлые
 находки переносятся как обычно. В логе CI — строка `skip-пути: N совпадений проигнорировано`

@@ -7,7 +7,7 @@ import { runEvalHarness, runFixtureCase, loadFixtures } from '../lib/eval.mjs';
 import { clusterFindings, normalizeConfidence, resolveBlockers, createFindingsFormatter } from '../lib/findings.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from '../lib/verifier.mjs';
 import { loadReviewConfig } from '../lib/config.mjs';
-import { routeDiff, isRenameOnlySection, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath, reviewSkipProtection } from '../lib/router.mjs';
+import { routeDiff, isRenameOnlySection, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath, reviewSkipProtection, isInertPath, collectProfileProtected } from '../lib/router.mjs';
 import { applyRefutation, decideRefutation, parseSpecialistAssignments, mergeSpecialistReferences } from '../lib/specialists.mjs';
 import {
   eslintJsonToFindings, dedupeAgainstPrescan, selectLintablePaths, selectLintableEntries,
@@ -845,6 +845,52 @@ test('reviewSkip из профиля PR не прячет код, .github, пи�
   assert.deepEqual(collectReviewSkipped(['.github/workflows/build/x.yml']).ignored.map((x) => x.by), ['builtIn']);
   assert.equal(isCodePath('src/x.generated.ts'), true);
   assert.equal(isCodePath('package-lock.json'), false);
+});
+
+test('isInertPath: allowlist того, что skip вправе убрать из входа LLM', () => {
+  const inert = [
+    // четыре сгенерированных пути Orakul обязаны оставаться пропускаемыми
+    'docs/08-technical/openapi/orakul-api.yaml', 'app/server/apiDocs/openapi.json',
+    'app/server/apiDocs/openapi.platform.json', 'docs/dev/reference/api-endpoints-index.md',
+    'package-lock.json', 'pnpm-lock.yaml', 'Cargo.lock', 'app/yarn.lock', 'dist/app.js.map', 'x.min.js.map',
+    'README.rst', 'notes.txt', 'docs/a.mdx', 'data/fixtures.yml', 'i18n/ru.json',
+  ];
+  const notInert = [
+    'package.json', 'app/package.json', 'tsconfig.json', 'tsconfig.build.json', 'jsconfig.json',
+    'jest.config.json', '.eslintrc.json', '.eslintrc.yml', '.prettierrc.yaml', 'docker-compose.yml',
+    'docker-compose.override.yaml', 'compose.prod.yml', 'openapitools.json', 'renovate.json', 'vercel.json',
+    '.gitlab-ci.yml', 'azure-pipelines.yml', 'bitbucket-pipelines.yml', 'action.yml', 'tools/x/action.yaml',
+    '.github/data.json', '.circleci/config.yml', '.husky/x.json', 'k8s/deploy.yaml', 'deploy/helm/x.yaml',
+    'charts/app/Chart.yaml', 'values.yaml', 'values-prod.yaml',
+    'scripts/deploy.sh', 'db/migrate.sql', 'Dockerfile', 'Makefile', 'infra/main.tf', 'Cargo.toml',
+    'netlify.toml', '.env', '.env.example', 'setup.cfg', 'x.ini', 'src/a.ts', 'dist/foo.js', 'x.jsonl',
+  ];
+  for (const p of inert) assert.equal(isInertPath(p), true, p);
+  for (const p of notInert) assert.equal(isInertPath(p), false, p);
+  for (const p of notInert) assert.ok(reviewSkipProtection(p), `${p} защищён`);
+  assert.equal(reviewSkipProtection('Dockerfile'), 'not-inert');
+  assert.equal(reviewSkipProtection('docs/08-technical/openapi/orakul-api.yaml'), null);
+});
+
+test('collectProfileProtected: файлы, которые читает профиль, — от корня репозитория', () => {
+  const cwd = '/repo';
+  const prot = collectProfileProtected({
+    profile: {
+      source: '/repo/ops/ai-review/profile.json', baseDir: '/repo/ops/ai-review', repoRulesFile: '/repo/ops/ai-review/repo-rules.md',
+      paths: { fpPatterns: 'ops/ai-review/fp.jsonl', fpMarkdown: 'docs/fp.md', feedbackLog: 'ops/ai-review/log.jsonl', astgrepConfig: 'ops/sg/sgconfig.yml' },
+    },
+    feedback: { patternsFile: 'env/fp.jsonl', mdPath: 'docs/fp.md', logFile: '/elsewhere/log.jsonl' },
+    prescan: { astgrep: { configPath: '' } },
+  }, { cwd });
+  for (const p of ['ops/ai-review/profile.json', 'ops/ai-review/repo-rules.md', 'ops/ai-review/AGENTS.md', 'AGENTS.md', 'agents.md',
+    '.ai-reviewer.json', 'ai-reviewer.config.json', 'ops/ai-review/fp.jsonl', 'docs/fp.md', 'ops/ai-review/log.jsonl',
+    'env/fp.jsonl', 'ops/sg/sgconfig.yml']) {
+    assert.ok(prot.paths.has(p), p);
+  }
+  assert.ok(![...prot.paths].some((p) => p.startsWith('..') || p.startsWith('/')), 'пути вне репозитория пропущены');
+  assert.deepEqual(prot.prefixes, ['ops/sg/'], 'каталог правил ast-grep');
+  assert.equal(reviewSkipProtection('ops/sg/rules/x.yml', { protectedPaths: prot }), 'profile');
+  assert.equal(reviewSkipProtection('docs/fp.md', { protectedPaths: prot }), 'profile');
 });
 
 test('splitDiffByParsedPath: ключ секции — путь parseDiff, текст собирается байт в байт', () => {

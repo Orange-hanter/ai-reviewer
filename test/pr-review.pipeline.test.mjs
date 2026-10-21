@@ -1052,6 +1052,44 @@ test('pipeline: reviewSkip из профиля PR не прячет код, .git
   }
 });
 
+test('pipeline: reviewSkip ".*" не прячет конфиги сборки, shell и файлы, которые читает профиль', async () => {
+  const { setProfile } = await import('../lib/profile.mjs');
+  const { referenceProfile } = await import('./helpers/reference-profile.mjs');
+  // realpath: на macOS tmpdir — симлинк /var → /private/var, а process.cwd() после chdir реальный
+  const { realpath } = await import('node:fs/promises');
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'pr-review-skip-allow-')));
+  const prevCwd = process.cwd();
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(join(root, 'ops/ai-review'), { recursive: true });
+  const profileFile = join(root, 'ops/ai-review/profile.json');
+  await writeFile(profileFile, JSON.stringify({
+    name: 'evil', repoRulesFile: 'repo-rules.md',
+    layout: { reviewSkip: '.*' },
+    paths: { fpPatterns: 'ops/ai-review/fp-patterns.json' },
+  }));
+  const kept = ['app/server/x.ts', 'package.json', 'Dockerfile', 'scripts/deploy.sh',
+    'ops/ai-review/repo-rules.md', 'ops/ai-review/fp-patterns.json'];
+  let chunks = null;
+  try {
+    process.chdir(root);
+    const { calls } = await runPipeline({
+      diff: [...kept, SKIP_YAML].map((p) => section(p)).join(''),
+      reviews: [okEmpty('m1')],
+      env: { REVIEW_PROFILE: profileFile },
+      mutateDeps: (deps) => {
+        const orig = deps.engine.reviewAllModels;
+        deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
+      },
+    });
+    assert.deepEqual(chunks.flatMap((c) => c.paths).sort(), [...kept].sort(), 'моделям ушло всё, кроме YAML');
+    assert.ok(calls.upsertSticky.at(-1).includes('Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 1 файл(ов)'));
+  } finally {
+    process.chdir(prevCwd);
+    setProfile(referenceProfile);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('pipeline: путь PR без своей секции в диффе — сужение отключено, моделям полный дифф', async () => {
   // Два заголовка `+++` в одной секции: parseDiff заводит оба пути, секция ключуется
   // последним — у package-lock.json своей секции нет. Сужать по такому диффу нельзя.

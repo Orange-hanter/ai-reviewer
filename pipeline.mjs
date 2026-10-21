@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { relative, isAbsolute } from 'node:path';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
 import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths, collectDeletedPaths, splitDiffByParsedPath } from './lib/diff.mjs';
@@ -22,8 +21,7 @@ import {
 } from './lib/symbol-cards.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
 import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
-import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath } from './lib/router.mjs';
-import { PROFILE_FILENAMES } from './lib/profile.mjs';
+import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath, collectProfileProtected } from './lib/router.mjs';
 import { createObservability, slimFindings, countBySeverity, PR_TITLE_LOG_MAX } from './lib/observability.mjs';
 import { buildSummary, buildRouterSummary, buildLlmUnavailableSummary } from './lib/report.mjs';
 import { buildReviewJson, writeReviewExports } from './lib/export.mjs';
@@ -90,21 +88,6 @@ function logActionabilityDistribution(obs, { findings, inlineCount, outside, thr
     histogram,
     topOutsideReasons,
   });
-}
-
-/**
- * Пути профиля прогона в дереве репозитория — их reviewSkip исключить не может: профиль из
- * checkout'а PR иначе прятал бы от моделей собственную правку. Файл профиля (REVIEW_PROFILE
- * или найденный автопоиском, относительно рабочего каталога) и имена автопоиска в корне.
- */
-function profileProtectedPaths(profile, cwd = process.cwd()) {
-  const out = new Set(PROFILE_FILENAMES);
-  const src = String(profile?.source || '');
-  if (src && isAbsolute(src)) {
-    const rel = relative(cwd, src).split('\\').join('/');
-    if (rel && !rel.startsWith('..')) out.add(rel);
-  }
-  return out;
 }
 
 /** Sticky при `REVIEW_BLAST_REQUIRED=1` и непосчитанном blast-radius (LLM не вызывался). */
@@ -549,7 +532,7 @@ export function createReviewPipeline(cfg, deps = {}) {
         reviewSkip: cfg.profile?.layout?.reviewSkip || null,
         fileClass,
         isCode,
-        protectedPaths: profileProtectedPaths(cfg.profile),
+        protectedPaths: collectProfileProtected(cfg),
         sensitive: cfg.profile?.layout?.sensitive || null,
       });
       if (reviewSkipped.ignored.length) {
