@@ -1,0 +1,33 @@
+{
+  "findings": [
+    {
+      "file": "api/config.ts",
+      "line": 4,
+      "severity": "major",
+      "confidence": 0.9,
+      "title": "Код вне PR зависит от `parseLimits` — проверьте совместимость",
+      "body": "Этот файл не изменён в PR, но вызывает `parseLimits` в `loadConfig()`, а `parseLimits` затронут изменениями (Graphify blast-radius: другой слой приложения).",
+      "model": "blast-radius",
+      "source": "blast-radius",
+      "prescan": false,
+      "blastCaller": true,
+      "blastSymbol": "parseLimits",
+      "blastEdgeConfidence": "EXTRACTED"
+    },
+    {
+      "file": "lib/limits.ts",
+      "line": 2,
+      "severity": "minor",
+      "confidence": 0.7,
+      "title": "strict по умолчанию false меняет поведение по умолчанию",
+      "body": "Раньше strict передавался явно.",
+      "model": "m1",
+      "advisorClaims": [
+        {
+          "role": "correctness",
+          "status": "verified"
+        }
+      ]
+    }
+  ]
+}

@@ -22,7 +22,7 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::findings::{js_to_string, js_truthy};
+use crate::findings::{js_to_string, js_truthy, BLAST_FINDING_SOURCE};
 
 /// lib/verifier.mjs SEV_ORDER (прочее/отсутствующее → 9).
 fn sev_order(sev: Option<&Value>) -> i32 {
@@ -55,7 +55,13 @@ pub fn select_verifier_candidates(
     let mut blockers: Vec<usize> = (0..findings.len())
         .filter(|i| in_tiers(&findings[*i]) && !js_truthy(findings[*i].get("prescan").unwrap_or(&Value::Null)))
         .collect();
-    blockers.sort_by_key(|i| sev_order(findings[*i].get("severity")));
+    // RFC 21: внутри одного уровня severity blast-находки после LLM-находок — при капе
+    // предположение графа не вытесняет то, что уже согласовало жюри. Сортировка
+    // устойчивая: порядок внутри группы прежний. Rust-owned: JS-копия сортирует по severity.
+    let is_blast = |i: &usize| {
+        findings[*i].get("source").and_then(Value::as_str) == Some(BLAST_FINDING_SOURCE)
+    };
+    blockers.sort_by_key(|i| (sev_order(findings[*i].get("severity")), is_blast(i)));
     blockers.truncate(max);
 
     if advisory_max == 0 || advisory_candidates.is_empty() {
@@ -240,6 +246,18 @@ mod tests {
         // кап
         let idx = select_verifier_candidates(&f, &[json!("critical"), json!("major")], 1, &[], 0);
         assert_eq!(idx, vec![2]);
+    }
+
+    #[test]
+    fn select_blast_after_llm_of_same_severity() {
+        let f = vec![
+            json!({"file": "b.ts", "line": 1, "severity": "major", "title": "blast", "source": "blast-radius"}),
+            json!({"file": "a.ts", "line": 2, "severity": "major", "title": "llm-major"}),
+            json!({"file": "a.ts", "line": 3, "severity": "critical", "title": "llm-critical"}),
+        ];
+        let tiers = [json!("critical"), json!("major")];
+        assert_eq!(select_verifier_candidates(&f, &tiers, 12, &[], 0), vec![2, 1, 0]);
+        assert_eq!(select_verifier_candidates(&f, &tiers, 2, &[], 0), vec![2, 1], "blast вытеснен капом первым");
     }
 
     #[test]

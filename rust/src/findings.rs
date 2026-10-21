@@ -348,6 +348,9 @@ pub struct Gate {
     pub consensus_min: Option<f64>,
     pub confidence_min: f64,
     pub strict: bool,
+    /// RFC 21, `REVIEW_BLAST_VERIFY=shadow`: blast-находка, которая заблокировала бы,
+    /// не блокирует, а помечается wouldBlockBlast.
+    pub blast_shadow: bool,
 }
 
 impl Gate {
@@ -365,6 +368,7 @@ impl Gate {
             consensus_min: num("consensusMin"),
             confidence_min: num("confidenceMin").unwrap_or(0.8),
             strict: v.get("strict").and_then(Value::as_bool).unwrap_or(false),
+            blast_shadow: v.get("blastVerify").and_then(Value::as_str) == Some("shadow"),
         }
     }
 
@@ -385,6 +389,8 @@ impl Gate {
 
 /// Blast soft-gate policy: чистый blast-кластер блокирует только после verifier.
 /// null соответствует JS null (fail-open / не blast-кластер).
+/// Shadow-режим RFC 21 (`gate.blast_shadow`) применяется в cluster_findings: там решение —
+/// свойство находки (RFC 17), а этот хелпер гейта не видит.
 pub fn soft_consensus_for_blast_cluster(block_tier: &[Value]) -> Option<bool> {
     if block_tier.is_empty() {
         return None;
@@ -411,6 +417,10 @@ pub struct FindingMutation {
     pub cluster_models: Vec<Value>,
     pub confidence_block: bool,
     pub consensus_block: bool,
+    /// RFC 21: blast-находка заблокировала бы, но гейт в shadow. Поле только при true —
+    /// прежние входы дают прежний JSON.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub would_block_blast: bool,
 }
 
 #[derive(Debug)]
@@ -476,14 +486,18 @@ pub fn cluster_findings(findings: &[Value], gate: &Gate) -> ClusterOutcome {
             let tier_block = in_block_on && (gate.in_block_single(sev) || consensus_tier);
             let confidence_block = !in_block_on || confidence >= gate.confidence_min;
             let verified = f.get("verifierStatus").and_then(Value::as_str) == Some("verified");
+            let is_blast = f.get("source").and_then(Value::as_str) == Some(BLAST_FINDING_SOURCE);
             let mut consensus_block = tier_block && confidence_block;
             if consensus_block && gate.strict {
                 consensus_block = js_truthy(f.get("prescan").unwrap_or(&Value::Null)) || verified;
-            } else if consensus_block
-                && f.get("source").and_then(Value::as_str) == Some(BLAST_FINDING_SOURCE)
-            {
+            } else if consensus_block && is_blast {
                 // blast-radius — soft: без подтверждения verifier'а не блокирует
                 consensus_block = verified;
+            }
+            // RFC 21, shadow: решение посчитано, но гейт его не исполняет.
+            let would_block_blast = consensus_block && is_blast && gate.blast_shadow;
+            if would_block_blast {
+                consensus_block = false;
             }
             mutations.push(FindingMutation {
                 index: i,
@@ -492,6 +506,7 @@ pub fn cluster_findings(findings: &[Value], gate: &Gate) -> ClusterOutcome {
                 cluster_models: models.clone(),
                 confidence_block,
                 consensus_block,
+                would_block_blast,
             });
         }
         cluster_lists.push(group.clone());
@@ -825,6 +840,38 @@ mod tests {
         let out = cluster_findings(&findings, &gate());
         assert!(!out.mutations[0].consensus_block, "blast без verified не блокирует и рядом с LLM");
         assert!(out.mutations[1].consensus_block, "LLM-находка — обычный гейт");
+    }
+
+    /// RFC 21, REVIEW_BLAST_VERIFY=shadow: verified blast-находка не блокирует, а помечается;
+    /// LLM-находка в том же режиме — обычный гейт.
+    #[test]
+    fn cluster_blast_shadow_marks_instead_of_blocking() {
+        let mut v = serde_json::to_value(json!({
+            "blockOn": ["critical", "major"], "blockSingle": ["critical"],
+            "consensusMin": 1.0, "confidenceMin": 0.8, "blastVerify": "shadow",
+        })).unwrap();
+        let shadow = Gate::from_value(&v);
+        let blast = |status: &str| json!({
+            "file": "a.ts", "line": 1, "severity": "major", "confidence": 0.9,
+            "model": "blast-radius", "source": BLAST_FINDING_SOURCE, "verifierStatus": status,
+        });
+        let out = cluster_findings(&[blast("verified")], &shadow);
+        assert!(!out.mutations[0].consensus_block, "shadow — не блок");
+        assert!(out.mutations[0].would_block_blast, "но помечена как заблокировавшая бы");
+
+        let out = cluster_findings(&[blast("unverified")], &shadow);
+        assert!(!out.mutations[0].would_block_blast, "без verified и при 1 не блокировала бы");
+
+        let llm = json!({"file": "b.ts", "line": 1, "severity": "major", "confidence": 0.9, "model": "llm"});
+        let out = cluster_findings(&[llm], &shadow);
+        assert!(out.mutations[0].consensus_block, "shadow касается только blast");
+
+        v["blastVerify"] = json!("1");
+        let on = Gate::from_value(&v);
+        let out = cluster_findings(&[blast("verified")], &on);
+        assert!(out.mutations[0].consensus_block && !out.mutations[0].would_block_blast);
+        let json = serde_json::to_value(&out.mutations[0]).unwrap();
+        assert!(json.get("wouldBlockBlast").is_none(), "поле только при true — прежний JSON");
     }
 
     #[test]

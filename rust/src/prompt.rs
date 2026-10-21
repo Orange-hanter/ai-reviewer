@@ -20,7 +20,7 @@
 use anyhow::{bail, Result};
 use serde_json::{json, Map, Value};
 
-use crate::findings::{js_to_string, js_truthy};
+use crate::findings::{js_to_string, js_truthy, BLAST_FINDING_SOURCE};
 
 /// Части активного профиля, нужные билдерам (сериализует JS-обёртка).
 pub struct PromptCtx {
@@ -709,6 +709,27 @@ the change is clearly compatible. Do not invent callers that are absent from the
 the shown code.
 </blast_radius_rule>"#;
 
+/// RFC 21: правило для кандидатов, которых выдал сам blast-radius (`source: blast-radius`).
+/// Ребро графа — посылка такого кандидата, а не улика; verified — только с обеими строками.
+/// Едет, только если такой кандидат есть. Ведущий `\n\n` — часть раздела.
+const VERIFIER_BLAST_CANDIDATE_RULE: &str = r#"
+
+<blast_candidate_rule>
+Candidates marked [blast-radius] come from the dependency graph, not from a reviewer: each states
+that code outside the PR depends on a symbol the PR changes. That dependency is the premise of the
+candidate, not evidence of a defect, and <blast_radius_rule> does not apply to these candidates. The
+context includes a window of the caller's file around the candidate line.
+- verified — only when the shown code proves both facts: the diff changes the contract of the symbol
+  (signature, parameter order or types, return value, thrown errors, or behaviour the call relies
+  on), and the shown caller line uses the symbol in a way the new contract breaks. Name both lines
+  in reason: where the contract changed and where the call breaks it.
+- rejected — the contract did not change (a body change that keeps behaviour for callers), the change
+  is backward compatible (a new optional parameter, a default value, an overload), or the shown call
+  is compatible with the new contract.
+- downgrade to minor — the contract changed, but the incompatibility cannot be proven from the shown
+  code (the call goes through a wrapper or passes a dynamic value).
+</blast_candidate_rule>"#;
+
 const VERIFIER_HEAD: &str = r#"You are the verifier: the second, independent pass of a code review. You receive candidate findings
 from the first pass. Your verdict decides whether a critical or major finding blocks the merge, so
 judge each candidate by the evidence in front of you, not by how confident its wording sounds."#;
@@ -747,7 +768,7 @@ One verdict per candidate index. severity only when decision is downgrade. Write
 the readers are Russian-speaking developers.
 </output_format>"#;
 
-fn verifier_system(ctx: &PromptCtx, with_blast: bool) -> String {
+fn verifier_system(ctx: &PromptCtx, with_blast: bool, with_blast_candidates: bool) -> String {
     let mut s = String::from(VERIFIER_HEAD);
     s.push_str("\n\n");
     s.push_str(VERIFIER_DECISION);
@@ -757,6 +778,9 @@ fn verifier_system(ctx: &PromptCtx, with_blast: bool) -> String {
     }
     if with_blast {
         s.push_str(VERIFIER_BLAST_RULE);
+    }
+    if with_blast_candidates {
+        s.push_str(VERIFIER_BLAST_CANDIDATE_RULE);
     }
     s.push_str("\n\n");
     s.push_str(UNTRUSTED_INPUT);
@@ -768,9 +792,10 @@ fn verifier_system(ctx: &PromptCtx, with_blast: bool) -> String {
 /// buildVerifierMessages — промпт Pass B: докажи по коду или reject/downgrade.
 pub fn build_verifier_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Value>> {
     let blast_blocks = arr_arg(args, "blastBlocks");
-    let system = verifier_system(ctx, !blast_blocks.is_empty());
-
     let candidates = arr_arg(args, "candidates");
+    let is_blast = |f: &Value| f.get("source").and_then(Value::as_str) == Some(BLAST_FINDING_SOURCE);
+    let system = verifier_system(ctx, !blast_blocks.is_empty(), candidates.iter().any(is_blast));
+
     let list: String = candidates
         .iter()
         .enumerate()
@@ -783,8 +808,10 @@ pub fn build_verifier_messages(args: &Value, ctx: &PromptCtx) -> Result<Vec<Valu
                 Some(c) if !matches!(c, Value::Null) => js_to_string(c),
                 _ => "—".to_string(),
             };
+            // RFC 21: пометка, по которой verifier применяет <blast_candidate_rule>.
+            let mark = if is_blast(f) { " [blast-radius]" } else { "" };
             format!(
-                "{}. [{}] {}{line} — **{}** ({}, conf={})\n   {}",
+                "{}. [{}]{mark} {}{line} — **{}** ({}, conf={})\n   {}",
                 i,
                 js_to_string(f.get("severity").unwrap_or(&Value::Null)),
                 js_to_string(f.get("file").unwrap_or(&Value::Null)),
@@ -1208,6 +1235,30 @@ mod tests {
         let full = mk(json!(["`foo` @ a.ts:1 [calls][EXTRACTED]"]));
         assert!(full.contains("</decision>\n\n<blast_radius_rule>\nWhen a candidate claims a breaking change"));
         assert!(full.contains("</blast_radius_rule>\n\n<untrusted_input>"));
+        assert!(!full.contains("<blast_candidate_rule>"), "без blast-кандидата правила нет");
+    }
+
+    /// RFC 21: blast-кандидат помечен в списке, и только с ним едет <blast_candidate_rule>.
+    #[test]
+    fn verifier_blast_candidate_rule_is_conditional() {
+        let c = ctx();
+        let args = json!({
+            "candidates": [
+                {"severity": "major", "file": "a.ts", "line": 1, "title": "llm", "body": ""},
+                {"severity": "major", "file": "b.ts", "line": 7, "title": "caller", "body": "",
+                 "source": "blast-radius", "model": "blast-radius"},
+            ],
+            "annotated": "", "fileContents": "", "blastBlocks": ["`foo` @ b.ts:7 [calls][EXTRACTED]"],
+            "pr": {"number": 1, "title": "t"},
+        });
+        let msgs = build_verifier_messages(&args, &c).unwrap();
+        let system = msgs[0]["content"].as_str().unwrap();
+        let user = msgs[1]["content"].as_str().unwrap();
+        assert!(system.contains("</blast_radius_rule>\n\n<blast_candidate_rule>\nCandidates marked [blast-radius]"));
+        assert!(system.contains("<blast_radius_rule> does not apply to these candidates"));
+        assert!(system.contains("</blast_candidate_rule>\n\n<untrusted_input>"));
+        assert!(user.contains("1. [major] [blast-radius] b.ts:7 — **caller**"));
+        assert!(user.contains("0. [major] a.ts:1 — **llm**"), "LLM-кандидат без пометки");
     }
 
     #[test]

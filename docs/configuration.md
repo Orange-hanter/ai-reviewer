@@ -209,6 +209,8 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_GRAPHIFY_DEPTH` | `2` | `--depth` для `graphify affected` (clamp 1…5) |
 | `REVIEW_GRAPHIFY_DROP_AMBIGUOUS` | `1` | `0`/`false`/`no`/`off` — оставлять AMBIGUOUS-рёбра в blast |
 | `REVIEW_BLAST_REQUIRED` | `0` | `1` — blast-radius не посчитан (нет/не читается `graph.json`, все запросы `affected` упали) → exit 1 до LLM, sticky с причиной (fail-closed). Шаблон `examples/ci/pr-review.yml` ставит `1` |
+| `REVIEW_BLAST_VERIFY` | `0` | Проверка blast-находок verifier'ом ([RFC 21](../proposals/21-blast-verification.md)): `0` — прежнее поведение (в `moa` strict-refutation понижает blast-находку до minor, merge она не блокирует); `shadow` — refutation её не понижает, verifier судит её с окном файла вызывающего кода, но гейт не блокирует: событие `blast_would_block`; `1` — блокирует после `verified`. `1`/`true`/`on`, `0`/`false`/`off` — как у прочих флагов, иное значение → `0` |
+| `REVIEW_BLAST_VERIFY_MARGIN` | `20` | ±строк вокруг строки вызова в файле вне PR, которое verifier получает для blast-кандидата. Файл читается с той же защитой, что файлы PR (symlink наружу, бинарь — отказ); не прочитан → находка `minor`, `verifierStatus: unverified`, verifier её не получает |
 
 Нет графа → blast-radius пустой, ревью продолжается (при `REVIEW_BLAST_REQUIRED=1` — блок).
 Устаревший граф (`graph_stale`), неразрешённые символы и «зависимых нет» сбоем не считаются.
@@ -310,11 +312,11 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_PRICE_JSON` | — | Цены моделей `{"<model>":{"in":$/1M,"out":$/1M}}`; ключ `*` или `default` — для остальных моделей. Задан → в `efficiencyMetrics` события `run_end` появляется `cost_usd`; битый JSON ≡ не задано |
 | `REVIEW_REASONING_STICKY` | `1` | Секция reasoning в sticky |
 
-### Поля артефакта (`version: 2`)
+### Поля артефакта (`version: 3`)
 
 Артефакт `<toolName>.json` — машинный вывод прогона для внешнего потребителя
 (cod-doc ingest, оркестратор swarm); собирается в [`lib/export.mjs`](../lib/export.mjs),
-`EXPORT_VERSION = 2`. Необязательные поля (`router`, `verdict`, `llmFailed`, `fp`, `prescan`…) без значения
+`EXPORT_VERSION = 3`. Необязательные поля (`router`, `verdict`, `llmFailed`, `fp`, `prescan`…) без значения
 в JSON отсутствуют, а не пустые.
 
 Верхний уровень:
@@ -332,7 +334,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `counts`, `total` | Число находок по severity и всего |
 | `findings`, `blockers` | Находки, формат ниже |
 | `reasoning` | Выдержки рассуждений advisors |
-| `verifier`, `refutation` | Статистика Pass B и refutation |
+| `verifier`, `refutation` | Статистика Pass B и refutation; `verifier.bySource` — вердикты отдельно по `blast-radius` и `llm` (RFC 21), `refutation.skippedBlast` — blast-находки, которые refutation пропустил |
 | `blast` | `{symbols_total, symbols_resolved, affected_nonempty, graph_status, skip_reason, affected_files, confidence, cross_community}` |
 | `swarm` | Контракт для оркестратора — [swarm.md](swarm.md) |
 | `prescan` | `{findings, scanned, skipped, byTool, error}` |
@@ -347,6 +349,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `verifierStatus` | `verified` / `rejected` / `downgraded` / `unverified` / `overflow` — вердикт Pass B |
 | `actionabilityScore` | Сумма весов сигналов доказуемости; есть у **каждой** находки |
 | `actionabilityPromoted` | Advisory, поднятая в строку по доказуемости (не блокер) |
+| `wouldBlockBlast` | v3: blast-находка, которую гейт заблокировал бы, но `REVIEW_BLAST_VERIFY=shadow` (RFC 21); то же — событие `blast_would_block` в JSONL observability |
 | `prescan`, `consensusBlock`, `refutationStatus`, `advisorClaims` | Откуда находка и что с ней сделали жюри и линтеры; элемент `advisorClaims` — `{role, status, reason}` (`reason` ≤ 200) |
 
 Версия артефакта растёт и на аддитивных изменениях, поэтому потребитель обязан сверять её

@@ -1,0 +1,9 @@
+{
+  "verdicts": [
+    {
+      "candidateIndex": 0,
+      "decision": "verified",
+      "reason": "Сигнатура parseLimits в lib/limits.ts:1 стала объектом опций, а api/config.ts:4 передаёт строку и boolean."
+    }
+  ]
+}
