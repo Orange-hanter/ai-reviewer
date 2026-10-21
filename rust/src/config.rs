@@ -886,7 +886,13 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "symbolCards": env_flag(env, "REVIEW_VERIFIER_SYMBOL_CARDS", false),
         }),
     );
-    out.insert("router".into(), json!({ "enabled": router_enabled }));
+    // REVIEW_PROFILE_TRUSTED=1: профиль взят из base-ветки, а не из checkout'а PR —
+    // только тогда layout.reviewSkip применяется (lib/router.mjs#collectReviewSkipped).
+    let profile_trusted = env_flag(env, "REVIEW_PROFILE_TRUSTED", false);
+    out.insert(
+        "router".into(),
+        json!({ "enabled": router_enabled, "profileTrusted": profile_trusted }),
+    );
     out.insert(
         "specialists".into(),
         json!({

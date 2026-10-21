@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { writeFile, readFile, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { defaultRustBin } from '../lib/rust-bin.mjs';
 
@@ -1120,6 +1121,30 @@ const SKIP_ONLY_DIFF = `diff --git a/${SKIP_YAML} b/${SKIP_YAML}
 +  /x: {}
 ${LOCK_DIFF}`;
 
+// reviewSkip применяется только к профилю из base-ветки (REVIEW_PROFILE_TRUSTED=1).
+// sgconfig reference-профиля (ops/pr-review/…) в этом репозитории нет — без override защита
+// уходит в fail-closed и прячет от skip любой YAML. Даём существующий конфиг пакета.
+const TRUSTED = {
+  REVIEW_PROFILE_TRUSTED: '1',
+  REVIEW_ASTGREP_CONFIG: fileURLToPath(new URL('../ast-grep/sgconfig.yml', import.meta.url)),
+};
+
+test('pipeline: профиль не помечен доверенным — reviewSkip игнорируется, YAML уходит моделям', async () => {
+  let chunks = null;
+  const logs = [];
+  const { calls } = await runPipeline({
+    diff: CODE_DIFF + SKIP_ONLY_DIFF, reviews: [okEmpty('m1')],
+    mutateDeps: (deps) => {
+      deps.log = (...a) => logs.push(a.join(' '));
+      const orig = deps.engine.reviewAllModels;
+      deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
+    },
+  });
+  assert.deepEqual(chunks.flatMap((c) => c.paths).sort(), ['foo.ts', SKIP_YAML].sort(), 'lockfile снят встроенным skip, YAML — нет');
+  assert.ok(logs.some((l) => l.includes('reviewSkip ignored: profile not marked trusted (REVIEW_PROFILE_TRUSTED)')), logs.join('\n'));
+  assert.ok(calls.upsertSticky.at(-1).includes('Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 1 файл(ов)'));
+});
+
 test('pipeline: skip-пути (reviewSkip профиля + lockfile) не уходят в чанки, видны в sticky', async () => {
   let chunks = null;
   const blind = {
@@ -1128,7 +1153,7 @@ test('pipeline: skip-пути (reviewSkip профиля + lockfile) не ухо
     findings: [{ file: SKIP_YAML, line: 2, severity: 'major', title: 'duplicate key', body: 'description at wrong level', confidence: 0.95, model: 'm1' }],
   };
   const { code, calls } = await runPipeline({
-    diff: CODE_DIFF + SKIP_ONLY_DIFF, reviews: [blind],
+    diff: CODE_DIFF + SKIP_ONLY_DIFF, reviews: [blind], env: TRUSTED,
     mutateDeps: (deps) => {
       const orig = deps.engine.reviewAllModels;
       deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
@@ -1147,7 +1172,7 @@ test('pipeline: skip-пути (reviewSkip профиля + lockfile) не ухо
 });
 
 test('pipeline: роутер выключен, в PR только skip-пути — LLM не вызывается', async () => {
-  const { code, calls } = await runPipeline({ diff: SKIP_ONLY_DIFF, reviews: [criticalReview], env: { REVIEW_ROUTER: '0' } });
+  const { code, calls } = await runPipeline({ diff: SKIP_ONLY_DIFF, reviews: [criticalReview], env: { ...TRUSTED, REVIEW_ROUTER: '0' } });
   assert.equal(calls.engineRuns, 0, 'моделям читать нечего');
   assert.equal(code, 0);
   assert.ok(calls.upsertSticky.at(-1).includes('Не ревьюились моделями'));
@@ -1168,7 +1193,7 @@ test('pipeline: reviewSkip из профиля PR не прячет код, .git
     const { calls } = await runPipeline({
       diff: [...guarded, SKIP_YAML].map((p) => section(p)).join(''),
       reviews: [okEmpty('m1')],
-      env: { REVIEW_PROFILE: profileFile },
+      env: { ...TRUSTED, REVIEW_PROFILE: profileFile },
       mutateDeps: (deps) => {
         const orig = deps.engine.reviewAllModels;
         deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
@@ -1205,7 +1230,7 @@ test('pipeline: reviewSkip ".*" не прячет конфиги сборки, s
     const { calls } = await runPipeline({
       diff: [...kept, SKIP_YAML].map((p) => section(p)).join(''),
       reviews: [okEmpty('m1')],
-      env: { REVIEW_PROFILE: profileFile },
+      env: { ...TRUSTED, REVIEW_PROFILE: profileFile },
       mutateDeps: (deps) => {
         const orig = deps.engine.reviewAllModels;
         deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
@@ -1227,6 +1252,7 @@ test('pipeline: путь PR без своей секции в диффе — с�
   let chunks = null;
   const { calls } = await runPipeline({
     diff: twoHeaders + section(SKIP_YAML),
+    env: TRUSTED,
     reviews: [okEmpty('m1')],
     mutateDeps: (deps) => {
       const orig = deps.engine.reviewAllModels;

@@ -168,6 +168,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `REVIEW_ROUTER` | `1` | `0` — всегда полный прогон |
+| `REVIEW_PROFILE_TRUSTED` | `0` | `1` — профиль взят из base-ветки, а не из checkout'а PR; только тогда применяется `layout.reviewSkip` ([profiles.md](profiles.md#layoutreviewskip-и-доверие)) |
 
 Классы: lockfile / generated / rename-only (`similarity index 100%` или секция без строк `+`/`-`; rename с правками — обычный файл, RFC 17) → **skip**; удалённый файл классифицируется по своему пути; docs-only → **light**; ни одного
 файла-кода (только config `yml/yaml/json/toml/sh/sql`, docs, прочее) → **light**; хоть один
@@ -175,14 +176,17 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 [`lib/router.mjs`](../lib/router.mjs), паритетно в `rust/src/router.rs`); `layout.logic`
 профиля его не меняет.
 
-Skip-класс работает и внутри full-маршрута. Lockfile, generated (по пути, только без
-расширения кода) и пути из `layout.reviewSkip` профиля ([profiles.md](profiles.md)) в LLM-чанки
-не попадают, даже когда PR содержит код. Файл с расширением кода (`x.generated.ts`,
-`dist/foo.js`) для маршрута остаётся skip, но моделям уходит: имя файла выбирает автор PR.
-Исключить можно только инертный файл (allowlist: lockfile, `*.map`, документация, данные
-`json`/`yaml` кроме конфигов сборки/CI); защищённые пути (код, `.github/`, пин движка, файлы
-профиля, `layout.sensitive`) не исключаются никогда — см. [profiles.md](profiles.md#layoutreviewskip-и-доверие). Пути из `reviewSkip` роутер считает skip, поэтому PR из одних таких путей —
-маршрут **skip**. Prescan, blast-radius и карта PR эти файлы видят по-прежнему. Находки моделей
+Skip-класс работает и внутри full-маршрута, но вход LLM сужают только двое:
+- встроенный skip — общеизвестные lockfile (по имени) и `*.map`; прочий класс skip
+  (`dist/`, `*.generated.*`, `*.lock`) решает лишь маршрут;
+- `layout.reviewSkip` профиля — **только при `REVIEW_PROFILE_TRUSTED=1`**, без флага он
+  игнорируется (строка в логе).
+
+Исключить можно только инертный файл (allowlist: lockfile, `*.map`, `md`/`mdx`/`rst`, данные
+`json`/`yaml` кроме dotfile, конфигов сборки/CI и каталогов инфраструктуры). Код, `.github/`,
+пин движка, всё, что читает движок, и `layout.sensitive` не исключаются никогда — см.
+[profiles.md](profiles.md#layoutreviewskip-и-доверие). Пути из `reviewSkip` роутер считает
+skip, поэтому PR из одних таких путей — маршрут **skip**. Prescan, blast-radius и карта PR эти файлы видят по-прежнему. Находки моделей
 о них, перенос из прошлого прогона и prior findings в промпте отбрасываются. В sticky
 выводится строка «Не ревьюились моделями (generated/lockfile/reviewSkip профиля): N файл(ов)»,
 в observability — `plan.reviewSkipped`. При `REVIEW_ROUTER=0` маршрут всегда full, но

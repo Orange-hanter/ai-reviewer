@@ -7,7 +7,7 @@ import { runEvalHarness, runFixtureCase, loadFixtures } from '../lib/eval.mjs';
 import { clusterFindings, normalizeConfidence, resolveBlockers, createFindingsFormatter } from '../lib/findings.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from '../lib/verifier.mjs';
 import { loadReviewConfig } from '../lib/config.mjs';
-import { routeDiff, isRenameOnlySection, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath, reviewSkipProtection, isInertPath, collectProfileProtected } from '../lib/router.mjs';
+import { routeDiff, isRenameOnlySection, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath, reviewSkipProtection, isInertPath, collectProfileProtected, parseSgconfigDirs } from '../lib/router.mjs';
 import { applyRefutation, decideRefutation, parseSpecialistAssignments, mergeSpecialistReferences } from '../lib/specialists.mjs';
 import {
   eslintJsonToFindings, dedupeAgainstPrescan, selectLintablePaths, selectLintableEntries,
@@ -807,22 +807,36 @@ test('routeDiff R4: skipPaths профиля — класс skip, маршрут
   assert.equal(routeDiff([gen], 'diff', { skipPaths: [gen] }).route, 'skip', 'PR из одних reviewSkip-путей — как lockfile');
 });
 
-test('collectReviewSkipped: встроенный skip-класс + reviewSkip профиля, порядок changedPaths', () => {
-  const paths = ['app/server/x.ts', 'package-lock.json', 'docs/08-technical/openapi/a.yaml', 'src/x.generated.ts', 'docs/a.md', 'dist/app.js.map'];
-  const r = collectReviewSkipped(paths, { reviewSkip: /^docs\/08-technical\/openapi\//i });
+test('collectReviewSkipped: встроенный skip (lockfile/map) + reviewSkip доверенного профиля', () => {
+  const paths = ['app/server/x.ts', 'package-lock.json', 'docs/08-technical/openapi/a.yaml', 'src/x.generated.ts',
+    'dist/bundle.css', 'docs/a.md', 'dist/app.js.map', 'vendor/x.lock'];
+  const r = collectReviewSkipped(paths, { reviewSkip: /^docs\/08-technical\/openapi\//i, trusted: true });
   assert.deepEqual(r.byProfile, ['docs/08-technical/openapi/a.yaml']);
+  // встроенный — только общеизвестные lockfile и *.map; generated-каталоги и `*.lock` — нет
   assert.deepEqual(r.builtIn, ['package-lock.json', 'dist/app.js.map']);
   assert.deepEqual([...r.all], ['docs/08-technical/openapi/a.yaml', 'package-lock.json', 'dist/app.js.map']);
-  // generated по имени, но с расширением кода — остаётся во входе LLM (имя выбирает автор PR)
-  assert.deepEqual(r.ignored, [{ path: 'src/x.generated.ts', reason: 'code', by: 'builtIn' }]);
+  assert.deepEqual(r.ignored, []);
+  assert.equal(r.reviewSkipIgnored, false);
   assert.equal(collectReviewSkipped(['app/server/x.ts']).all.size, 0, 'без профиля и skip-класса — пусто');
   assert.equal(formatReviewSkippedNote(collectReviewSkipped(['app/server/x.ts'])), '');
-  const many = collectReviewSkipped(['a.lock', 'b.lock', 'c.lock', 'd.lock', 'x.ts']);
+  const many = collectReviewSkipped(['a.map', 'b.map', 'c.map', 'yarn.lock', 'x.ts']);
   assert.equal(formatReviewSkippedNote(many),
-    'Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 4 файл(ов) — `a.lock`, `b.lock`, `c.lock` и ещё 1.');
+    'Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 4 файл(ов) — `a.map`, `b.map`, `c.map` и ещё 1.');
 });
 
-test('reviewSkip из профиля PR не прячет код, .github, пин движка, профиль и sensitive', () => {
+test('collectReviewSkipped: trust gate — без REVIEW_PROFILE_TRUSTED reviewSkip не применяется', () => {
+  const paths = ['docs/08-technical/openapi/a.yaml', 'package-lock.json'];
+  const re = /^docs\/08-technical\/openapi\//i;
+  const off = collectReviewSkipped(paths, { reviewSkip: re });
+  assert.deepEqual(off.byProfile, [], 'дефолт — недоверенный профиль');
+  assert.deepEqual(off.builtIn, ['package-lock.json'], 'встроенный skip от профиля не зависит');
+  assert.equal(off.reviewSkipIgnored, true);
+  const on = collectReviewSkipped(paths, { reviewSkip: re, trusted: true });
+  assert.deepEqual(on.byProfile, ['docs/08-technical/openapi/a.yaml']);
+  assert.equal(collectReviewSkipped(paths, { trusted: false }).reviewSkipIgnored, false, 'нет reviewSkip — нечего игнорировать');
+});
+
+test('reviewSkip доверенного профиля не прячет код, .github, пин движка, профиль и sensitive', () => {
   const paths = [
     'app/server/auth.ts', 'scripts/x.py', 'dist/foo.js', '.github/workflows/ci.yml', '.github/CODEOWNERS',
     'ops/ai-reviewer-ref', 'ops/ai-review/profile.json', '.ai-reviewer.json', 'ops/deploy/run.yml',
@@ -830,6 +844,7 @@ test('reviewSkip из профиля PR не прячет код, .github, пи�
   ];
   const r = collectReviewSkipped(paths, {
     reviewSkip: /.*/,
+    trusted: true,
     protectedPaths: new Set(['ops/ai-review/profile.json', '.ai-reviewer.json']),
     sensitive: /(?:^|\/)ops\/deploy/i,
   });
@@ -840,9 +855,8 @@ test('reviewSkip из профиля PR не прячет код, .github, пи�
     ['ops/ai-reviewer-ref', 'engine-pin'], ['ops/ai-review/profile.json', 'profile'], ['.ai-reviewer.json', 'profile'],
     ['ops/deploy/run.yml', 'sensitive'],
   ]);
-  // встроенный skip-класс проходит ту же защиту: каталог `build/` под .github — не повод молчать
-  assert.equal(reviewSkipProtection('.github/workflows/build/x.yml'), '.github');
-  assert.deepEqual(collectReviewSkipped(['.github/workflows/build/x.yml']).ignored.map((x) => x.by), ['builtIn']);
+  // встроенный skip проходит ту же защиту: lockfile под .github — не повод молчать
+  assert.deepEqual(collectReviewSkipped(['.github/x/package-lock.json']).ignored.map((x) => [x.by, x.reason]), [['builtIn', '.github']]);
   assert.equal(isCodePath('src/x.generated.ts'), true);
   assert.equal(isCodePath('package-lock.json'), false);
 });
@@ -853,44 +867,87 @@ test('isInertPath: allowlist того, что skip вправе убрать и�
     'docs/08-technical/openapi/orakul-api.yaml', 'app/server/apiDocs/openapi.json',
     'app/server/apiDocs/openapi.platform.json', 'docs/dev/reference/api-endpoints-index.md',
     'package-lock.json', 'pnpm-lock.yaml', 'Cargo.lock', 'app/yarn.lock', 'dist/app.js.map', 'x.min.js.map',
-    'README.rst', 'notes.txt', 'docs/a.mdx', 'data/fixtures.yml', 'i18n/ru.json',
+    'README.rst', 'docs/a.mdx', 'data/fixtures.yml', 'i18n/ru.json',
   ];
   const notInert = [
+    // конфиги сборки/CI/инструментов по имени
     'package.json', 'app/package.json', 'tsconfig.json', 'tsconfig.build.json', 'jsconfig.json',
-    'jest.config.json', '.eslintrc.json', '.eslintrc.yml', '.prettierrc.yaml', 'docker-compose.yml',
-    'docker-compose.override.yaml', 'compose.prod.yml', 'openapitools.json', 'renovate.json', 'vercel.json',
-    '.gitlab-ci.yml', 'azure-pipelines.yml', 'bitbucket-pipelines.yml', 'action.yml', 'tools/x/action.yaml',
-    '.github/data.json', '.circleci/config.yml', '.husky/x.json', 'k8s/deploy.yaml', 'deploy/helm/x.yaml',
-    'charts/app/Chart.yaml', 'values.yaml', 'values-prod.yaml',
+    'jest.config.json', 'docker-compose.yml', 'docker-compose.override.yaml', 'compose.prod.yml',
+    'openapitools.json', 'renovate.json', 'vercel.json', 'netlify.json', 'azure-pipelines.yml',
+    'bitbucket-pipelines.yml', 'action.yml', 'tools/x/action.yaml', 'charts/app/Chart.yaml', 'values.yaml', 'values-prod.yaml',
+    // dotfile
+    '.eslintrc.json', '.eslintrc.yml', '.prettierrc.yaml', '.gitlab-ci.yml', '.cursorrules', 'app/.babelrc.json', '.env', '.env.example',
+    // каталоги
+    '.github/data.json', '.gitlab/ci.yml', '.circleci/config.yml', '.husky/x.json', '.devcontainer/devcontainer.json',
+    '.vscode/settings.json', '.idea/x.yml', 'k8s/deploy.yaml', 'deploy/helm/x.yaml', 'ops/helm/values.json',
+    'terraform/vars.json', 'infra/stack.yaml', 'deploy/app.json', 'app/charts/x.json',
+    // инструкции агентам
+    'AGENTS.md', 'docs/CLAUDE.md', 'GEMINI.md', '.github/copilot-instructions.md', 'copilot-instructions.md',
+    // не данные и не документация
+    'notes.txt', 'requirements.txt', 'CMakeLists.txt', 'vendor/x.lock', 'COMPOSE.LOCK',
     'scripts/deploy.sh', 'db/migrate.sql', 'Dockerfile', 'Makefile', 'infra/main.tf', 'Cargo.toml',
-    'netlify.toml', '.env', '.env.example', 'setup.cfg', 'x.ini', 'src/a.ts', 'dist/foo.js', 'x.jsonl',
+    'netlify.toml', 'setup.cfg', 'x.ini', 'src/a.ts', 'dist/foo.js', 'x.jsonl',
   ];
   for (const p of inert) assert.equal(isInertPath(p), true, p);
   for (const p of notInert) assert.equal(isInertPath(p), false, p);
   for (const p of notInert) assert.ok(reviewSkipProtection(p), `${p} защищён`);
   assert.equal(reviewSkipProtection('Dockerfile'), 'not-inert');
+  assert.equal(reviewSkipProtection('AGENTS.md'), 'not-inert');
   assert.equal(reviewSkipProtection('docs/08-technical/openapi/orakul-api.yaml'), null);
 });
 
-test('collectProfileProtected: файлы, которые читает профиль, — от корня репозитория', () => {
+test('parseSgconfigDirs: ruleDirs/utilDirs/testConfigs; непонятное — null', () => {
+  assert.deepEqual(parseSgconfigDirs('# c\nruleDirs:\n  - rules\n  - "more/rules"  # x\nutilDirs:\n  - utils\n'
+    + 'testConfigs:\n  - testDir: rule-tests\n    snapshotDir: __snap__\nlanguageGlobs:\n  tsx: ["*.ts"]\n'),
+  ['rules', 'more/rules', 'utils', 'rule-tests', '__snap__']);
+  assert.deepEqual(parseSgconfigDirs('ruleDirs: [a, \'b\']\n'), ['a', 'b']);
+  assert.deepEqual(parseSgconfigDirs(''), []);
+  assert.equal(parseSgconfigDirs('ruleDirs: rules\n'), null, 'скаляр вместо списка');
+  assert.equal(parseSgconfigDirs('ruleDirs:\n  - {a: 1}\n'), null);
+  assert.equal(parseSgconfigDirs(null), null);
+});
+
+test('collectProfileProtected: всё, что читает движок, — от корня репозитория', () => {
   const cwd = '/repo';
+  const texts = { '/repo/ops/sg/sgconfig.yml': 'ruleDirs:\n  - rules\n  - ../shared-rules\nutilDirs:\n  - utils\n' };
+  const readText = (f) => { if (f in texts) return texts[f]; throw new Error('ENOENT'); };
   const prot = collectProfileProtected({
     profile: {
       source: '/repo/ops/ai-review/profile.json', baseDir: '/repo/ops/ai-review', repoRulesFile: '/repo/ops/ai-review/repo-rules.md',
-      paths: { fpPatterns: 'ops/ai-review/fp.jsonl', fpMarkdown: 'docs/fp.md', feedbackLog: 'ops/ai-review/log.jsonl', astgrepConfig: 'ops/sg/sgconfig.yml' },
+      paths: {
+        fpPatterns: 'ops/ai-review/fp.jsonl', fpMarkdown: 'docs/fp.md', feedbackLog: 'ops/ai-review/log.jsonl',
+        astgrepConfig: 'ops/sg/sgconfig.yml', feedbackCandidatesDir: 'ops/ai-review/candidates', custom: 'cfg/extra.json',
+      },
     },
-    feedback: { patternsFile: 'env/fp.jsonl', mdPath: 'docs/fp.md', logFile: '/elsewhere/log.jsonl' },
-    prescan: { astgrep: { configPath: '' } },
-  }, { cwd });
+    feedback: { patternsFile: 'env/fp.jsonl', mdPath: 'docs/fp.md', logFile: '/elsewhere/log.jsonl', candidatesDir: 'env/cand' },
+    incremental: { stateFile: '.ai-review/incremental/state.json' },
+    graphify: { graph: 'app/.graphify/graphify-out/graph.json', report: 'app/.graphify/graphify-out/GRAPH_REPORT.md' },
+    structure: { obligations: 'ops/obligations.json', mutationReport: 'reports/mutation.json', lcov: 'coverage/lcov.info' },
+    prescan: { astgrep: { configPath: 'ops/sg/sgconfig.yml' } },
+  }, { cwd, readText });
   for (const p of ['ops/ai-review/profile.json', 'ops/ai-review/repo-rules.md', 'ops/ai-review/AGENTS.md', 'AGENTS.md', 'agents.md',
     '.ai-reviewer.json', 'ai-reviewer.config.json', 'ops/ai-review/fp.jsonl', 'docs/fp.md', 'ops/ai-review/log.jsonl',
-    'env/fp.jsonl', 'ops/sg/sgconfig.yml']) {
+    'env/fp.jsonl', 'ops/sg/sgconfig.yml', 'cfg/extra.json', '.ai-review/incremental/state.json',
+    'app/.graphify/graphify-out/graph.json', 'app/.graphify/graphify-out/GRAPH_REPORT.md', 'ops/obligations.json',
+    'reports/mutation.json', 'coverage/lcov.info']) {
     assert.ok(prot.paths.has(p), p);
   }
   assert.ok(![...prot.paths].some((p) => p.startsWith('..') || p.startsWith('/')), 'пути вне репозитория пропущены');
-  assert.deepEqual(prot.prefixes, ['ops/sg/'], 'каталог правил ast-grep');
-  assert.equal(reviewSkipProtection('ops/sg/rules/x.yml', { protectedPaths: prot }), 'profile');
+  for (const d of ['ops/ai-review/candidates/', 'env/cand/', 'ops/sg/rules/', 'ops/shared-rules/', 'ops/sg/utils/']) {
+    assert.ok(prot.prefixes.includes(d), d);
+  }
+  assert.equal(prot.anyYaml, false);
+  assert.equal(reviewSkipProtection('ops/shared-rules/x.yml', { protectedPaths: prot }), 'profile', 'ruleDirs вне каталога конфига');
   assert.equal(reviewSkipProtection('docs/fp.md', { protectedPaths: prot }), 'profile');
+  assert.equal(reviewSkipProtection('ops/sg/other.yml', { protectedPaths: prot }), null, 'конфиг разобран — каталог не целиком');
+
+  // sgconfig не читается/не разбирается → fail-closed: каталог конфига и любой YAML
+  const closed = collectProfileProtected({ profile: { paths: { astgrepConfig: 'ops/sg/sgconfig.yml' } } }, { cwd, readText: () => 'ruleDirs: rules\n' });
+  assert.ok(closed.prefixes.includes('ops/sg/'));
+  assert.equal(closed.anyYaml, true);
+  assert.equal(reviewSkipProtection('docs/08-technical/openapi/a.yaml', { protectedPaths: closed }), 'profile');
+  const missing = collectProfileProtected({ profile: { paths: { astgrepConfig: 'ops/none/sgconfig.yml' } } }, { cwd, readText });
+  assert.equal(missing.anyYaml, true, 'файла нет — тоже fail-closed');
 });
 
 test('splitDiffByParsedPath: ключ секции — путь parseDiff, текст собирается байт в байт', () => {

@@ -200,6 +200,20 @@ jobs:
           tar -xzf "$D/$NAME" -C .ai-reviewer-engine/rust/bin
           echo "→ бинари ai-reviewer@$REF ($T) установлены"
 
+      # Профиль и правила репозитория — из base-ветки: автор PR не может своим PR поменять
+      # ни промпт, ни список путей, которые не уходят моделям (layout.reviewSkip). Только
+      # после этого шага профиль объявляется доверенным (REVIEW_PROFILE_TRUSTED=1 ниже).
+      - name: Take review profile from base branch
+        if: steps.pin.outputs.ref != ''
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          BASE_REF="${BASE_REF:-main}"
+          [[ "$BASE_REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid BASE_REF"; exit 1; }
+          for f in ops/ai-review/profile.json ops/ai-review/repo-rules.md; do
+            git show "origin/$BASE_REF:$f" > "$f" 2>/dev/null || { rm -f "$f"; echo "→ $f нет в origin/$BASE_REF"; }
+          done
+
       # БЕЗ continue-on-error: скрипт выходит 1 ТОЛЬКО на находках critical/major (REVIEW_BLOCK_ON)
       # внутри скрипта (die/throw), джоб зелёный, merge не блокируется.
       - name: Run AI review
@@ -242,6 +256,7 @@ jobs:
           # Профиль проекта: маркеры комментариев, правила репозитория для промпта, раскладка
           # каталогов, scope ast-grep правил и пути feedback (см. docs/profiles.md движка).
           REVIEW_PROFILE: ops/ai-review/profile.json
+          REVIEW_PROFILE_TRUSTED: '1'      # профиль взят из base-ветки шагом выше → reviewSkip применяется
           REVIEW_CHUNK_BYTES: '56000'       # крупнее чанк → меньше LLM-вызовов (баланс recall/скорость)
           REVIEW_CONCURRENCY: '10'            # параллельных chunk-pipeline (3 specialists + aggregator)
           REVIEW_MAX_CHUNKS: '40'           # потолок числа чанков (гигантский PR → чанки крупнее, влезаем в timeout)

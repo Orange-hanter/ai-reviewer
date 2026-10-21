@@ -573,11 +573,14 @@ export function createReviewPipeline(cfg, deps = {}) {
       };
       let reviewSkipped = collectReviewSkipped(changedPaths, {
         reviewSkip: cfg.profile?.layout?.reviewSkip || null,
-        fileClass,
+        trusted: cfg.router?.profileTrusted === true,
         isCode,
         protectedPaths: collectProfileProtected(cfg),
         sensitive: cfg.profile?.layout?.sensitive || null,
       });
+      if (reviewSkipped.reviewSkipIgnored) {
+        log('reviewSkip ignored: profile not marked trusted (REVIEW_PROFILE_TRUSTED)');
+      }
       if (reviewSkipped.ignored.length) {
         log(`skip-пути: ${reviewSkipped.ignored.length} совпадений проигнорировано — защищённые пути остаются во входе LLM`,
           reviewSkipped.ignored.map((x) => `${x.path} (${x.by}: ${x.reason})`));
@@ -590,7 +593,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       const unmatchedPaths = changedPaths.filter((p) => !sectionPaths.has(p));
       if (unmatchedPaths.length && reviewSkipped.all.size) {
         log(`skip-пути: у ${unmatchedPaths.length} файл(ов) PR нет своей секции в диффе — сужение отключено, моделям уходит полный дифф`, unmatchedPaths);
-        reviewSkipped = { byProfile: [], builtIn: [], ignored: reviewSkipped.ignored, all: new Set() };
+        reviewSkipped = { ...reviewSkipped, byProfile: [], builtIn: [], all: new Set() };
       }
       const route = routeDiff(changedPaths, diff, { ...cfg.router, skipPaths: reviewSkipped.byProfile });
       log(`router R4: ${formatRouteLog(route)}`);
