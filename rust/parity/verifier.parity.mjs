@@ -242,7 +242,26 @@ check('apply: пустые verdicts, не-strict — находки как ес�
   };
 });
 
-console.log(`parity cases compared: ${compared}`);
+// RFC 21: blast после LLM-находки той же severity — rust-owned (RFC 20): JS-копия
+// сортирует только по severity, сверяется лишь ожидаемый порядок бинаря.
+let rustOwned = 0;
+{
+  rustOwned += 1;
+  console.log('rust-owned (не сверяется с JS): selectVerifierCandidates blast после LLM');
+  delete process.env.AI_REVIEWER_VERIFIER_FORCE_JS;
+  const findings = [
+    { file: 'b.ts', line: 1, severity: 'major', title: 'blast', source: 'blast-radius' },
+    { file: 'a.ts', line: 2, severity: 'major', title: 'llm' },
+  ];
+  const selected = selectVerifierCandidates(findings, GATE, 12, {});
+  try {
+    assert.deepEqual(selected.map((f) => f.title), ['llm', 'blast']);
+  } catch (e) {
+    failures.push({ label: 'rust-owned select blast order', js: '—', rust: JSON.stringify(selected.map((f) => f.title)), err: e.message });
+  }
+}
+
+console.log(`parity cases compared: ${compared}, rust-owned: ${rustOwned}`);
 if (failures.length) {
   console.log(`FAILURES: ${failures.length}`);
   for (const f of failures.slice(0, 20)) {

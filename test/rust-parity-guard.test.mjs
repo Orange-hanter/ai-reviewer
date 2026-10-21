@@ -198,7 +198,7 @@ test('паритет: дорогие абзацы промпта условны 
     [/if with_priors\s*\{\s*s\.push_str\(AGGREGATOR_CONVERGENCE\)/, 'CONVERGENCE под условием'],
     [/aggregator_system\(ctx, !blast_blocks\.is_empty\(\), !priors\.is_empty\(\)\)/, 'условия жюри — непустые blast-radius и priors'],
     [/if with_blast\s*\{\s*s\.push_str\(VERIFIER_BLAST_RULE\)/, 'абзац verifier\'а под условием'],
-    [/verifier_system\(ctx, !blast_blocks\.is_empty\(\)\)/, 'условие verifier\'а — непустой blast-radius'],
+    [/verifier_system\(ctx, !blast_blocks\.is_empty\(\)[,)]/, 'условие verifier\'а — непустой blast-radius'],
   ];
   for (const [re, what] of rustMarks) {
     assert.match(rustSrc, re, `в rust/src/prompt.rs не найдено: ${what}. `

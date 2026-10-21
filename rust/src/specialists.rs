@@ -26,7 +26,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
-use crate::findings::{js_to_number, js_to_string, js_trim, js_truthy};
+use crate::findings::{js_to_number, js_to_string, js_trim, js_truthy, BLAST_FINDING_SOURCE};
 
 pub const SPECIALIST_ROLES: [&str; 3] = ["security", "correctness", "architecture"];
 
@@ -175,6 +175,14 @@ pub struct RefutationStats {
     pub downgraded: usize,
     pub no_claims: usize,
     pub downgraded_no_claims: usize,
+    /// RFC 21: blast-находки, пропущенные refutation'ом. Поле в выводе только при > 0 —
+    /// прежние входы дают прежний JSON (parity с deprecated JS-копией).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub skipped_blast: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 pub struct RefutationOutcome {
@@ -197,12 +205,17 @@ fn js_tmpl(v: Option<&Value>) -> String {
 
 /// Порт applyRefutation: jury-разбор advisorClaims по каждой находке.
 /// strict: critical/major без advisorClaims → downgrade minor (не блок без jury).
+/// skip_blast (RFC 21, `REVIEW_BLAST_VERIFY` ≠ 0): blast-находка проходит как prescan —
+/// refutation меряет согласие advisors, а у детерминированной находки их нет; понижать её
+/// за отсутствие голосов значит путать «никто не возразил» с «никто не спрашивал».
+/// Судит её verifier. Rust-owned: JS-копия этого параметра не знает.
 /// Мутации НЕ применяются к входу — возвращаются отдельно (обёртка накладывает
 /// на исходные объекты, сохраняя семантику разделяемых ссылок).
 pub fn apply_refutation(
     all_findings: &[Value],
     strict: bool,
     block_on: &[Value],
+    skip_blast: bool,
 ) -> RefutationOutcome {
     let tiers: Vec<Value> = block_on.to_vec();
     let in_tiers = |f: &Value| {
@@ -216,6 +229,16 @@ pub fn apply_refutation(
 
     for (i, f) in all_findings.iter().enumerate() {
         if js_truthy(f.get("prescan").unwrap_or(&Value::Null)) {
+            kept.push(i);
+            continue;
+        }
+        if skip_blast && f.get("source").and_then(Value::as_str) == Some(BLAST_FINDING_SOURCE) {
+            mutations.push(RefutationMutation {
+                index: i,
+                severity: None,
+                refutation_status: Some("not_applicable".to_string()),
+            });
+            stats.skipped_blast += 1;
             kept.push(i);
             continue;
         }
@@ -406,8 +429,12 @@ pub fn format_refutation_log(stats: &Value) -> String {
         Some(v) if js_truthy(v) => format!(" downgradedNoClaims={}", n("downgradedNoClaims")),
         _ => String::new(),
     };
+    let blast = match stats.get("skippedBlast") {
+        Some(v) if js_truthy(v) => format!(" skippedBlast={}", n("skippedBlast")),
+        _ => String::new(),
+    };
     format!(
-        "kept={} dropped={} downgraded={} noClaims={}{extra}",
+        "kept={} dropped={} downgraded={} noClaims={}{extra}{blast}",
         n("kept"),
         n("dropped"),
         n("downgraded"),
@@ -506,7 +533,7 @@ mod tests {
             f("critical", json!({})),
             f("minor", json!({})),
         ];
-        let out = apply_refutation(&findings, true, &[json!("critical"), json!("major")]);
+        let out = apply_refutation(&findings, true, &[json!("critical"), json!("major")], false);
         // prescan прошёл, drop удалён, downgrade/verify/strict kept, minor без claims kept
         assert_eq!(out.kept, vec![0, 2, 3, 4, 5]);
         assert_eq!(out.stats.dropped, 1);
@@ -526,9 +553,37 @@ mod tests {
     }
 
     #[test]
+    fn apply_refutation_blast_skipped_only_with_flag() {
+        // RFC 21: blast-находка без advisorClaims — не повод для strict-понижения.
+        let blast = || f("major", json!({"source": "blast-radius", "prescan": false}));
+        let tiers = [json!("critical"), json!("major")];
+
+        let off = apply_refutation(&[blast()], true, &tiers, false);
+        assert_eq!(off.mutations[0].severity, Some(json!("minor")), "флаг выключен — прежнее поведение");
+        assert_eq!(off.mutations[0].refutation_status.as_deref(), Some("downgraded_no_claims"));
+        assert_eq!(off.stats.skipped_blast, 0);
+
+        let on = apply_refutation(&[blast(), f("major", json!({}))], true, &tiers, true);
+        assert_eq!(on.kept, vec![0, 1]);
+        let m = |i: usize| on.mutations.iter().find(|m| m.index == i).unwrap();
+        assert_eq!(m(0).severity, None, "blast-major остаётся major");
+        assert_eq!(m(0).refutation_status.as_deref(), Some("not_applicable"));
+        assert_eq!(m(1).severity, Some(json!("minor")), "LLM-находка без claims понижается как раньше");
+        assert_eq!(on.stats.skipped_blast, 1);
+        assert_eq!(on.stats.downgraded_no_claims, 1);
+        assert!(serde_json::to_value(&on.stats).unwrap().get("skippedBlast").is_some());
+        assert!(serde_json::to_value(&off.stats).unwrap().get("skippedBlast").is_none(),
+            "без пропусков поле не сериализуется — прежний JSON");
+        assert_eq!(
+            format_refutation_log(&serde_json::to_value(&on.stats).unwrap()),
+            "kept=0 dropped=0 downgraded=1 noClaims=0 downgradedNoClaims=1 skippedBlast=1"
+        );
+    }
+
+    #[test]
     fn apply_refutation_not_strict_keeps_block_tier_without_claims() {
         let findings = vec![f("critical", json!({}))];
-        let out = apply_refutation(&findings, false, &[json!("critical")]);
+        let out = apply_refutation(&findings, false, &[json!("critical")], false);
         assert_eq!(out.kept, vec![0]);
         assert_eq!(out.stats.no_claims, 1);
         assert_eq!(out.stats.downgraded, 0);

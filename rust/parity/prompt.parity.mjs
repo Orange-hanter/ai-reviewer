@@ -226,6 +226,10 @@ for (const [profileName, activate] of Object.entries(PROFILES)) {
     changedFilesSection: '## All changed files in the PR (4)\n- `src/a.ts`\n',
   }));
 
+  // RFC 21: blast-кандидат — пометка [blast-radius] в user-части есть только в Rust
+  // (JS-копия deprecated, RFC 20); текст проверяет cargo-тест verifier_blast_candidate_rule_is_conditional.
+  rustOwnedCase(`${profileName}: buildVerifierMessages blast candidate`);
+
   // RFC 14, решение 4: карточки символов verifier'у
   check(`${profileName}: buildVerifierMessages symbol cards`, () => buildVerifierMessages({
     candidates: [{ severity: 'major', file: 'src/a.ts', line: 3, title: 'сигнатура', body: '`parseLimits` без strict', confidence: 0.8 }],

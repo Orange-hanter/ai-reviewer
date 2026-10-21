@@ -12,7 +12,7 @@
 //!   parseAssignments        {env, moaReferences?}        → [{role, model}]
 //!   normalizeAdvisorClaims  {raw}                        → claims | null
 //!   decideRefutation        {claims}                     → {action, severity?}
-//!   applyRefutation         {findings, strict?, blockOn?} → {kept, mutations, stats, logs}
+//!   applyRefutation         {findings, strict?, blockOn?, skipBlast?} → {kept, mutations, stats, logs}
 //!   mergeSpecialistReferences {chunkResults}             → [reference]
 //!   formatRefutationLog     {stats}                      → string
 //!
@@ -72,6 +72,7 @@ fn run() -> Result<()> {
                 &arr_arg("findings"),
                 obj.get("strict").and_then(Value::as_bool).unwrap_or(false),
                 &arr_arg("blockOn"),
+                obj.get("skipBlast").and_then(Value::as_bool).unwrap_or(false),
             );
             json!({
                 "kept": outcome.kept,

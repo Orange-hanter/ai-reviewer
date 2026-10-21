@@ -16,7 +16,7 @@ import { MARKERS, extractStickyFooterRaw } from '../lib/constants.mjs';
 const {
   parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, collectAddedPaths,
   extractJsonObject, filterFalsePositiveFindings, clusterFindings,
-  hasMarker, publicErrorLabel, loadReviewConfig, readChangedFiles, normalizeConfidence,
+  hasMarker, publicErrorLabel, loadReviewConfig, readChangedFiles, readOutsideFile, normalizeConfidence,
   extractFileDiffSections, selectVerifierCandidates, applyVerifierVerdicts,
   parseJsonl, aggregateMetrics, formatMetricsReport,
   parseDiffNewPath, parseDiffGitPath, unescapeGitPath, buildSummary, filterStalePriorFindings,
@@ -642,6 +642,28 @@ test('readChangedFiles: symlink наружу репозитория не чит�
     assert.ok(logs.some((m) => m.includes(`пропуск файла вне репо: ${link}`)), logs.join('\n'));
   } finally {
     await rm(link, { force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test('readOutsideFile: файл вызывающего кода (RFC 21) — та же защита, что у файлов PR', async () => {
+  const outsideDir = await mkdtemp(join(tmpdir(), 'pr-review-outside-'));
+  const secret = join(outsideDir, 'secret.ts');
+  await writeFile(secret, 'TOP-SECRET\n');
+  const link = `.tmp-pr-review-caller-link-${process.pid}.ts`;
+  const caller = `.tmp-pr-review-caller-${process.pid}.ts`;
+  await symlink(secret, link);
+  // Длиннее maxFileLines по умолчанию: строка вызова в конце не должна отрезаться.
+  await writeFile(caller, `${Array.from({ length: 2000 }, (_, i) => `// ${i + 1}`).join('\n')}\nfoo(1, 2);\n`);
+  try {
+    assert.equal(await readOutsideFile(link), null, 'symlink наружу → null');
+    assert.equal(await readOutsideFile(`.tmp-pr-review-missing-${process.pid}.ts`), null, 'нет файла → null');
+    const entry = await readOutsideFile(caller);
+    assert.match(entry, /foo\(1, 2\);/, 'файл целиком, без обрезки по maxFileLines');
+    assert.ok(entry.startsWith(`### ${caller}\n`), 'формат записи readChangedFiles');
+  } finally {
+    await rm(link, { force: true });
+    await rm(caller, { force: true });
     await rm(outsideDir, { recursive: true, force: true });
   }
 });
@@ -2050,4 +2072,23 @@ test('buildVerifierFileContents: только файлы кандидатов, �
   assert.ok(r.text.includes('… (lines 121–169 not shown)'), 'два окна a.ts не слились');
   assert.ok(!r.text.includes('### b.ts\n```\n… ('), 'b.ts отдан целиком: центрировать окно не на чем');
   assert.ok(r.after < r.before, `окна короче целых файлов: ${r.before} → ${r.after}`);
+});
+
+test('buildVerifierFileContents: файл вызывающего кода вне PR — только окно у blast-кандидата (RFC 21)', () => {
+  const contentMap = new Map([['a.ts', mkEntry('a.ts', 50)]]);
+  const outside = new Map([
+    ['caller.ts', mkEntry('caller.ts', 300)],
+    ['other.ts', mkEntry('other.ts', 300)],
+  ]);
+  const r = buildVerifierFileContents(contentMap, [
+    { file: 'a.ts', line: 5 },
+    { file: 'caller.ts', line: 150, source: 'blast-radius' },
+    { file: 'caller.ts', line: 160, source: 'blast-radius' },
+  ], { margin: 80, outside, outsideMargin: 20 });
+  assert.equal(r.files, 2, 'other.ts без кандидата не попал');
+  assert.ok(r.text.includes('### caller.ts'));
+  assert.ok(r.text.includes('… (lines 1–129 not shown)'), 'окно ±20, а не ±80 и не файл целиком');
+  assert.ok(r.text.includes('… (lines 181–300 not shown)'), 'два кандидата одного файла — одно окно');
+  const none = buildVerifierFileContents(contentMap, [{ file: 'caller.ts', line: 150 }], { margin: 80 });
+  assert.ok(!none.text.includes('caller.ts'), 'без outside файл вне PR в контекст не попадает');
 });
