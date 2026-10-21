@@ -51,7 +51,8 @@ TS/JS в корне репозитория, блок правил проекта
     "lintable": "^app/(?:shared|server|client)/.+\\.(?:ts|tsx)$",
     "e2eSpec": "^app/e2e/.*\\.spec\\.ts$",
     "logic": "^(?:app/)?(?:server|shared|client)/.+\\.(?:ts|tsx)$",  // сейчас не читается, см. ниже
-    "sensitive": "(?:^|/)ops/(?:pr-merge|deploy)"
+    "sensitive": "(?:^|/)ops/(?:pr-merge|deploy)",
+    "reviewSkip": ["^docs/openapi/", "^app/server/apiDocs/openapi\\.json$"]  // строка или массив
   },
 
   "astgrep": {
@@ -94,6 +95,7 @@ TS/JS в корне репозитория, блок правил проекта
 | `layout.e2eSpec` | Что считать e2e-спекой: список таких файлов уходит в промпт, чтобы модель не писала «тестов нет» о PR со спекой в диффе | `*.spec.*` / `*.test.*` (`js`/`ts`, варианты `x`/`c`/`m`) под каталогом `e2e/`, `test/` или `tests/` на любой глубине: `(?:^\|/)(?:e2e\|tests?)/.+\.(?:spec\|test)\.[cm]?[jt]sx?$` |
 | `layout.logic` | **Сейчас не читается**: поле валидируется и хранится, но роутер классифицирует файлы по своим зашитым `LOGIC`/`CODE` ([`lib/router.mjs`](../lib/router.mjs), `rust/src/router.rs`) — задавать его бессмысленно | `\.(?:ts\|tsx\|js\|jsx\|mjs\|cjs\|vue\|svelte)$` — только JS/TS/Vue/Svelte |
 | `layout.sensitive` | Зоны, где цена пропущенного дефекта выше средней (плюс к встроенным auth/billing/migrations/workflows) — влияет на маршрут находки | пусто |
+| `layout.reviewSkip` | Пути, которые **никогда не уходят моделям**: сгенерированное, что CI потребителя сверяет с источником (OpenAPI-спека, её JSON-копии, индекс эндпоинтов). Регекс или массив регексов (склеиваются в `(?:a)\|(?:b)`), без учёта регистра; битый — фича выключена. Совпавший путь роутер считает skip, он исключается из LLM-чанков, находки моделей о нём снимаются, а в sticky он учтён в строке «Не ревьюились моделями». Prescan, blast-radius и карта PR его видят. Lockfile и generated по встроенному регексу роутера исключаются и без этого поля. Подробнее — [configuration.md](configuration.md#router) | пусто |
 | `astgrep.scopes` | `ruleId → regex пути`: где правило вообще применимо (globs в `sgconfig.yml` не знают слоёв проекта) | правило действует везде |
 | `astgrep.allow` | `ruleId → список путей-исключений` (например, единственный модуль, которому сырой `X-Forwarded-For` положен по роли) | пусто |
 | `paths.feedbackLog` | JSONL-журнал feedback | `.ai-review/feedback/fp-feedback.jsonl` |

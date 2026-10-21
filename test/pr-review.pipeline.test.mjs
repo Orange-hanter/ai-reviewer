@@ -977,6 +977,52 @@ test('инкрементально: файл упавшей части PR рев
   }
 });
 
+// Сгенерированное, что потребитель сверяет с источником в CI (layout.reviewSkip reference-
+// профиля), и встроенный skip-класс (lockfile) рядом с кодом: маршрут full, но в чанки
+// моделям уходит только код. Регрессия Orakul: куски 26k-строчного OpenAPI YAML жюри читало
+// с отступами через границу чанка и на каждом прогоне поднимало блокирующий major.
+const SKIP_YAML = 'docs/08-technical/openapi/orakul-api.yaml';
+const SKIP_ONLY_DIFF = `diff --git a/${SKIP_YAML} b/${SKIP_YAML}
+--- a/${SKIP_YAML}
++++ b/${SKIP_YAML}
+@@ -1,1 +1,2 @@
+ paths:
++  /x: {}
+${LOCK_DIFF}`;
+
+test('pipeline: skip-пути (reviewSkip профиля + lockfile) не уходят в чанки, видны в sticky', async () => {
+  let chunks = null;
+  const blind = {
+    model: 'm1', summary: 'ок', verdict: 'changes_requested',
+    // модель видела yaml только в карте PR — находка о нём сделана вслепую и в отчёт не идёт
+    findings: [{ file: SKIP_YAML, line: 2, severity: 'major', title: 'duplicate key', body: 'description at wrong level', confidence: 0.95, model: 'm1' }],
+  };
+  const { code, calls } = await runPipeline({
+    diff: CODE_DIFF + SKIP_ONLY_DIFF, reviews: [blind],
+    mutateDeps: (deps) => {
+      const orig = deps.engine.reviewAllModels;
+      deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
+    },
+  });
+  assert.equal(calls.engineRuns, 1, 'код в PR есть — LLM вызывается');
+  const llmText = chunks.map((c) => c.annotated).join('\n');
+  assert.ok(llmText.includes('diff --git a/foo.ts'), 'код ушёл в чанк');
+  assert.ok(!llmText.includes(SKIP_YAML), 'reviewSkip-путь в чанк не попал');
+  assert.ok(!llmText.includes('package-lock.json'), 'lockfile в чанк не попал');
+  assert.deepEqual(chunks.flatMap((c) => c.paths), ['foo.ts']);
+  assert.equal(code, 0, 'находка модели о невиденном файле снята — блока нет');
+  const sticky = calls.upsertSticky.at(-1);
+  assert.ok(sticky.includes('Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 2 файл(ов)'), sticky);
+  assert.ok(sticky.includes(`\`${SKIP_YAML}\``));
+});
+
+test('pipeline: роутер выключен, в PR только skip-пути — LLM не вызывается', async () => {
+  const { code, calls } = await runPipeline({ diff: SKIP_ONLY_DIFF, reviews: [criticalReview], env: { REVIEW_ROUTER: '0' } });
+  assert.equal(calls.engineRuns, 0, 'моделям читать нечего');
+  assert.equal(code, 0);
+  assert.ok(calls.upsertSticky.at(-1).includes('Не ревьюились моделями'));
+});
+
 test('engine: индексы чанков, упавших у модели, доходят до результата (RFC 19)', async () => {
   const { createReviewEngine } = await import('../lib/engine.mjs');
   const { createPromptBuilder } = await import('../lib/prompt.mjs');

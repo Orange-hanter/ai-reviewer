@@ -174,6 +174,18 @@ fn route_result(route: &str, reason: &str, files: Vec<FileClass>) -> RouteResult
 /// - light: docs-only (+ skip-класс) — без LLM, merge не блокируется по коду
 /// - full: server/shared/client logic или смешанный код — полный pipeline
 pub fn route_diff(changed_paths: &[String], diff: &str, enabled: bool) -> RouteResult {
+    route_diff_with_skip(changed_paths, diff, enabled, &[])
+}
+
+/// `route_diff` с явным списком путей класса skip (`layout.reviewSkip` профиля).
+/// Регекс профиля компилирует и применяет JS-сторона (диалект JS не 1:1 с regex-крейтом),
+/// сюда приходит уже готовый список путей — сравнение строк, без второго диалекта.
+pub fn route_diff_with_skip(
+    changed_paths: &[String],
+    diff: &str,
+    enabled: bool,
+    skip_paths: &[String],
+) -> RouteResult {
     if !enabled {
         return route_result("full", "router выключен (REVIEW_ROUTER=0)", Vec::new());
     }
@@ -185,7 +197,11 @@ pub fn route_diff(changed_paths: &[String], diff: &str, enabled: bool) -> RouteR
     let files: Vec<FileClass> = changed_paths
         .iter()
         .map(|path| FileClass {
-            class: classify_changed_file(path, sections.get(path.as_str()).map(String::as_str)).to_string(),
+            class: if skip_paths.iter().any(|s| s == path) {
+                "skip".to_string()
+            } else {
+                classify_changed_file(path, sections.get(path.as_str()).map(String::as_str)).to_string()
+            },
             path: path.clone(),
         })
         .collect();
@@ -338,6 +354,32 @@ mod tests {
             .route,
             "light"
         );
+    }
+
+    #[test]
+    fn route_diff_profile_skip_paths() {
+        // Пути из layout.reviewSkip — класс skip: сгенерированный YAML рядом с кодом
+        // маршрут не меняет, а PR только из таких путей — skip, как lockfile.
+        let paths = vec![
+            "docs/08-technical/openapi/orakul-api.yaml".to_string(),
+            "app/server/api.ts".to_string(),
+        ];
+        let skip = vec!["docs/08-technical/openapi/orakul-api.yaml".to_string()];
+        let r = route_diff_with_skip(&paths, "diff", true, &skip);
+        assert_eq!(r.route, "full");
+        assert_eq!(r.files[0].class, "skip");
+        assert_eq!(r.files[1].class, "logic");
+
+        let gen_only = vec!["app/client/api/generated-client.ts".to_string()];
+        assert_eq!(route_diff(&gen_only, "diff", true).route, "full");
+        assert_eq!(route_diff_with_skip(&gen_only, "diff", true, &gen_only).route, "skip");
+        // пустой список — ровно route_diff
+        assert_eq!(
+            route_diff_with_skip(&paths, "diff", true, &[]).files[0].class,
+            "docs"
+        );
+        // роутер выключен — список не читается
+        assert_eq!(route_diff_with_skip(&gen_only, "diff", false, &gen_only).route, "full");
     }
 
     #[test]

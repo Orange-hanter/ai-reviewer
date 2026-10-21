@@ -10,6 +10,30 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+### Сгенерированные файлы не уходят моделям — `layout.reviewSkip`
+
+Класс skip роутера (lockfile, generated) решал только маршрут PR. Когда в PR рядом с ним был
+код, skip-файл всё равно нарезался в чанки. Orakul коммитит 26k-строчный OpenAPI YAML и его
+JSON-копии, которые CI сверяет с источником (`gen-openapi.mjs --check`). Жюри получало куски
+YAML, читало отступы через границу чанка и на каждом прогоне поднимало блокирующий major
+(«duplicate key», «description на неверном уровне»).
+
+Теперь:
+- lockfile и generated по встроенному регексу роутера в LLM-чанки не попадают (это меняет
+  поведение без настройки);
+- новое поле профиля `layout.reviewSkip` (регекс или массив регексов) объявляет пути, которые
+  никогда не уходят моделям. Роутер считает их skip (`routeDiff` получает `skipPaths`, паритетно
+  в Rust), поэтому PR из одних таких путей — маршрут skip;
+- находки моделей о skip-путях, их перенос из инкрементального state и prior findings в
+  промпте отбрасываются; Δ-блок покажет такие находки снятыми;
+- в sticky появляется строка «Не ревьюились моделями (generated/lockfile/reviewSkip профиля):
+  N файл(ов)», в событии `plan` — `reviewSkipped: {builtIn, profile}`;
+- prescan, blast-radius и карта PR skip-пути видят по-прежнему: меняется только вход LLM.
+
+Reference-профиль Orakul (`profiles/orakul.json`, `examples/consumers/orakul/profile.json`)
+объявляет `docs/08-technical/openapi/`, `app/server/apiDocs/openapi(.platform).json` и
+`docs/dev/reference/api-endpoints-index.md`.
+
 ## 0.6.3 — Walkthrough отчёта не противоречит блоку — 2026-10-16
 
 Пин потребителя — `v0.6.3`. Формат футера sticky, namespace маркеров, контракты `swarm` /

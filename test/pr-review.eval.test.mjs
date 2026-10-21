@@ -7,7 +7,7 @@ import { runEvalHarness, runFixtureCase, loadFixtures } from '../lib/eval.mjs';
 import { clusterFindings, normalizeConfidence, resolveBlockers, createFindingsFormatter } from '../lib/findings.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from '../lib/verifier.mjs';
 import { loadReviewConfig } from '../lib/config.mjs';
-import { routeDiff, isRenameOnlySection, classifyFilePath } from '../lib/router.mjs';
+import { routeDiff, isRenameOnlySection, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote } from '../lib/router.mjs';
 import { applyRefutation, decideRefutation, parseSpecialistAssignments, mergeSpecialistReferences } from '../lib/specialists.mjs';
 import {
   eslintJsonToFindings, dedupeAgainstPrescan, selectLintablePaths, selectLintableEntries,
@@ -795,6 +795,29 @@ test('routeDiff R4: lockfile-only → skip', () => {
 +  "version": "2"`;
   const route = routeDiff(['package-lock.json'], diff);
   assert.equal(route.route, 'skip');
+});
+
+test('routeDiff R4: skipPaths профиля — класс skip, маршрут по остальным', () => {
+  const yaml = 'docs/08-technical/openapi/orakul-api.yaml';
+  const mixed = routeDiff([yaml, 'app/server/x.ts'], 'diff', { skipPaths: [yaml] });
+  assert.equal(mixed.route, 'full');
+  assert.deepEqual(mixed.files.map((f) => f.class), ['skip', 'logic']);
+  const gen = 'app/client/api/client.ts';
+  assert.equal(routeDiff([gen], 'diff').route, 'full');
+  assert.equal(routeDiff([gen], 'diff', { skipPaths: [gen] }).route, 'skip', 'PR из одних reviewSkip-путей — как lockfile');
+});
+
+test('collectReviewSkipped: встроенный skip-класс + reviewSkip профиля, порядок changedPaths', () => {
+  const paths = ['app/server/x.ts', 'package-lock.json', 'docs/08-technical/openapi/a.yaml', 'src/x.generated.ts', 'docs/a.md'];
+  const r = collectReviewSkipped(paths, { reviewSkip: /^docs\/08-technical\/openapi\//i });
+  assert.deepEqual(r.byProfile, ['docs/08-technical/openapi/a.yaml']);
+  assert.deepEqual(r.builtIn, ['package-lock.json', 'src/x.generated.ts']);
+  assert.deepEqual([...r.all], ['docs/08-technical/openapi/a.yaml', 'package-lock.json', 'src/x.generated.ts']);
+  assert.equal(collectReviewSkipped(['app/server/x.ts']).all.size, 0, 'без профиля и skip-класса — пусто');
+  assert.equal(formatReviewSkippedNote(collectReviewSkipped(['app/server/x.ts'])), '');
+  const many = collectReviewSkipped(['a.lock', 'b.lock', 'c.lock', 'd.lock', 'x.ts']);
+  assert.equal(formatReviewSkippedNote(many),
+    'Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 4 файл(ов) — `a.lock`, `b.lock`, `c.lock` и ещё 1.');
 });
 
 test('routeDiff R4: docs-only → light', () => {

@@ -426,6 +426,34 @@ fn regex_candidate(v: Option<&Value>, fallback: &str) -> Value {
     }
 }
 
+/// `layout.reviewSkip`: строка-регекс или массив строк-регексов → один источник.
+/// Массив склеивается в `(?:a)|(?:b)`, пустые/нестроковые элементы отбрасываются;
+/// пусто → null (фича выключена). Валидирует диалектом JS сторона lib/profile.mjs.
+fn review_skip_candidate(v: Option<&Value>) -> Value {
+    match v {
+        Some(Value::String(s)) if !s.trim().is_empty() => Value::String(s.clone()),
+        Some(Value::Array(items)) => {
+            let parts: Vec<&str> = items
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .collect();
+            match parts.len() {
+                0 => Value::Null,
+                1 => Value::String(parts[0].to_string()),
+                _ => Value::String(
+                    parts
+                        .iter()
+                        .map(|p| format!("(?:{p})"))
+                        .collect::<Vec<_>>()
+                        .join("|"),
+                ),
+            }
+        }
+        _ => Value::Null,
+    }
+}
+
 /// `String(raw.appDir ?? '').replace(/^\.\/+|\/+$/g, '')`:
 /// ровно одно ведущее '.' + прогон '/', хвостовые '/' снимаются все.
 fn strip_app_dir(s: &str) -> String {
@@ -580,6 +608,7 @@ pub fn normalize_profile_facts(raw: &Value, base_dir: &str, source: &str) -> Val
             "sensitive": regex_candidate(layout_raw.get("sensitive"), ""),
             "e2eSpec": regex_candidate(layout_raw.get("e2eSpec"), DEFAULT_E2E_SPEC),
             "logic": regex_candidate(layout_raw.get("logic"), DEFAULT_LOGIC),
+            "reviewSkip": review_skip_candidate(layout_raw.get("reviewSkip")),
         },
         "astgrep": { "scopes": scopes, "allow": allow },
         "strict": raw.get("strict") == Some(&Value::Bool(true)),
@@ -1149,6 +1178,23 @@ mod tests {
         assert_eq!(f["paths"]["exportDir"], "out/export");
         assert_eq!(f["paths"]["feedbackLog"], ".ai-review/feedback/fp-feedback.jsonl");
         assert!(f["strict"] == Value::Bool(false));
+    }
+
+    #[test]
+    fn normalize_profile_review_skip() {
+        let f = |v: Value| normalize_profile_facts(&json!({ "layout": { "reviewSkip": v } }), "/r", "s");
+        // не задан / пусто / не строка — фича выключена
+        assert_eq!(normalize_profile_facts(&json!({}), "/r", "s")["layout"]["reviewSkip"], Value::Null);
+        assert_eq!(f(json!("  "))["layout"]["reviewSkip"], Value::Null);
+        assert_eq!(f(json!(5))["layout"]["reviewSkip"], Value::Null);
+        assert_eq!(f(json!([]))["layout"]["reviewSkip"], Value::Null);
+        // строка — как есть; массив из одного — сам элемент; несколько — альтернатива групп
+        assert_eq!(f(json!("^docs/openapi/"))["layout"]["reviewSkip"], "^docs/openapi/");
+        assert_eq!(f(json!(["^a/", "", 3]))["layout"]["reviewSkip"], "^a/");
+        assert_eq!(
+            f(json!(["^docs/08-technical/openapi/", "^app/x(\\.p)?\\.json$"]))["layout"]["reviewSkip"],
+            "(?:^docs/08-technical/openapi/)|(?:^app/x(\\.p)?\\.json$)"
+        );
     }
 
     #[test]
