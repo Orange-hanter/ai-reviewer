@@ -26,16 +26,26 @@
  *   … --emit gold-private        # записать кандидатов
  *
  * Скрипт готовит кандидатов; отбор и чтение кейса глазами — ручной шаг поверх.
+ *
+ * Режим `--blast` (RFC 21) вместо tp/clean ищет «PR сломал вызывающий код вне PR»: единица P
+ * сменила сигнатуру S в файле A, а фикс ≤ 120 дней спустя поправил вызов S в файле B, которого
+ * нет в P, причём строка вызова (git blame на родителе фикса) старше P. Вызов привязан к A по
+ * импорту/получателю (`relatedCall`), а не по одному имени. Мету пишет только для пар, явно
+ * отобранных глазами: `REVIEW_GOLD_BLAST_KEEP="<sha8 P>:<S>,…" … --blast --emit gold-private`.
+ * `REVIEW_GOLD_BLAST_DEBUG=1` печатает отброшенные «не тот S» и «P велик».
  */
 import { execFileSync } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const FLAGS = new Set(['--repo', '--name', '--branch', '--since', '--emit', '--clean', '--tp-max']);
+// Флаги без значения. `--blast` — отдельный режим (RFC 21): вместо tp/clean ищет PR, сменивший
+// контракт функции, чей вызов ВНЕ PR потом исправил фикс.
+const BOOL_FLAGS = new Set(['--blast']);
 // Неизвестный флаг — ошибка: «--emit gold-private» одним аргументом иначе молча даёт прогон без записи.
-for (let i = 2; i < process.argv.length; i += 2) {
-  if (!FLAGS.has(process.argv[i])) {
-    console.error(`неизвестный аргумент «${process.argv[i]}»; флаги: ${[...FLAGS].join(' ')}`);
+for (let i = 2; i < process.argv.length; i += BOOL_FLAGS.has(process.argv[i]) ? 1 : 2) {
+  if (!FLAGS.has(process.argv[i]) && !BOOL_FLAGS.has(process.argv[i])) {
+    console.error(`неизвестный аргумент «${process.argv[i]}»; флаги: ${[...FLAGS, ...BOOL_FLAGS].join(' ')}`);
     process.exit(2);
   }
 }
@@ -51,6 +61,7 @@ const SINCE = arg('--since', '2026-01-01');
 const EMIT = arg('--emit', null);
 const CLEAN_WANT = Number(arg('--clean', 4));
 const TP_MAX = Number(arg('--tp-max', 25));
+const BLAST = process.argv.includes('--blast');
 
 // Пороги — как у публичного сборщика (RFC 03, «Оценка»): кейс влезает в прогон, дефект локализован.
 const LIMITS = { buggyLines: 800, buggyFiles: 15, fixRemoved: 150, maxAgeDays: 120 };
@@ -239,6 +250,344 @@ function slug(s, max = 40) {
   return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, max).replace(/-+$/, '');
 }
 
+// ── режим --blast (RFC 21): PR сменил контракт S в файле A, фикс потом поправил вызов S в B вне PR ──
+
+// Объявление функции/метода с именем в группе 1 — по тексту строки, для JS/TS, Python, Rust, Go.
+// Строка-вызов `foo(x);` под второй вариант не попадает: после закрывающей скобки там `;`/`,`/`)`.
+const DECL_RES = [
+  /\b(?:function\*?|def|fn)\s+([A-Za-z_$][\w$]*)\s*[(<]/,
+  /\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*[([]/,
+  /(?:\b(?:const|let|var)\s+|^\s*(?:(?:public|private|protected|readonly|static)\s+)+)([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*(?::[^=]+)?=>|\($|[A-Za-z_$][\w$]*\s*=>)/,
+  /^\s*(?:(?:export|default|public|private|protected|static|async|override|abstract|pub(?:\([\w:]+\))?)\s+)*(?!(?:if|for|while|switch|catch|return|function|new|await|super|this)\b)([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\((?:[^()]*\)\s*(?::\s*[^;,=]+)?\s*[{;]?\s*$|[^)]*$)/,
+  // свойство-функция объекта/типа: `foo: async (a) => …`, `foo: (a: X) => Y;`
+  /^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*)\??\s*:\s*(?:async\s*)?\([^)]*(?:\)\s*(?::\s*[^=]+)?=>|$)/,
+];
+const BLAST_SKIP_NAMES = new Set('constructor render main init get set run handle call apply bind toString valueOf'.split(' '));
+
+/** Объявления файла: имя → отсортированный список нормализованных сигнатур (с учётом многострочных параметров). */
+function declsIn(text, file = '') {
+  const lines = text.split('\n');
+  const out = new Map();
+  // форма «метод класса» (`foo(a) {`) — только у C-подобных; в Python/Go/Rust объявление всегда с ключевым словом
+  const methodForm = !/\.(?:py|go|rs|rb|sh|sql|ya?ml)$/i.test(file);
+  for (let i = 0; i < lines.length; i++) {
+    let name = null; let isMethod = false;
+    for (let k = 0; k < DECL_RES.length; k++) {
+      if (k === 3 && !methodForm) continue;
+      const m = DECL_RES[k].exec(lines[i]);
+      if (m) { name = m[1]; isMethod = k === 3; break; }
+    }
+    if (!name || KEYWORDS.has(name) || BLAST_SKIP_NAMES.has(name)) continue;
+    // сигнатура: от строки объявления до закрытия первой скобки параметров (не дальше 25 строк)
+    let sig = ''; let depth = 0; let opened = false; let tail = ''; let endJ = i;
+    for (let j = i; j < Math.min(lines.length, i + 25); j++) {
+      const l = lines[j];
+      sig += ` ${l.trim()}`;
+      endJ = j;
+      for (let c = 0; c < l.length; c++) {
+        const ch = l[c];
+        if (ch === '(') { depth++; opened = true; } else if (ch === ')') { depth--; if (opened && depth <= 0) { tail = l.slice(c + 1); break; } }
+      }
+      if (opened && depth <= 0) break;
+    }
+    // метод без ключевого слова отличаем от многострочного вызова по телу: после `)` — `{` (тип возврата допустим);
+    // в .ts допустим и метод интерфейса/порта без тела: `)` + обязательный тип возврата + `;`
+    const tsSig = /\.tsx?$/.test(file) && /^\s*:\s*[^;,=]+;\s*$/.test(tail);
+    if (isMethod && !tsSig && !/^\s*(?::\s*[^;,=]+?)?\s*\{/.test(tail) && !(/^\s*(?::\s*[^;,=]+?)?\s*$/.test(tail) && /^\s*\{/.test(lines[endJ + 1] || ''))) continue;
+    const norm = sig.replace(/\s+/g, ' ').replace(/[{:]\s*$/, '').replace(/,\s*\)/g, ')').trim();
+    if (!out.has(name)) out.set(name, []);
+    out.get(name).push(norm);
+  }
+  for (const v of out.values()) v.sort();
+  return out;
+}
+
+const showCache = new Map();
+/** Текст файла на ревизии; null — файла там нет. */
+function showFile(rev, file) {
+  const key = `${rev}:${file}`;
+  if (!showCache.has(key)) {
+    let text = null;
+    // stderr глушим: «файла нет на ревизии» здесь — штатный ответ, а не ошибка
+    try { text = execFileSync('git', ['-C', REPO, 'show', key], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { text = null; }
+    showCache.set(key, text);
+  }
+  return showCache.get(key);
+}
+
+const contractChangeCache = new Map();
+/** Единица P: имя → [{file, before, after}] — функции, чья сигнатура в файле изменилась (есть и до, и после). */
+function contractChanges(u) {
+  if (contractChangeCache.has(u.sha)) return contractChangeCache.get(u.sha);
+  const out = new Map();
+  for (const [file, rec] of unitDiff(u, 0)) {
+    if (TEST_PATH.test(file) || !CODE_PATH.test(file)) continue;
+    const before = showFile(u.base, file);
+    const after = showFile(u.sha, file);
+    if (before == null || after == null) continue;
+    const db = declsIn(before, file);
+    const da = declsIn(after, file);
+    for (const [name, sigsA] of da) {
+      const sigsB = db.get(name);
+      if (!sigsB || sigsB.join('\n') === sigsA.join('\n')) continue;
+      if (!out.has(name)) out.set(name, []);
+      out.get(name).push({ file, before: sigsB, after: sigsA });
+    }
+  }
+  contractChangeCache.set(u.sha, out);
+  return out;
+}
+
+const BLAST_CALL_RE = /(?<![\w$])([A-Za-z_$][\w$]{2,})\s*(?:<[^>()]*>)?\s*\(/g;
+
+/**
+ * Вызов `S` в B относится к объявлению в A, а не к одноимённой функции другого модуля:
+ * `recv.S(` — получатель похож на имя файла/каталога A или на класс, объявленный в A
+ * (`this.usersService` ↔ users.service.ts, `task_service` ↔ task_service.py);
+ * голый `S(` — B импортирует S из модуля с именем файла A (Go — тот же пакет-каталог).
+ */
+function relatedCall(callText, s, fileA, fileB, revA, textB) {
+  const norm = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const parts = fileA.split('/');
+  const baseRaw = parts[parts.length - 1].replace(/\.[^.]+$/, '');
+  const baseA = norm(baseRaw);
+  const dirA = norm(parts[parts.length - 2] || '');
+  const sx = s.replace(/[$]/g, '\\$');
+  const recvM = new RegExp(`([A-Za-z_$][\\w$]*)\\s*(?:\\?\\.|\\.|::)\\s*${sx}\\s*(?:<[^>()]*>)?\\s*\\(`).exec(callText);
+  if (recvM) {
+    // получатель — псевдоним модуля A: `from pkg import task_service as tasks`, `import * as tg from './telegram.js'`
+    const r0 = recvM[1];
+    const aliasRes = [
+      new RegExp(`^\\s*from\\s+[\\w.]+\\s+import\\s+(?:[^\\n]*,\\s*)?([\\w]+)\\s+as\\s+${r0}\\b`, 'm'),
+      new RegExp(`^\\s*import\\s+([\\w.]+)\\s+as\\s+${r0}\\b`, 'm'),
+      new RegExp(`import\\s+(?:\\*\\s+as\\s+)?${r0}\\s+from\\s*['"]([^'"]+)['"]`),
+    ];
+    for (const re of aliasRes) {
+      const am = re.exec(textB);
+      if (!am) continue;
+      const seg = norm(am[1].replace(/\.(?:[cm]?[jt]sx?|vue|svelte)$/, '').split(/[/.]/).filter(Boolean).pop() || '');
+      if (seg === baseA || (baseRaw === 'index' && seg === dirA)) return true;
+    }
+    const recv = norm(r0.replace(/^_+/, ''));
+    if (recv.length < 3 || ['this', 'self', 'super'].includes(recv)) return false;
+    if (recv === baseA || recv === dirA || (baseA.length >= 5 && (recv.includes(baseA) || baseA.includes(recv)))) return true;
+    const textA = showFile(revA, fileA) || '';
+    const classes = [...textA.matchAll(/\b(?:class|struct|interface)\s+([A-Za-z_]\w*)/g)].map((m) => norm(m[1]));
+    if (classes.some((c) => c.length >= 5 && (c === recv || recv.endsWith(c) || c.endsWith(recv)))) return true;
+    // DI через интерфейс: `private readonly devs: DevelopersUseCasePort` в B, `class X implements DevelopersUseCasePort` в A
+    const typeM = new RegExp(`\\b${r0}\\s*[?!]?\\s*:\\s*([A-Za-z_]\\w*)`).exec(textB);
+    if (typeM) {
+      const t = norm(typeM[1]);
+      const implemented = [...textA.matchAll(/\bimplements\s+([\w\s,<>]+?)\s*\{/g)]
+        .flatMap((m) => m[1].split(',').map((x) => norm(x.replace(/<.*$/, ''))));
+      if (classes.includes(t) || implemented.includes(t)) return true;
+    }
+    return false;
+  }
+  if (/\.go$/.test(fileA) && fileA.split('/').slice(0, -1).join('/') === fileB.split('/').slice(0, -1).join('/')) return true;
+  const modOk = (mod) => {
+    // `../shared/dishCost.js` → dishCost; `cod_doc.agent.retry` → retry
+    const seg = norm(mod.replace(/\.(?:[cm]?[jt]sx?|vue|svelte)$/, '').split(/[/.]/).filter(Boolean).pop() || '');
+    return seg === baseA || (baseRaw === 'index' && seg === dirA) || (/^(?:mod|__init__)$/.test(baseRaw) && seg === dirA);
+  };
+  for (const m of textB.matchAll(new RegExp(`import\\s*(?:type\\s*)?\\{[^}]*\\b${sx}\\b[^}]*\\}\\s*from\\s*['"]([^'"]+)['"]`, 'g'))) if (modOk(m[1])) return true;
+  for (const m of textB.matchAll(new RegExp(`^\\s*from\\s+([\\w.]+)\\s+import\\s*(?:\\([^)]*?|[^\\n(]*?)\\b${sx}\\b`, 'gm'))) if (modOk(m[1])) return true;
+  for (const m of textB.matchAll(new RegExp(`^\\s*use\\s+([\\w:]+)::\\{?[^;]*\\b${sx}\\b`, 'gm'))) if (modOk(m[1].replace(/::/g, '/'))) return true;
+  return false;
+}
+
+/** Хунки фикса в нумерации СТАРОГО файла: файл → [[from, to]] (вставка без удалений — [a+1, a+1]). */
+function fixHunksOld(u) {
+  const out = new Map();
+  let cur = null;
+  for (const raw of git('diff', '-U0', '--no-color', '--no-renames', u.base, u.sha).split('\n')) {
+    const fm = /^\+\+\+ b\/(.+)$/.exec(raw);
+    if (fm) { cur = fm[1]; if (!out.has(cur)) out.set(cur, []); continue; }
+    if (raw.startsWith('diff --git ')) { cur = null; continue; }
+    const h = /^@@ -(\d+)(?:,(\d+))? \+/.exec(raw);
+    if (h && cur) {
+      const a = Number(h[1]); const n = h[2] === undefined ? 1 : Number(h[2]);
+      out.get(cur).push(n === 0 ? [a + 1, a + 1] : [a, a + n - 1]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Места вызова, которые фикс тронул, в нумерации файла на родителе фикса:
+ *  - удалённая строка с вызовом `S(`, если `S(` есть и среди добавленных (вызов изменён, а не убран);
+ *  - открытый многострочный вызов `S(` (до 15 строк выше хунка), внутри которого фикс поменял
+ *    аргументы, — сама строка `S(` при этом может остаться нетронутой.
+ */
+function callSitesTouched(textBase, rec, hunks) {
+  const lines = textBase.split('\n');
+  const addedCalls = new Set();
+  for (const a of rec.added) for (const m of a.text.matchAll(BLAST_CALL_RE)) addedCalls.add(m[1]);
+  const okName = (n) => !KEYWORDS.has(n) && !BLAST_SKIP_NAMES.has(n);
+  const sites = new Map(); // line → { line, text, names:Set }
+  const add = (line, name) => {
+    if (!sites.has(line)) sites.set(line, { line, text: lines[line - 1] ?? '', names: new Set() });
+    sites.get(line).names.add(name);
+  };
+  for (const r of rec.removed) {
+    if (DECL_RES.slice(0, 3).some((re) => re.test(r.text))) continue; // объявление, не вызов
+    for (const m of r.text.matchAll(BLAST_CALL_RE)) if (okName(m[1]) && addedCalls.has(m[1])) add(r.line, m[1]);
+  }
+  for (const [from] of hunks) {
+    // глубина скобок, открытых выше строки `from`: идём вверх и ищем вызов, чья скобка ещё не закрыта
+    let depth = 0;
+    for (let k = from - 1; k >= Math.max(1, from - 15); k--) {
+      const l = lines[k - 1] ?? '';
+      let found = null; let stop = false;
+      for (let c = l.length - 1; c >= 0; c--) {
+        if (l[c] === ')') depth--;
+        else if (l[c] === '(') {
+          depth++;
+          if (depth > 0) {
+            const m = /([A-Za-z_$][\w$]{2,})\s*(?:<[^>()]*>)?\s*$/.exec(l.slice(0, c));
+            if (m && okName(m[1])) found = m[1];
+            stop = true; // ближайшая незакрытая скобка: вызов или нет — дальше вверх не ищем
+            break;
+          }
+        }
+      }
+      if (found && !DECL_RES.some((re) => re.test(l))) add(k, found);
+      if (stop) break;
+    }
+  }
+  return [...sites.values()].map((s) => ({ ...s, names: [...s.names] }));
+}
+
+async function harvestBlast() {
+  const cands = new Map(); // pi → { locations: Map(file → Map(line → …)), fixes: Map, symbols: Map(S → {file, before, after}) }
+  const funnel = { sites: 0, olderThanP: 0, outsideP: 0, sigChanged: 0, related: 0, onTreeP: 0 };
+  let fixSkippedB = 0;
+  for (const { u: f, i: fi } of fixes) {
+    const diff = unitDiff(f, 0);
+    let removedCount = 0; let addedCount = 0;
+    for (const rec of diff.values()) { removedCount += rec.removed.length; addedCount += rec.added.length; }
+    // фикс, только ДОБАВИВШИЙ аргумент в многострочный вызов, ничего не удаляет — здесь он тоже годится
+    if (removedCount + addedCount === 0 || removedCount > LIMITS.fixRemoved) { fixSkippedB++; continue; }
+    // единицы-кандидаты P: раньше фикса, не старше 120 дней
+    const window = [];
+    for (let pi = fi - 1; pi >= 0; pi--) {
+      if ((f.date - units[pi].date) / 86_400_000 > LIMITS.maxAgeDays) break;
+      window.push(pi);
+    }
+    const hunks = fixHunksOld(f);
+    for (const [fileB, rec] of diff) {
+      if (TEST_PATH.test(fileB) || !CODE_PATH.test(fileB)) continue;
+      const textBase = showFile(f.base, fileB);
+      if (textBase == null) continue;
+      const sites = callSitesTouched(textBase, rec, hunks.get(fileB) || []);
+      if (!sites.length) continue;
+      const blame = blameLines(f.base, fileB, sites.map((c) => c.line));
+      for (const { line: callLine, text: callText, names } of sites) {
+        funnel.sites++;
+        const commit = blame.get(callLine);
+        const ci = commit ? unitOfCommit.get(commit) : -1; // вне окна SINCE — старше любой единицы
+        if (ci === undefined) continue;
+        const r = { line: callLine, text: callText };
+        for (const pi of window) {
+          if (ci >= pi) continue; // вызов появился в P или позже — не «P не обновил старый вызов»
+          funnel.olderThanP++;
+          const p = units[pi];
+          const pdiff = unitDiff(p, 0);
+          if (pdiff.has(fileB)) continue; // B в P — это не blast
+          funnel.outsideP++;
+          const changes = contractChanges(p);
+          for (const s of names) {
+            if (!changes.has(s)) continue;
+            funnel.sigChanged++;
+            const textAtP = showFile(p.sha, fileB);
+            if (textAtP == null) continue;
+            const ch = (changes.get(s) || []).filter((c) => c.file !== fileB && relatedCall(r.text, s, c.file, fileB, p.sha, textAtP));
+            if (!ch.length) {
+              if (process.env.REVIEW_GOLD_BLAST_DEBUG) console.log(`  [не связан] P=${p.sha.slice(0, 8)} F=${f.sha.slice(0, 8)} S=${s} A=${changes.get(s).map((c) => c.file).join(',')} B=${fileB}:${r.line} · ${r.text.trim().slice(0, 100)}`);
+              continue;
+            }
+            funnel.related++;
+            const want = r.text.trim();
+            const hits = textAtP.split('\n').map((t, k) => ({ t: t.trim(), n: k + 1 })).filter((x) => x.t === want);
+            if (!hits.length) continue;
+            funnel.onTreeP++;
+            const lineAtP = hits.sort((a, b) => Math.abs(a.n - r.line) - Math.abs(b.n - r.line))[0].n;
+            if (!cands.has(pi)) cands.set(pi, { locations: new Map(), fixes: new Map(), symbols: new Map() });
+            const c = cands.get(pi);
+            if (!c.locations.has(fileB)) c.locations.set(fileB, new Map());
+            c.locations.get(fileB).set(lineAtP, { s, fix: f.sha, callText: want });
+            c.fixes.set(f.sha, f);
+            c.symbols.set(s, ch[0]);
+          }
+        }
+      }
+    }
+  }
+
+  const out = [];
+  for (const [pi, c] of cands) {
+    const u = units[pi];
+    const size = unitSize(u);
+    if (size.lines > LIMITS.buggyLines || size.files > LIMITS.buggyFiles) {
+      if (process.env.REVIEW_GOLD_BLAST_DEBUG) console.log(`  [велик] P=${u.sha.slice(0, 8)} ${size.lines}л/${size.files}ф S=${[...c.symbols.keys()].join(',')} · ${u.title.slice(0, 70)}`);
+      continue;
+    }
+    out.push({ u, size, ...c });
+  }
+  out.sort((a, b) => b.u.date - a.u.date);
+  console.log(`[harvest-local --blast] ${NAME} ${BRANCH} since ${SINCE}: единиц ${units.length}, фиксов ${fixes.length} (пропущено по размеру ${fixSkippedB}), blast-кандидатов ${out.length}`);
+  console.log(`  воронка: вызовов в фиксах ${funnel.sites} → старше P ${funnel.olderThanP} → B вне P ${funnel.outsideP} → P сменил сигнатуру S ${funnel.sigChanged} → вызов к S из A ${funnel.related} → строка на дереве P ${funnel.onTreeP} → по размеру P ${out.length} единиц`);
+  for (const t of out) {
+    console.log(`  blast ${t.u.sha.slice(0, 8)} ${t.u.date.toISOString().slice(0, 10)} ${t.size.lines}л/${t.size.files}ф · ${t.u.title.slice(0, 70)}`);
+    for (const [s, ch] of t.symbols) console.log(`    S=${s} A=${ch.file}\n      до:    ${ch.before.join(' | ').slice(0, 200)}\n      после: ${ch.after.join(' | ').slice(0, 200)}`);
+    for (const [file, m] of t.locations) for (const [line, x] of m) console.log(`    B=${file}:${line} S=${x.s} F=${x.fix.slice(0, 8)} · ${x.callText.slice(0, 120)}`);
+  }
+
+  if (!EMIT) return;
+  // Мету пишем только для явно перечисленных через REVIEW_GOLD_BLAST_KEEP="sha8:S,…" — отбор глазами
+  // обязателен (RFC 21): автоматический кандидат без проверки в набор не идёт.
+  const keep = new Set(String(process.env.REVIEW_GOLD_BLAST_KEEP || '').split(',').map((x) => x.trim()).filter(Boolean));
+  const outDir = resolve(EMIT);
+  let written = 0;
+  for (const t of out) {
+    for (const [s, ch] of t.symbols) {
+      if (!keep.has(`${t.u.sha.slice(0, 8)}:${s}`)) continue;
+      const locs = [];
+      const fixShas = new Set();
+      for (const [file, m] of t.locations) for (const [line, x] of m) if (x.s === s) { locs.push({ file, lines: [line, line] }); fixShas.add(x.fix); }
+      const fixList = [...fixShas].map((sha) => t.fixes.get(sha));
+      const id = `${NAME}-${t.u.sha.slice(0, 8)}-blast-${slug(s)}`;
+      const meta = {
+        id,
+        type: 'tp',
+        tags: ['blast'],
+        description: `«${t.u.title}» сменил контракт ${s} в ${ch.file}, а вызов вне PR остался старым — его потом исправил ${fixList.map((f) => f.ref || f.sha.slice(0, 8)).join(', ')}`,
+        source: {
+          local: NAME,
+          branch: BRANCH,
+          sha: t.u.sha,
+          base: t.u.base,
+          ref: t.u.ref,
+          fixes: fixList.map((f) => ({ sha: f.sha, ref: f.ref, title: f.title })),
+          evidence: [
+            `дифф виновника: ${t.size.lines} строк в ${t.size.files} файл(ах)`,
+            `сигнатура ${s} в ${ch.file}: «${ch.before.join(' | ')}» → «${ch.after.join(' | ')}»`,
+            'локации: строка вызова в файле вне PR на дереве PR; git blame на родителе фикса — вызов старше PR',
+          ],
+        },
+        expect: {
+          mustFindLocations: locs,
+          note: `S=${s}, A=${ch.file}, фикс ${fixList.map((f) => f.sha.slice(0, 8)).join(', ')}`,
+        },
+      };
+      await mkdir(join(outDir, id), { recursive: true });
+      await writeFile(join(outDir, id, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+      written++;
+    }
+  }
+  console.log(`[harvest-local --blast] записано: ${written} → ${outDir}`);
+}
+
 // ── основной проход ──
 const units = loadUnits();
 const unitOfCommit = new Map();
@@ -249,6 +598,10 @@ for (let i = 0; i < units.length; i++) {
 }
 
 const fixes = units.map((u, i) => ({ u, i })).filter(({ u }) => isFix(u));
+if (BLAST) {
+  await harvestBlast();
+  process.exit(0);
+}
 const hitsByUnit = new Map(); // i → { locations: Map(file → Set(line)), fixes: [], contract: Set }
 let fixSkipped = 0;
 for (const { u: f, i: fi } of fixes) {
