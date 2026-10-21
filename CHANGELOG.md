@@ -18,6 +18,9 @@ last_updated: 2026-09-10
 - Артефакт экспорта — `EXPORT_VERSION` **3**: у находки появилось поле `wouldBlockBlast`,
   у статистики verifier'а — `bySource`. Аддитивно; потребитель, сверяющий версию на
   «известна ли», а не на равенство, ничего не замечает.
+- Новое необязательное поле профиля `layout.reviewSkip` (действует при
+  `REVIEW_PROFILE_TRUSTED=1`); без него меняется одно — общеизвестные lockfile и `*.map`
+  больше не уходят моделям в PR с кодом (ниже).
 - Формат футера sticky, namespace маркеров, контракты `swarm` / `structure` — без изменений.
 
 ### Добавлено — проверка blast-находок verifier'ом ([RFC 21](proposals/21-blast-verification.md))
@@ -36,6 +39,41 @@ strict-refutation понижал её до `minor` за отсутствие `ad
   `deepseek-v4-pro`: смена сигнатуры → verified ×2, необязательный параметр → rejected ×2.
 
 Дефолт переключится после замера на gold (план `blast-verification`, BLV-007/008).
+
+### Сгенерированные файлы не уходят моделям — `layout.reviewSkip`
+
+Класс skip роутера (lockfile, generated) решал только маршрут PR. Когда в PR рядом с ним был
+код, skip-файл всё равно нарезался в чанки. Orakul коммитит 26k-строчный OpenAPI YAML и его
+JSON-копии, которые CI сверяет с источником (`gen-openapi.mjs --check`). Жюри получало куски
+YAML, читало отступы через границу чанка и на каждом прогоне поднимало блокирующий major
+(«duplicate key», «description на неверном уровне»).
+
+Теперь:
+- файл, который роутер по имени считает generated (`x.generated.ts`, `dist/foo.js`), моделям
+  уходит — маршрут PR по-прежнему считает его skip, но вход LLM по одному имени не сужается;
+- trust gate: `reviewSkip` применяется только при `REVIEW_PROFILE_TRUSTED=1` (профиль взят
+  из base-ветки; шаг — в `examples/ci/pr-review.yml`), без флага игнорируется со строкой в логе;
+- встроенный skip сужает вход LLM только для общеизвестных lockfile (по имени) и `*.map`;
+- allowlist инертных файлов (и для доверенного профиля): lockfile, `*.map`, `md`/`mdx`/`rst`,
+  данные `json`/`yaml` — кроме dotfile, каталогов CI/IDE/инфраструктуры, инструкций агентам и
+  конфигов сборки; код по расширению, `.github/`, пин движка `ai-reviewer-ref`, всё, что читает
+  движок (профиль, `repoRulesFile`, `AGENTS.md`, каждое значение `paths.*`, путевые поля cfg,
+  каталоги из `ruleDirs`/`utilDirs`/`testConfigs` sgconfig — fail-closed), и `layout.sensitive`
+  не исключаются никогда; проигнорированные совпадения пишутся в лог;
+- сужение диффа fail-closed: секции ключуются путём из `parseDiff`; путь PR без своей
+  секции — модели получают полный дифф;
+- новое поле профиля `layout.reviewSkip` (регекс или массив регексов) объявляет пути, которые
+  никогда не уходят моделям. Роутер считает их skip (`routeDiff` получает `skipPaths`, паритетно
+  в Rust), поэтому PR из одних таких путей — маршрут skip;
+- находки моделей о skip-путях, их перенос из инкрементального state и prior findings в
+  промпте отбрасываются; Δ-блок покажет такие находки снятыми;
+- в sticky появляется строка «Не ревьюились моделями (generated/lockfile/reviewSkip профиля):
+  N файл(ов)», в событии `plan` — `reviewSkipped: {builtIn, profile}`;
+- prescan, blast-radius и карта PR skip-пути видят по-прежнему: меняется только вход LLM.
+
+Reference-профиль Orakul (`profiles/orakul.json`, `examples/consumers/orakul/profile.json`)
+объявляет `docs/08-technical/openapi/`, `app/server/apiDocs/openapi(.platform).json` и
+`docs/dev/reference/api-endpoints-index.md`.
 
 ## 0.6.3 — Walkthrough отчёта не противоречит блоку — 2026-10-16
 

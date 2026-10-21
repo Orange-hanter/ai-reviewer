@@ -15,7 +15,9 @@
  *   4. classifyChangedFile + routeDiff на diff.patch всех fixtures-кейсов
  *      (changedPaths — ключи секций + добавленные вручную пути без секций),
  *      литеральные кейсы из test/pr-review.eval.test.mjs, enabled/пустые пути;
- *   5. formatRouteLog для каждого прогона routeDiff.
+ *   5. formatRouteLog для каждого прогона routeDiff;
+ *   6. routeDiff со skipPaths (пути layout.reviewSkip профиля);
+ *   7. isCodePath на батарее путей корпуса 1.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -107,6 +109,9 @@ const PATHS = [
   'LICENSE', 'assets/logo.png', '.gitignore', 'Makefile', 'Dockerfile', '',
 ];
 for (const [i, p] of PATHS.entries()) checkClassify(`#${i} ${p}`, p);
+for (const [i, p] of PATHS.entries()) {
+  compare(`isCodePath #${i} ${p}`, runJs(R.isCodePath, p).value, R.isCodePath(p));
+}
 
 // ---------------------------------------------------------------------------
 // Корпус 2: extractFileDiffSections
@@ -177,6 +182,14 @@ checkRoute('other only → light', ['LICENSE'], 'diff');
 checkRoute('logic + skip', ['package-lock.json', 'server/x.ts'], 'diff');
 checkRoute('rename + logic', ['app/shared/new.ts', 'client/x.ts'], 'diff --git a/app/shared/old.ts b/app/shared/new.ts\nsimilarity index 100%\nrename from app/shared/old.ts\nrename to app/shared/new.ts\n');
 checkRoute('generated + docs', ['dist/bundle.js', 'docs/a.md'], 'diff');
+// skipPaths (layout.reviewSkip профиля): путь из списка — класс skip на обеих сторонах
+const OPENAPI = 'docs/08-technical/openapi/orakul-api.yaml';
+checkRoute('skipPaths: generated yaml + logic', [OPENAPI, 'app/server/x.ts'], 'diff', { skipPaths: [OPENAPI] });
+checkRoute('skipPaths: only profile-skip logic', ['app/client/api/client.ts'], 'diff', { skipPaths: ['app/client/api/client.ts'] });
+checkRoute('skipPaths: profile-skip + docs', ['app/server/apiDocs/openapi.json', 'docs/a.md'], 'diff', { skipPaths: ['app/server/apiDocs/openapi.json'] });
+checkRoute('skipPaths: not in changedPaths', ['app/server/x.ts'], 'diff', { skipPaths: ['other.json'] });
+checkRoute('skipPaths: empty', ['config.yml'], 'diff', { skipPaths: [] });
+checkRoute('skipPaths: router off', ['app/server/x.ts'], 'diff', { enabled: false, skipPaths: ['app/server/x.ts'] });
 
 // ---------------------------------------------------------------------------
 // Итог
