@@ -169,7 +169,9 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `REVIEW_ROUTER` | `1` | `0` — всегда полный прогон |
-| `REVIEW_PROFILE_TRUSTED` | `0` | `1` — профиль взят из base-ветки, а не из checkout'а PR; только тогда применяется `layout.reviewSkip` ([profiles.md](profiles.md#layoutreviewskip-и-доверие)) |
+| `REVIEW_PROFILE_TRUSTED` | `0` | `1` — профиль доверенный: движок читает его и его вход (repoRulesFile, AGENTS.md, fpPatterns, sgconfig + ruleDirs) из `REVIEW_BASE_REF`, и применяется `layout.reviewSkip` ([profiles.md](profiles.md#доверие)). Без `REVIEW_BASE_REF` флаг снимается |
+| `REVIEW_BASE_REF` | — | ref base-ветки для доверенного профиля (`origin/main`); git обязан резолвить его в коммит, иначе доверие снимается |
+| `REVIEW_LOCKFILE_REGISTRIES` | — | хосты через запятую сверх `registry.npmjs.org`, `registry.yarnpkg.com` для проверки источников в npm/yarn/pnpm lockfile ([profiles.md](profiles.md#layoutreviewskip-и-доверие)) |
 
 Классы: lockfile / generated / rename-only (`similarity index 100%` или секция без строк `+`/`-`; rename с правками — обычный файл, RFC 17) → **skip**; удалённый файл классифицируется по своему пути; docs-only → **light**; ни одного
 файла-кода (только config `yml/yaml/json/toml/sh/sql`, docs, прочее) → **light**; хоть один
@@ -178,12 +180,13 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 профиля его не меняет.
 
 Skip-класс работает и внутри full-маршрута, но вход LLM сужают только двое:
-- встроенный skip — общеизвестные lockfile (по имени) и `*.map`; прочий класс skip
+- встроенный skip — npm/yarn/pnpm lockfile (по имени; их источники пакетов проверяет
+  детерминированная проверка реестров) и source map JS/TS/CSS; прочий класс skip
   (`dist/`, `*.generated.*`, `*.lock`) решает лишь маршрут;
-- `layout.reviewSkip` профиля — **только при `REVIEW_PROFILE_TRUSTED=1`**, без флага он
-  игнорируется (строка в логе).
+- `layout.reviewSkip` профиля — **только при `REVIEW_PROFILE_TRUSTED=1` и `REVIEW_BASE_REF`**,
+  без них он игнорируется (строка в логе).
 
-Исключить можно только инертный файл (allowlist: lockfile, `*.map`, `md`/`mdx`/`rst`, данные
+Исключить можно только инертный файл (allowlist: lockfile, source map JS/TS/CSS, `md`/`mdx`/`rst`, данные
 `json`/`yaml` кроме dotfile, конфигов сборки/CI и каталогов инфраструктуры). Код, `.github/`,
 пин движка, всё, что читает движок, и `layout.sensitive` не исключаются никогда — см.
 [profiles.md](profiles.md#layoutreviewskip-и-доверие). Пути из `reviewSkip` роутер считает

@@ -819,9 +819,9 @@ test('collectReviewSkipped: встроенный skip (lockfile/map) + reviewSki
   assert.equal(r.reviewSkipIgnored, false);
   assert.equal(collectReviewSkipped(['app/server/x.ts']).all.size, 0, 'без профиля и skip-класса — пусто');
   assert.equal(formatReviewSkippedNote(collectReviewSkipped(['app/server/x.ts'])), '');
-  const many = collectReviewSkipped(['a.map', 'b.map', 'c.map', 'yarn.lock', 'x.ts']);
+  const many = collectReviewSkipped(['a.js.map', 'b.css.map', 'c.ts.map', 'yarn.lock', 'x.ts']);
   assert.equal(formatReviewSkippedNote(many),
-    'Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 4 файл(ов) — `a.map`, `b.map`, `c.map` и ещё 1.');
+    'Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 4 файл(ов) — `a.js.map`, `b.css.map`, `c.ts.map` и ещё 1.');
 });
 
 test('collectReviewSkipped: trust gate — без REVIEW_PROFILE_TRUSTED reviewSkip не применяется', () => {

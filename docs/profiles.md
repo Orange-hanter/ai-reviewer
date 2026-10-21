@@ -95,7 +95,7 @@ TS/JS в корне репозитория, блок правил проекта
 | `layout.e2eSpec` | Что считать e2e-спекой: список таких файлов уходит в промпт, чтобы модель не писала «тестов нет» о PR со спекой в диффе | `*.spec.*` / `*.test.*` (`js`/`ts`, варианты `x`/`c`/`m`) под каталогом `e2e/`, `test/` или `tests/` на любой глубине: `(?:^\|/)(?:e2e\|tests?)/.+\.(?:spec\|test)\.[cm]?[jt]sx?$` |
 | `layout.logic` | **Сейчас не читается**: поле валидируется и хранится, но роутер классифицирует файлы по своим зашитым `LOGIC`/`CODE` ([`lib/router.mjs`](../lib/router.mjs), `rust/src/router.rs`) — задавать его бессмысленно | `\.(?:ts\|tsx\|js\|jsx\|mjs\|cjs\|vue\|svelte)$` — только JS/TS/Vue/Svelte |
 | `layout.sensitive` | Зоны, где цена пропущенного дефекта выше средней (плюс к встроенным auth/billing/migrations/workflows) — влияет на маршрут находки | пусто |
-| `layout.reviewSkip` | Пути, которые **никогда не уходят моделям**: сгенерированное, что CI потребителя сверяет с источником (OpenAPI-спека, её JSON-копии, индекс эндпоинтов). Регекс или массив регексов (склеиваются в `(?:a)\|(?:b)`), без учёта регистра; битый — фича выключена. Применяется **только при `REVIEW_PROFILE_TRUSTED=1`** (профиль взят из base-ветки). Совпавший путь роутер считает skip, он исключается из LLM-чанков, находки моделей о нём снимаются, а в sticky он учтён в строке «Не ревьюились моделями». Prescan, blast-radius и карта PR его видят. Исключается только инертный файл (allowlist); код, `.github/`, пин движка, всё, что читает движок, и `layout.sensitive` — никогда. См. [ниже](#layoutreviewskip-и-доверие). Lockfile и `*.map` исключаются и без этого поля. Подробнее — [configuration.md](configuration.md#router) | пусто |
+| `layout.reviewSkip` | Пути, которые **никогда не уходят моделям**: сгенерированное, что CI потребителя сверяет с источником (OpenAPI-спека, её JSON-копии, индекс эндпоинтов). Регекс или массив регексов (склеиваются в `(?:a)\|(?:b)`), без учёта регистра; битый — фича выключена. Применяется **только при `REVIEW_PROFILE_TRUSTED=1` и `REVIEW_BASE_REF`** (движок сам читает профиль из base, см. [«Доверие»](#доверие)). Совпавший путь роутер считает skip, он исключается из LLM-чанков, находки моделей о нём снимаются, а в sticky он учтён в строке «Не ревьюились моделями». Prescan, blast-radius и карта PR его видят. Исключается только инертный файл (allowlist); код, `.github/`, пин движка, всё, что читает движок, и `layout.sensitive` — никогда. См. [ниже](#layoutreviewskip-и-доверие). npm/yarn/pnpm lockfile и source map JS/TS/CSS исключаются и без этого поля. Подробнее — [configuration.md](configuration.md#router) | пусто |
 | `astgrep.scopes` | `ruleId → regex пути`: где правило вообще применимо (globs в `sgconfig.yml` не знают слоёв проекта) | правило действует везде |
 | `astgrep.allow` | `ruleId → список путей-исключений` (например, единственный модуль, которому сырой `X-Forwarded-For` положен по роли) | пусто |
 | `paths.feedbackLog` | JSONL-журнал feedback | `.ai-review/feedback/fp-feedback.jsonl` |
@@ -115,21 +115,70 @@ TS/JS в корне репозитория, блок правил проекта
 ## `layout.reviewSkip` и доверие
 
 **Trust gate.** `reviewSkip` применяется, только когда потребитель объявил профиль доверенным:
-`REVIEW_PROFILE_TRUSTED=1`. Это значит, что файл профиля взят из base-ветки, а не из checkout'а
-PR, и автор PR его не правил. Без флага `reviewSkip` игнорируется целиком, в логе одна строка
-`reviewSkip ignored: profile not marked trusted (REVIEW_PROFILE_TRUSTED)`. Шаг workflow —
-в [`examples/ci/pr-review.yml`](../examples/ci/pr-review.yml):
+`REVIEW_PROFILE_TRUSTED=1` **и** назвал base ref: `REVIEW_BASE_REF` (например
+`origin/main`). Без флага `reviewSkip` игнорируется целиком, в логе одна строка
+`reviewSkip ignored: profile not marked trusted (REVIEW_PROFILE_TRUSTED)`. Флаг без
+`REVIEW_BASE_REF`, с невалидным ref или ref, который git не резолвит в коммит, **снимается**:
+`REVIEW_PROFILE_TRUSTED=1 снят: <причина>` в логе, дальше — как без флага.
+
+### Доверие
+
+В потребителе рабочее дерево — checkout PR. Всё, что в нём лежит, пишет автор PR, и любой
+файл, который движок читает как настройку гейта, — способ этот гейт ослабить: промпт
+(`repoRulesFile`, `AGENTS.md`), FP-паттерны, снимающие находки (`paths.fpPatterns`), правила
+ast-grep, сам профиль с `reviewSkip`. Модель доверия:
+
+| Вход | Без доверия | `REVIEW_PROFILE_TRUSTED=1` + `REVIEW_BASE_REF` |
+|------|-------------|-----------------------------------------------|
+| файл профиля (`REVIEW_PROFILE` / автопоиск) | рабочее дерево | `git cat-file blob <base>:<путь>` |
+| `repoRulesFile`, `AGENTS.md`/`agents.md` (каталог профиля и корень) | рабочее дерево | base |
+| `paths.fpPatterns` (`REVIEW_FP_PATTERNS`) | рабочее дерево | base |
+| `paths.astgrepConfig` + его `ruleDirs`/`utilDirs` | рабочее дерево | копия base во временном каталоге, ast-grep запускается с ней |
+| `layout.reviewSkip` | не применяется | применяется |
+
+- Файла нет в base — он **отсутствует**: копия из рабочего дерева не подставляется
+  (`repoRulesFile` → пустые правила, fpPatterns → стартовый набор пакета, sgconfig → ast-grep
+  пропущен).
+- Путь вне рабочего каталога или внутри пакета движка (`.ai-reviewer-engine/` в checkout'е
+  потребителя) читается с диска: его не пишет автор PR.
+- `paths.fpMarkdown` и `paths.feedbackLog` прогон ревью не читает: их пишет и читает
+  feedback-цикл (`pr-review-feedback`), у которого свой checkout.
+- Не покрыто: конфиг eslint prescan, граф graphify, состояние инкрементального прогона,
+  lcov — они либо собираются в CI заново, либо не управляют гейтом.
+
+CI-шаблон дополнительно восстанавливает эти файлы из base до запуска движка (защита для пинов
+старше этой версии и для инструментов, читающих диск). Шаг в
+[`examples/ci/pr-review.yml`](../examples/ci/pr-review.yml):
 
 ```sh
-git show "origin/$BASE_REF:ops/ai-review/profile.json" > ops/ai-review/profile.json
-git show "origin/$BASE_REF:ops/ai-review/repo-rules.md" > ops/ai-review/repo-rules.md
-# и в env шага ревью: REVIEW_PROFILE_TRUSTED: '1'
+# файлы: нет в base — удалить из рабочего дерева
+for f in ops/ai-review/profile.json ops/ai-review/repo-rules.md AGENTS.md agents.md ops/pr-review/feedback/fp-patterns.jsonl; do
+  git show "origin/$BASE_REF:$f" > "$f" 2>/dev/null || rm -f "$f"
+done
+# каталоги ast-grep: целиком из base (добавленное в PR — удалить)
+for d in ops/pr-review/ast-grep; do
+  rm -rf "$d"; git ls-tree -d --name-only "origin/$BASE_REF" -- "$d" | grep -q . && git checkout "origin/$BASE_REF" -- "$d"
+done
+# и в env шага ревью: REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: origin/${{ github.base_ref }}
 ```
 
-**Встроенный skip** (без профиля) убирает из входа моделей только общеизвестные lockfile
-(`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `composer.lock`, `Cargo.lock`,
-`poetry.lock`, `Gemfile.lock` — точно по имени) и `*.map`. Остальной класс skip роутера
-(`dist/`, `build/`, `*.generated.*`, произвольный `*.lock`) решает только маршрут PR.
+**Встроенный skip** (без профиля) убирает из входа моделей только npm/yarn/pnpm lockfile
+(`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` — точно по имени) и source map JS/TS/CSS
+(`*.js.map`, `*.mjs.map`, `*.cjs.map`, `*.jsx.map`, `*.ts.map`, `*.tsx.map`, `*.css.map`).
+Голый `*.map` (nginx-карты, данные) не skip. Остальной класс skip роутера (`dist/`, `build/`,
+`*.generated.*`, произвольный `*.lock`) решает только маршрут PR.
+
+**Источники пакетов в lockfile** проверяются детерминированно, не моделью: в добавленных
+строках npm/yarn/pnpm lockfile ищется URL источника (`resolved`, `tarball`, `resolution`,
+`repo`). Хост вне `registry.npmjs.org`, `registry.yarnpkg.com` и списка env
+`REVIEW_LOCKFILE_REGISTRIES` (через запятую) или нешифрованный `http:` — находка **major**
+`lockfile: пакет ставится не из разрешённого реестра — <host>` в форме prescan
+(`ruleId: lockfile-foreign-registry`, `prescanBlock: true`). Она отменяет router skip/light
+(PR из одного lockfile идёт полным путём гейта) и, как major eslint, блокирует merge при
+`REVIEW_BLOCK_SINGLE`, включающем `major`. Профилем список реестров не расширяется: профиль
+недоверенного прогона пишет автор PR. `composer.lock`, `Cargo.lock`, `poetry.lock`,
+`Gemfile.lock` такой проверки не имеют и поэтому уходят моделям; скрыть их может только
+`reviewSkip` доверенного профиля.
 
 **Allowlist** — действует и для доверенного профиля. Из входа моделей можно убрать только
 инертный файл:
@@ -137,7 +186,7 @@ git show "origin/$BASE_REF:ops/ai-review/repo-rules.md" > ops/ai-review/repo-rul
 | Инертно (skip допустим) | Пример |
 |-------------------------|--------|
 | lockfile (по имени, список выше) | `package-lock.json`, `app/yarn.lock` |
-| source map | `*.map`, `*.min.js.map` |
+| source map JS/TS/CSS | `*.js.map`, `*.min.js.map`, `*.css.map` (голый `*.map` — нет) |
 | документация | `*.md`, `*.mdx`, `*.rst` |
 | данные | `*.json`, `*.yaml`, `*.yml` — `openapi.json`, `orakul-api.yaml` |
 
@@ -174,8 +223,12 @@ git show "origin/$BASE_REF:ops/ai-review/repo-rules.md" > ops/ai-review/repo-rul
   каталоги-префиксы `feedback.candidatesDir`, `export.dir`, `observability.dir`,
   `structure.exportDir`;
 - sgconfig ast-grep и каталоги из его `ruleDirs`, `utilDirs`, `testConfigs[].testDir`/
-  `snapshotDir` (относительно каталога конфига). Не прочитался или не разобрался — fail-closed:
-  защищается каталог конфига и любой `.yml`/`.yaml` в PR.
+  `snapshotDir` (относительно каталога конфига); при доверии — каталоги и версии из base, и
+  версии из PR. Не прочитался или не разобрался — fail-closed: защищается каталог конфига и
+  любой `.yml`/`.yaml` в PR. Разбор — подмножество YAML (парсера в зависимостях нет), и любая
+  строка вне него даёт «не разобрался»: ключ в кавычках, `---`, `?`, флоу-маппинг, якорь/алиас,
+  merge-ключ `<<`, вложенные строки под ключом, который не `ruleDirs`/`utilDirs`/`testConfigs`/
+  `languageGlobs`/`customLanguages`/`languageInjections`, кавычки или флоу внутри значения.
 
 Совпадение с защищённым путём просто не применяется: файл ревьюится как обычно, его прошлые
 находки переносятся как обычно. В логе CI — строка `skip-пути: N совпадений проигнорировано`

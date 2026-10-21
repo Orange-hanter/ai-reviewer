@@ -200,19 +200,50 @@ jobs:
           tar -xzf "$D/$NAME" -C .ai-reviewer-engine/rust/bin
           echo "→ бинари ai-reviewer@$REF ($T) установлены"
 
-      # Профиль и правила репозитория — из base-ветки: автор PR не может своим PR поменять
-      # ни промпт, ни список путей, которые не уходят моделям (layout.reviewSkip). Только
-      # после этого шага профиль объявляется доверенным (REVIEW_PROFILE_TRUSTED=1 ниже).
+      # Всё, что движок читает как настройку гейта, — из base-ветки: автор PR не может своим PR
+      # поменять ни промпт (repoRulesFile, AGENTS.md), ни FP-паттерны, снимающие находки, ни
+      # правила ast-grep, ни список путей, которые не уходят моделям (layout.reviewSkip).
+      # Движок с REVIEW_BASE_REF и сам читает эти файлы из base (docs/profiles.md «Доверие»);
+      # шаг — защита для пинов старше и для инструментов, читающих диск. Файла нет в base —
+      # он удаляется: копия из PR не должна остаться. Пути — из профиля base, не из PR.
       - name: Take review profile from base branch
         if: steps.pin.outputs.ref != ''
         env:
           BASE_REF: ${{ github.base_ref }}
+          PROFILE: ops/ai-review/profile.json
         run: |
           BASE_REF="${BASE_REF:-main}"
           [[ "$BASE_REF" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid BASE_REF"; exit 1; }
-          for f in ops/ai-review/profile.json ops/ai-review/repo-rules.md; do
-            git show "origin/$BASE_REF:$f" > "$f" 2>/dev/null || { rm -f "$f"; echo "→ $f нет в origin/$BASE_REF"; }
-          done
+          BASE="origin/$BASE_REF"
+          safe() { [[ "$1" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ && "$1" != *..* ]] || { echo "::error::небезопасный путь из профиля: $1"; exit 1; }; }
+          restore_file() {
+            safe "$1"
+            mkdir -p "$(dirname "$1")"
+            git show "$BASE:$1" > "$1" 2>/dev/null || { rm -f "$1"; echo "→ $1 нет в $BASE"; }
+          }
+          restore_dir() {   # целиком: добавленное в PR удаляется, удалённое — возвращается
+            safe "$1"
+            rm -rf "$1"
+            if [ -n "$(git ls-tree -d --name-only "$BASE" -- "$1")" ]; then
+              git checkout "$BASE" -- "$1"
+            else
+              echo "→ $1/ нет в $BASE"
+            fi
+          }
+          restore_file "$PROFILE"
+          PDIR="$(dirname "$PROFILE")"
+          for f in AGENTS.md agents.md "$PDIR/AGENTS.md" "$PDIR/agents.md"; do restore_file "$f"; done
+          if [ -f "$PROFILE" ]; then
+            RULES="$(jq -r '.repoRulesFile // empty' "$PROFILE")"   # от каталога профиля
+            if [ -n "$RULES" ]; then restore_file "$PDIR/$RULES"; fi
+            FP="$(jq -r '.paths.fpPatterns // empty' "$PROFILE")"
+            if [ -n "$FP" ]; then restore_file "$FP"; fi
+            SG="$(jq -r '.paths.astgrepConfig // empty' "$PROFILE")"
+            if [ -n "$SG" ]; then
+              # sgconfig и его ruleDirs/utilDirs — каталог конфига целиком (в корне — только файл)
+              if [ "$(dirname "$SG")" = "." ]; then restore_file "$SG"; else restore_dir "$(dirname "$SG")"; fi
+            fi
+          fi
 
       # БЕЗ continue-on-error: скрипт выходит 1 ТОЛЬКО на находках critical/major (REVIEW_BLOCK_ON)
       # внутри скрипта (die/throw), джоб зелёный, merge не блокируется.
@@ -256,7 +287,9 @@ jobs:
           # Профиль проекта: маркеры комментариев, правила репозитория для промпта, раскладка
           # каталогов, scope ast-grep правил и пути feedback (см. docs/profiles.md движка).
           REVIEW_PROFILE: ops/ai-review/profile.json
-          REVIEW_PROFILE_TRUSTED: '1'      # профиль взят из base-ветки шагом выше → reviewSkip применяется
+          REVIEW_PROFILE_TRUSTED: '1'      # профиль и его вход — из base (шаг выше + REVIEW_BASE_REF) → reviewSkip применяется
+          REVIEW_BASE_REF: origin/${{ github.base_ref || 'main' }}   # без него REVIEW_PROFILE_TRUSTED снимается
+          # REVIEW_LOCKFILE_REGISTRIES: npm.pkg.github.com   # реестры сверх npmjs/yarnpkg для проверки lockfile
           REVIEW_CHUNK_BYTES: '56000'       # крупнее чанк → меньше LLM-вызовов (баланс recall/скорость)
           REVIEW_CONCURRENCY: '10'            # параллельных chunk-pipeline (3 specialists + aggregator)
           REVIEW_MAX_CHUNKS: '40'           # потолок числа чанков (гигантский PR → чанки крупнее, влезаем в timeout)

@@ -1124,8 +1124,11 @@ ${LOCK_DIFF}`;
 // reviewSkip применяется только к профилю из base-ветки (REVIEW_PROFILE_TRUSTED=1).
 // sgconfig reference-профиля (ops/pr-review/…) в этом репозитории нет — без override защита
 // уходит в fail-closed и прячет от skip любой YAML. Даём существующий конфиг пакета.
+// Доверие требует base ref (lib/trusted-input.mjs); cwd тестов — пакет движка, его файлы
+// читаются с диска, так что HEAD здесь только делает доверие действительным.
 const TRUSTED = {
   REVIEW_PROFILE_TRUSTED: '1',
+  REVIEW_BASE_REF: 'HEAD',
   REVIEW_ASTGREP_CONFIG: fileURLToPath(new URL('../ast-grep/sgconfig.yml', import.meta.url)),
 };
 
@@ -1169,6 +1172,55 @@ test('pipeline: skip-пути (reviewSkip профиля + lockfile) не ухо
   const sticky = calls.upsertSticky.at(-1);
   assert.ok(sticky.includes('Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 2 файл(ов)'), sticky);
   assert.ok(sticky.includes(`\`${SKIP_YAML}\``));
+});
+
+// Lockfile не уходит моделям (встроенный skip), а PR из одного lockfile — route skip. Смена
+// реестра в нём — подмена зависимости: детерминированная находка отменяет короткий путь.
+const EVIL_LOCK_DIFF = `diff --git a/package-lock.json b/package-lock.json
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -10,3 +10,3 @@
+     "node_modules/left-pad": {
+-      "resolved": "https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz",
++      "resolved": "https://evil.example.com/left-pad/-/left-pad-1.3.0.tgz",
+       "integrity": "sha512-x"
+`;
+
+test('pipeline: lockfile с пакетом из чужого реестра — находка major, router skip отменён', async () => {
+  const logs = [];
+  const { code, calls } = await runPipeline({
+    diff: EVIL_LOCK_DIFF, reviews: [okEmpty('m1')],
+    mutateDeps: (deps) => { deps.log = (...a) => logs.push(a.join(' ')); },
+  });
+  // major одного источника, как major eslint: в отчёте, блок — по REVIEW_BLOCK_SINGLE
+  assert.equal(code, 0);
+  assert.equal(calls.engineRuns, 0, 'моделям читать нечего — lockfile в skip');
+  const sticky = calls.upsertSticky.at(-1);
+  assert.ok(sticky.includes('lockfile: пакет ставится не из разрешённого реестра — evil.example.com'), sticky);
+  assert.ok(logs.some((l) => l.includes('router skip отменён')), logs.join('\n'));
+  const strict = await runPipeline({ diff: EVIL_LOCK_DIFF, reviews: [okEmpty('m1')], env: { REVIEW_BLOCK_SINGLE: 'critical,major' } });
+  assert.equal(strict.code, 1, 'prescanBlock: при REVIEW_BLOCK_SINGLE с major находка блокирует');
+  // тот же lockfile из официального реестра — по-прежнему короткий путь
+  const ok = await runPipeline({ diff: EVIL_LOCK_DIFF.replace('evil.example.com', 'registry.npmjs.org'), reviews: [okEmpty('m1')] });
+  assert.ok(!ok.calls.upsertSticky.at(-1).includes('lockfile: пакет'));
+  // хост из REVIEW_LOCKFILE_REGISTRIES разрешён
+  const allowed = await runPipeline({ diff: EVIL_LOCK_DIFF, reviews: [okEmpty('m1')], env: { REVIEW_LOCKFILE_REGISTRIES: 'evil.example.com' } });
+  assert.ok(!allowed.calls.upsertSticky.at(-1).includes('lockfile: пакет'));
+});
+
+test('pipeline: REVIEW_PROFILE_TRUSTED=1 без REVIEW_BASE_REF — доверие снято, reviewSkip не применяется', async () => {
+  const logs = [];
+  let chunks = null;
+  await runPipeline({
+    diff: CODE_DIFF + SKIP_ONLY_DIFF, reviews: [okEmpty('m1')], env: { ...TRUSTED, REVIEW_BASE_REF: '' },
+    mutateDeps: (deps) => {
+      deps.log = (...a) => logs.push(a.join(' '));
+      const orig = deps.engine.reviewAllModels;
+      deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
+    },
+  });
+  assert.ok(logs.some((l) => l.includes('REVIEW_PROFILE_TRUSTED=1 снят: REVIEW_BASE_REF не задан')), logs.join('\n'));
+  assert.ok(chunks.flatMap((c) => c.paths).includes(SKIP_YAML), 'YAML ушёл моделям');
 });
 
 test('pipeline: роутер выключен, в PR только skip-пути — LLM не вызывается', async () => {
@@ -1222,6 +1274,12 @@ test('pipeline: reviewSkip ".*" не прячет конфиги сборки, s
     layout: { reviewSkip: '.*' },
     paths: { fpPatterns: 'ops/ai-review/fp-patterns.json' },
   }));
+  // Доверенный профиль читается из REVIEW_BASE_REF (HEAD): каталог — репозиторий с профилем в base.
+  const { execFileSync } = await import('node:child_process');
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: root, stdio: 'ignore' });
+  git('init', '-q');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'base');
   const kept = ['app/server/x.ts', 'package.json', 'Dockerfile', 'scripts/deploy.sh',
     'ops/ai-review/repo-rules.md', 'ops/ai-review/fp-patterns.json'];
   let chunks = null;

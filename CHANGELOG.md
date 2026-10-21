@@ -10,6 +10,36 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+### Безопасность — вход доверенного профиля из base, fail-closed sgconfig, проверка lockfile
+
+Доработка `layout.reviewSkip` (PR #62) по итогам security-ревью, три пункта:
+
+- **Граница доверия** (`lib/trusted-input.mjs`). `REVIEW_PROFILE_TRUSTED=1` теперь требует
+  `REVIEW_BASE_REF` (`origin/main`): движок сам читает из base через git файл профиля,
+  `repoRulesFile`, `AGENTS.md`/`agents.md` (каталог профиля и корень), `paths.fpPatterns`, а
+  sgconfig ast-grep с его `ruleDirs`/`utilDirs` копирует из base во временный каталог и
+  запускает ast-grep с копией. Файла нет в base — он отсутствует, копия из PR не
+  подставляется. Без `REVIEW_BASE_REF`, с невалидным или нерезолвящимся ref доверие
+  снимается (строка `REVIEW_PROFILE_TRUSTED=1 снят: …` в логе), `reviewSkip` не применяется.
+  CI-шаблон восстанавливает из base профиль, `repoRulesFile`, `AGENTS.md`, fpPatterns и
+  каталог sgconfig (пути — из профиля base) и передаёт `REVIEW_BASE_REF`.
+- **`parseSgconfigDirs` fail-closed.** Строка, которую подмножество YAML не понимает (ключ в
+  кавычках, `---`, `?`, флоу-маппинг, якорь/алиас, `<<`, вложение под незнакомым ключом,
+  кавычки внутри значения), даёт null → защищается каталог конфига и любой YAML PR. Раньше
+  такие строки пропускались, и `"ruleDirs":` уводил каталоги правил из-под защиты.
+- **Встроенный skip уже.** Source map — только `*.{js,mjs,cjs,jsx,ts,tsx,css}.map` (голый
+  `*.map` — nginx-карты, данные — уходит моделям и не инертен для `reviewSkip`). Lockfile —
+  только npm/yarn/pnpm, и в их добавленных строках `resolved`/`tarball`/`resolution`/`repo` с
+  хостом вне `registry.npmjs.org`, `registry.yarnpkg.com` и env `REVIEW_LOCKFILE_REGISTRIES`
+  (или с `http:`) — детерминированная находка major `lockfile: пакет ставится не из
+  разрешённого реестра — <host>` (prescan, `ruleId: lockfile-foreign-registry`). Она отменяет
+  router skip/light. `composer.lock`/`Cargo.lock`/`poetry.lock`/`Gemfile.lock` проверки не
+  имеют и снова уходят моделям.
+
+**Для потребителя:** добавить в env шага ревью `REVIEW_BASE_REF: origin/${{ github.base_ref || 'main' }}`
+— без него `reviewSkip` перестанет применяться. Шаг «Take review profile from base branch»
+обновить по шаблону. Частный реестр npm — в `REVIEW_LOCKFILE_REGISTRIES`.
+
 ### Добавлено — запасная модель verifier'а, `REVIEW_VERIFIER_FALLBACK_MODEL`
 
 Раньше любой сбой основной модели verifier'а — сеть, лимит бесплатного тарифа, сорванный
