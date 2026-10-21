@@ -131,6 +131,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_VERIFIER` | `1` | Второй проход по кандидатам в блокеры |
 | `REVIEW_VERIFIER_MODEL` | `deepseek-v4-pro` | Модель-судья (вне пула advisors) |
+| `REVIEW_VERIFIER_FALLBACK_MODEL` | — | Запасная модель verifier'а: любой сбой основной (сеть, лимит бесплатного тарифа, сорванный JSON) отдаёт тот же батч ей вместо «verifier недоступен» (RFC 18). Пусто или равна основной — запасной нет. В observability вызов запасной помечен `fallbackFrom`. Работает только с Rust-конфигом |
 | `REVIEW_VERIFIER_MAX` | `12` | Максимум кандидатов в одном вызове verifier |
 | `REVIEW_VERIFIER_BATCHES` | `3` | Сколько вызовов verifier допустимо на прогон. Блокеры сверх `REVIEW_VERIFIER_MAX` идут следующими батчами; не влезшие в `MAX × BATCHES`, при `REVIEW_VERIFIER_STRICT=1` понижаются до minor (`verifierStatus: overflow`); не дошедшие из-за тайм-бюджета или сбоя хвостового батча — `verifierStatus: unavailable` (RFC 18) |
 | `REVIEW_VERIFIER_TEMPERATURE` | `0.2` | — |

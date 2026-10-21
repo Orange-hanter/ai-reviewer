@@ -156,3 +156,18 @@ test('LLM_MODEL_SETTINGS: effort, jsonEffort, maxTokens и provider — свои
     assert.ok(logs.some((l) => /неизвестное поле «efort»/.test(l)), 'ошибки разбора видны в логе');
   } finally { srv.close(); }
 });
+
+test('лимит :free-модели глушит только её, платная модель того же ключа работает', { skip }, async () => {
+  const freeLimit = '{"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429}}';
+  const srv = await scriptedServer([[429, freeLimit], [200, sse('{"verdicts":[]}')]]);
+  const logs = [];
+  try {
+    const c = client(srv.base, logs, []);
+    await assert.rejects(c.chatJson([{ role: 'user', content: 'x' }], 'minimax/minimax-m3.1-flash:free'), (e) => e.quota === true);
+    await assert.rejects(c.chatJson([{ role: 'user', content: 'x' }], 'minimax/minimax-m3.1-flash:free'), (e) => e.quota === true);
+    assert.deepEqual(await c.chatJson([{ role: 'user', content: 'x' }], 'deepseek/pro'), { verdicts: [] });
+    assert.equal(srv.seen.length, 2, 'второй вызов :free — без сети, платная модель — в сеть');
+    assert.equal(srv.seen[1].model, 'deepseek/pro');
+    assert.ok(logs.some((l) => /лимит модели исчерпан/.test(l)), logs.join('\n'));
+  } finally { srv.close(); }
+});
