@@ -806,6 +806,28 @@ test('blast-verify (RFC 21): verifier видит окно файла вызыв�
   assert.ok(seen[0].ctx.annotated.includes('export function foo()'), 'хунк, где меняется символ');
 });
 
+test('blast-verify (RFC 21): строка из графа мимо вызова — находка переносится на вызов символа', async () => {
+  // Граф ставит ребро на строку 1 (импорт), сам вызов `foo(` — на строке 40.
+  const lines = Array.from({ length: 60 }, (_, i) => `// ${i + 1}`);
+  lines[0] = "import { foo } from '../foo';";
+  lines[39] = 'const r = foo(1, 2);';
+  const entry = `### lib/caller.ts\n\`\`\`\n${lines.join('\n')}\n\`\`\``;
+  const seen = [];
+  await runPipeline({
+    diff: CODE_DIFF,
+    reviews: [emptyReview()],
+    graphify: { buildBlastRadius: async () => [BLAST_BLOCK.replace('lib/caller.ts:5', 'lib/caller.ts:1')] },
+    verifyFindings: async (candidates, ctx) => {
+      seen.push({ lines: candidates.map((c) => [c.line, c.blastGraphLine]), ctx });
+      return candidates.map((_, i) => ({ candidateIndex: i, decision: 'rejected', reason: 'r' }));
+    },
+    env: { REVIEW_VERIFIER: '1', REVIEW_BLAST_VERIFY: '1' },
+    mutateDeps: (deps) => { deps.readOutsideFile = async () => entry; },
+  });
+  assert.deepEqual(seen[0].lines, [[40, 1]], 'находка на строке вызова, строка графа сохранена');
+  assert.ok(seen[0].ctx.fileContents.includes('const r = foo(1, 2);'), 'окно verifier\'а стоит на вызове');
+});
+
 test('blast-verify (RFC 21): файл вызывающего кода не прочитан → minor/unverified, verifier его не получает', async () => {
   const { code, seen, reads, calls } = await runBlastVerify({ env: { REVIEW_BLAST_VERIFY: '1' } });
   assert.deepEqual(reads, ['lib/caller.ts']);

@@ -15,7 +15,7 @@ import { buildRepoPathIndex, listRepoFiles } from './lib/absent-path.mjs';
 import { BLAST_FINDING_SOURCE, MARKERS } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
-import { buildVerifierFileContents, windowChunkFileContents } from './lib/context-window.mjs';
+import { buildVerifierFileContents, windowChunkFileContents, findCallLines } from './lib/context-window.mjs';
 import {
   buildSymbolCards, createLineReader, selectChunkCards, symbolCardsHashInput, symbolCardsOutcome, isAbsenceClaim,
 } from './lib/symbol-cards.mjs';
@@ -188,6 +188,17 @@ async function runVerifierStage(allFindings, {
     for (const path of blastFiles) {
       const entry = await readOutside(path).catch(() => null);
       if (entry) outside.set(path, entry);
+    }
+    // Строка из графа — место ребра (бывает строкой импорта), а не вызова: окно verifier'а
+    // встало бы мимо вызова, и он честно отклонил бы находку. Переносим её на ближайший вызов
+    // символа; прежнюю строку храним. Вызова в файле нет (импорт, ре-экспорт) — строка прежняя.
+    for (const f of allFindings) {
+      if (f.source !== BLAST_FINDING_SOURCE || !outside.has(f.file) || !f.blastSymbol) continue;
+      const calls = findCallLines(outside.get(f.file), f.blastSymbol);
+      if (!calls.length || calls.includes(Number(f.line))) continue;
+      const near = calls.reduce((a, b) => (Math.abs(b - f.line) < Math.abs(a - f.line) ? b : a));
+      f.blastGraphLine = f.line;
+      f.line = near;
     }
     let unreadable = 0;
     for (const f of allFindings) {

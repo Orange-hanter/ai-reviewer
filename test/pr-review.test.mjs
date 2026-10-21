@@ -25,7 +25,7 @@ const {
   scoreFromRecord, locationMatches, DEFAULT_LOCATION_TOLERANCE,
   emitBlastRadiusFindings, resolveBlockers, normalizeFinding, setProfile, resetProfile,
   matchesKnownFalsePositive, redactSecretsForLog,
-  windowFileEntry, buildVerifierFileContents, windowChunkFileContents,
+  windowFileEntry, buildVerifierFileContents, windowChunkFileContents, findCallLines,
 } = await import('../index.mjs');
 const {
   buildGraphIndex, resolveUniqueNode, enrichAffectedDep, bareLabel, formatBlastBlock,
@@ -2072,6 +2072,14 @@ test('buildVerifierFileContents: только файлы кандидатов, �
   assert.ok(r.text.includes('… (lines 121–169 not shown)'), 'два окна a.ts не слились');
   assert.ok(!r.text.includes('### b.ts\n```\n… ('), 'b.ts отдан целиком: центрировать окно не на чем');
   assert.ok(r.after < r.before, `окна короче целых файлов: ${r.before} → ${r.after}`);
+});
+
+test('findCallLines: строки вызова символа, а не импорт и не имя-префикс (RFC 21)', () => {
+  const entry = '### a.js\n```\nimport * as telegram from "./t.js";\nif (telegram.getTgToken()) start();\nconst getTgTokenX = 1;\nx.getTgToken ();\n```';
+  assert.deepEqual(findCallLines(entry, 'getTgToken'), [2, 4]);
+  assert.deepEqual(findCallLines(entry, 'telegram'), [], 'обращение к модулю — не вызов');
+  assert.deepEqual(findCallLines(entry, 'a.b'), [], 'не идентификатор — пусто, без регулярки из ввода');
+  assert.deepEqual(findCallLines('не запись', 'x'), []);
 });
 
 test('buildVerifierFileContents: файл вызывающего кода вне PR — только окно у blast-кандидата (RFC 21)', () => {
