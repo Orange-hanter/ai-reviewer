@@ -812,24 +812,26 @@ test('collectReviewSkipped: встроенный skip (lockfile/map) + reviewSki
     'dist/bundle.css', 'docs/a.md', 'dist/app.js.map', 'vendor/x.lock'];
   const r = collectReviewSkipped(paths, { reviewSkip: /^docs\/08-technical\/openapi\//i, trusted: true });
   assert.deepEqual(r.byProfile, ['docs/08-technical/openapi/a.yaml']);
-  // встроенный — только общеизвестные lockfile и *.map; generated-каталоги и `*.lock` — нет
-  assert.deepEqual(r.builtIn, ['package-lock.json', 'dist/app.js.map']);
-  assert.deepEqual([...r.all], ['docs/08-technical/openapi/a.yaml', 'package-lock.json', 'dist/app.js.map']);
+  // встроенный — только source map; lockfile, generated-каталоги и `*.lock` уходят моделям
+  assert.deepEqual(r.builtIn, ['dist/app.js.map']);
+  assert.deepEqual([...r.all], ['docs/08-technical/openapi/a.yaml', 'dist/app.js.map']);
+  // lockfile из входа LLM убирает только reviewSkip доверенного профиля (allowlist: инертен)
+  assert.deepEqual(collectReviewSkipped(paths, { reviewSkip: /(?:^|\/)package-lock\.json$/, trusted: true }).byProfile, ['package-lock.json']);
   assert.deepEqual(r.ignored, []);
   assert.equal(r.reviewSkipIgnored, false);
   assert.equal(collectReviewSkipped(['app/server/x.ts']).all.size, 0, 'без профиля и skip-класса — пусто');
   assert.equal(formatReviewSkippedNote(collectReviewSkipped(['app/server/x.ts'])), '');
-  const many = collectReviewSkipped(['a.map', 'b.map', 'c.map', 'yarn.lock', 'x.ts']);
+  const many = collectReviewSkipped(['a.js.map', 'b.css.map', 'c.ts.map', 'd.tsx.map', 'yarn.lock', 'x.ts']);
   assert.equal(formatReviewSkippedNote(many),
-    'Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 4 файл(ов) — `a.map`, `b.map`, `c.map` и ещё 1.');
+    'Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 4 файл(ов) — `a.js.map`, `b.css.map`, `c.ts.map` и ещё 1.');
 });
 
 test('collectReviewSkipped: trust gate — без REVIEW_PROFILE_TRUSTED reviewSkip не применяется', () => {
-  const paths = ['docs/08-technical/openapi/a.yaml', 'package-lock.json'];
+  const paths = ['docs/08-technical/openapi/a.yaml', 'dist/app.js.map'];
   const re = /^docs\/08-technical\/openapi\//i;
   const off = collectReviewSkipped(paths, { reviewSkip: re });
   assert.deepEqual(off.byProfile, [], 'дефолт — недоверенный профиль');
-  assert.deepEqual(off.builtIn, ['package-lock.json'], 'встроенный skip от профиля не зависит');
+  assert.deepEqual(off.builtIn, ['dist/app.js.map'], 'встроенный skip от профиля не зависит');
   assert.equal(off.reviewSkipIgnored, true);
   const on = collectReviewSkipped(paths, { reviewSkip: re, trusted: true });
   assert.deepEqual(on.byProfile, ['docs/08-technical/openapi/a.yaml']);
@@ -855,8 +857,8 @@ test('reviewSkip доверенного профиля не прячет код,
     ['ops/ai-reviewer-ref', 'engine-pin'], ['ops/ai-review/profile.json', 'profile'], ['.ai-reviewer.json', 'profile'],
     ['ops/deploy/run.yml', 'sensitive'],
   ]);
-  // встроенный skip проходит ту же защиту: lockfile под .github — не повод молчать
-  assert.deepEqual(collectReviewSkipped(['.github/x/package-lock.json']).ignored.map((x) => [x.by, x.reason]), [['builtIn', '.github']]);
+  // встроенный skip проходит ту же защиту: source map под .github — не повод молчать
+  assert.deepEqual(collectReviewSkipped(['.github/x/app.js.map']).ignored.map((x) => [x.by, x.reason]), [['builtIn', '.github']]);
   assert.equal(isCodePath('src/x.generated.ts'), true);
   assert.equal(isCodePath('package-lock.json'), false);
 });

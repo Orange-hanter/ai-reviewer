@@ -21,6 +21,7 @@ import {
 } from './lib/symbol-cards.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
 import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
+import { scanLockfileRegistries } from './lib/lockfile-registry.mjs';
 import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath, collectProfileProtected } from './lib/router.mjs';
 import { createObservability, slimFindings, countBySeverity, PR_TITLE_LOG_MAX } from './lib/observability.mjs';
 import { buildSummary, buildRouterSummary, buildLlmUnavailableSummary } from './lib/report.mjs';
@@ -571,9 +572,16 @@ export function createReviewPipeline(cfg, deps = {}) {
         if (!isCodeCache.has(path)) isCodeCache.set(path, isCodePath(path));
         return isCodeCache.get(path);
       };
+      // Доверие — только когда движок сам читает профиль и его вход из REVIEW_BASE_REF
+      // (lib/trusted-input.mjs); без base ref REVIEW_PROFILE_TRUSTED=1 снимается.
+      if (cfg.trust?.requested && !cfg.trust.trusted) {
+        log(`REVIEW_PROFILE_TRUSTED=1 снят: ${cfg.trust.reason} — профиль и его файлы читаются из рабочего дерева как недоверенные`);
+      } else if (cfg.trust?.trusted) {
+        log(`профиль и его вход читаются из ${cfg.trust.baseRef} (REVIEW_PROFILE_TRUSTED=1)`);
+      }
       let reviewSkipped = collectReviewSkipped(changedPaths, {
         reviewSkip: cfg.profile?.layout?.reviewSkip || null,
-        trusted: cfg.router?.profileTrusted === true,
+        trusted: cfg.router?.profileTrusted === true && cfg.trust?.trusted === true,
         isCode,
         protectedPaths: collectProfileProtected(cfg),
         sensitive: cfg.profile?.layout?.sensitive || null,
@@ -608,7 +616,17 @@ export function createReviewPipeline(cfg, deps = {}) {
       });
       obs.logEvent('router', { route: route.route, reason: route.reason, files: route.files?.map((f) => f.class) });
 
-      if (route.route === 'skip' || route.route === 'light') {
+      // Источники пакетов в lockfile — ещё и детерминированно (добавочно к LLM: смену реестра
+      // в тысячах строк модель пропустит, а это подмена зависимости). Находки — в
+      // форме prescan, дальше по тому же пути (гейт, inline, sticky). Считаются ДО маршрута:
+      // PR из одного lockfile — route skip, и находка обязана отменить короткий путь.
+      const lockfileFindings = scanLockfileRegistries(diff, { registries: cfg.lockfile?.registries || [] });
+      if (lockfileFindings.length) {
+        log(`lockfile: ${lockfileFindings.length} источник(ов) пакетов вне разрешённых реестров`
+          + (route.route === 'full' ? '' : ` — router ${route.route} отменён, полный прогон гейта`));
+      }
+
+      if ((route.route === 'skip' || route.route === 'light') && !lockfileFindings.length) {
         const md = buildRouterSummary(cfg, { route, pr, headSha, changedPaths });
         finalObs = { exitCode: 0, route: route.route, wouldBlock: false };
         await persistAndCapture(buildReviewJson({
@@ -642,7 +660,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       if (addedPaths.size) log(`контекст: ${addedPaths.size} добавленных файл(ов) — дифф уже содержит их целиком, полный текст не прикладываем`);
       // Сначала читаем файлы: collectBlastSymbols добирает exports из полного текста,
       // а не только из hunk-строк (иначе правка тела функции → 0 symbols → пустой blast).
-      const [contentMap, rawPriorFindings, prescanResult] = await Promise.all([
+      const [contentMap, rawPriorFindings, rawPrescan] = await Promise.all([
         readChangedFiles(files, limits, log, { addedPaths }),
         (github.readPriorStickyData
           ? github.readPriorStickyData()
@@ -655,6 +673,13 @@ export function createReviewPipeline(cfg, deps = {}) {
         // Удалённым файлам линтер не нужен: их нет в рабочем дереве (RFC 17).
         prescan.run(deletedPaths.size ? changedPaths.filter((p) => !deletedPaths.has(p)) : changedPaths),
       ]);
+      const prescanResult = lockfileFindings.length
+        ? {
+          ...rawPrescan,
+          findings: [...(rawPrescan.findings || []), ...lockfileFindings],
+          byTool: { ...(rawPrescan.byTool || {}), lockfile: lockfileFindings.length },
+        }
+        : rawPrescan;
       const symbols = collectBlastSymbols(changedText, contentMap, limits.maxSymbols);
       log(`файлов: ${files.size} · символов под blast-radius: ${symbols.length}`, symbols);
       // Окна контекста для advisors и жюри (RFC 07): в промпт едут окрестности изменённых

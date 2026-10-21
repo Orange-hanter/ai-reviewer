@@ -53,6 +53,8 @@ export {
   DEFAULT_PROFILE, PROFILE_FILENAMES, createMarkers, normalizeProfile, loadProfileFile,
   getProfile, setProfile, resetProfile, resolveProfile,
 } from './lib/profile.mjs';
+export { resolveInputSource, worktreeSource, getInputSource, setInputSource, readInputText, materializeFromBase } from './lib/trusted-input.mjs';
+export { scanLockfileRegistries, parseLockfileRegistries, DEFAULT_LOCKFILE_REGISTRIES, LOCKFILE_REGISTRY_RULE } from './lib/lockfile-registry.mjs';
 export { publicErrorLabel, createAdaptiveSemaphore, redactSecretsForLog } from './lib/util.mjs';
 export { parseJsonl, aggregateMetrics, formatMetricsReport } from './lib/metrics.mjs';
 export { createGraphifyClient, blastUnavailableReason } from './lib/graphify.mjs';
