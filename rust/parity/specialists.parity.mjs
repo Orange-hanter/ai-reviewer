@@ -262,10 +262,41 @@ for (const [i, stats] of STAT_CASES.entries()) {
 }
 
 // ---------------------------------------------------------------------------
+// 7. RFC 21: blast-находка в strict-refutation
+//    без skipBlast — обычная сверка (обе стороны понижают до minor);
+//    со skipBlast — rust-owned (RFC 20): JS-копия параметра не знает, сверяется
+//    только ожидаемое поведение бинаря.
+// ---------------------------------------------------------------------------
+
+let rustOwned = 0;
+{
+  const blast = () => [{ file: 'b.ts', line: 3, severity: 'major', title: 't', source: 'blast-radius', prescan: false }];
+  const opts = { strict: true, blockOn: ['critical', 'major'] };
+  const jsIn = blast();
+  const js = runJs(S.applyRefutation, jsIn, () => {}, opts).value;
+  const rustIn = blast();
+  const rust = S.applyRefutation(rustIn, () => {}, opts);
+  compare('applyRefutation blast без skipBlast return', js, rust);
+  compare('applyRefutation blast без skipBlast mutations', jsIn, rustIn);
+
+  rustOwned += 1;
+  console.log('rust-owned (не сверяется с JS): applyRefutation blast + skipBlast');
+  const own = blast();
+  const r = S.applyRefutation(own, () => {}, { ...opts, skipBlast: true });
+  try {
+    assert.equal(own[0].severity, 'major');
+    assert.equal(own[0].refutationStatus, 'not_applicable');
+    assert.equal(r.stats.skippedBlast, 1);
+  } catch (e) {
+    failures.push({ label: 'rust-owned applyRefutation blast + skipBlast', js: '—', rust: JSON.stringify({ f: own[0], stats: r.stats }) });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Итог
 // ---------------------------------------------------------------------------
 
-console.log(`parity cases compared: ${compared}`);
+console.log(`parity cases compared: ${compared}, rust-owned: ${rustOwned}`);
 if (failures.length) {
   console.log(`FAILURES: ${failures.length}`);
   for (const f of failures.slice(0, 20)) {

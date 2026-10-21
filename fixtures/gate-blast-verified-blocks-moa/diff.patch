@@ -1,0 +1,11 @@
+diff --git a/lib/limits.ts b/lib/limits.ts
+--- a/lib/limits.ts
++++ b/lib/limits.ts
+@@ -1,5 +1,6 @@
+-export function parseLimits(raw: string, strict: boolean): Limits {
++export function parseLimits(opts: { raw: string; strict?: boolean }): Limits {
++  const { raw, strict = false } = opts;
+   const parts = raw.split(',');
+   if (strict && parts.length !== 2) throw new Error('bad limits');
+   return { min: Number(parts[0]), max: Number(parts[1]) };
+ }

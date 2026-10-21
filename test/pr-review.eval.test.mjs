@@ -108,12 +108,12 @@ test('applyVerifierVerdicts: downgrade critical → minor, не блок', () =>
 
 test('eval harness: все fixtures green', async () => {
   const { ok, metrics, results } = await runEvalHarness();
-  assert.equal(metrics.total, 20, 'ожидаем 20 seed fixtures');
+  assert.equal(metrics.total, 21, 'ожидаем 21 seed fixtures');
   if (!ok) {
     const failed = results.filter((r) => !r.pass).map((r) => `${r.id}: ${r.errors.join('; ')}`);
     assert.fail(`eval fixtures failed:\n${failed.join('\n')}`);
   }
-  assert.equal(metrics.passed, 20);
+  assert.equal(metrics.passed, 21);
 });
 
 test('loadReviewConfig: REVIEW_VERIFIER off', () => {

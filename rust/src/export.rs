@@ -27,7 +27,8 @@ use crate::findings::{js_to_number, js_to_string, js_truthy};
 use crate::report::{extract_reasoning_entries, js_slice_utf16, utf16_len};
 use crate::structure_evidence::sha256_str;
 
-pub const EXPORT_VERSION: i64 = 2;
+/// v3 (RFC 21): wouldBlockBlast у находки — аддитивно.
+pub const EXPORT_VERSION: i64 = 3;
 pub const SARIF_SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
 pub const TOOL_VERSION: &str = "1.0";
 
@@ -174,6 +175,7 @@ pub fn slim_finding(f: &Value) -> Value {
     insert_if_defined(&mut m, "refutationStatus", truthy_or_undef(obj.get("refutationStatus")));
     insert_if_defined(&mut m, "fp", truthy_or_undef(obj.get("fp")));
     insert_if_defined(&mut m, "verifierStatus", truthy_or_undef(obj.get("verifierStatus")));
+    insert_if_defined(&mut m, "wouldBlockBlast", truthy_or_undef(obj.get("wouldBlockBlast")));
     // actionabilityScore: только конечное число (Number.isFinite).
     match obj.get("actionabilityScore").and_then(js_to_number) {
         Some(x) if x.is_finite() => {
@@ -797,7 +799,7 @@ mod tests {
             "findings": [{"file": "a.ts", "line": 1, "severity": "major", "title": "t", "body": "b"}],
         });
         let out = build_review_json(Some(&input), "2026-09-04T00:00:00.000Z").unwrap();
-        assert_eq!(out["version"], json!(2));
+        assert_eq!(out["version"], json!(3));
         assert_eq!(out["generatedAt"], json!("2026-09-04T00:00:00.000Z"));
         assert_eq!(out["reviewMode"], json!("consensus"));
         assert_eq!(out["total"], json!(1));
