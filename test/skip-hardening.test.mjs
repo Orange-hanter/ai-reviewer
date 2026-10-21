@@ -80,7 +80,7 @@ test('scanLockfileRegistries: чужой хост в добавленных reso
   const f = scanLockfileRegistries(diff);
   assert.deepEqual(f.map((x) => [x.file, x.line, x.title]), [
     ['package-lock.json', 7, 'lockfile: пакет ставится не из разрешённого реестра — evil.example.com'],
-    ['package-lock.json', 9, 'lockfile: пакет ставится не из разрешённого реестра — github.com'],
+    ['package-lock.json', 9, 'lockfile: источник пакета не разобран однозначно — userinfo (@) в адресе'],
     ['app/yarn.lock', 6, 'lockfile: пакет ставится по нешифрованному http — registry.yarnpkg.com'],
     ['pnpm-lock.yaml', 6, 'lockfile: пакет ставится не из разрешённого реестра — npm.pkg.github.com'],
   ]);
@@ -95,8 +95,60 @@ test('scanLockfileRegistries: чужой хост в добавленных reso
   // allowlist из env
   const hosts = parseLockfileRegistries(' npm.pkg.github.com , https://github.com/org ,, ');
   assert.deepEqual(hosts, ['npm.pkg.github.com', 'github.com']);
-  assert.deepEqual(scanLockfileRegistries(diff, { registries: hosts }).map((x) => x.file), ['package-lock.json', 'app/yarn.lock']);
+  assert.deepEqual(scanLockfileRegistries(diff, { registries: hosts }).map((x) => x.title), [
+    'lockfile: пакет ставится не из разрешённого реестра — evil.example.com',
+    'lockfile: источник пакета не разобран однозначно — userinfo (@) в адресе',
+    'lockfile: пакет ставится по нешифрованному http — registry.yarnpkg.com',
+  ], 'npm.pkg.github.com разрешён env; userinfo — неоднозначность, allowlist её не снимает');
   assert.deepEqual(scanLockfileRegistries(lockSection('package-lock.json', ['"resolved": "https://registry.npmjs.org/a.tgz"'])), []);
+});
+
+test('scanLockfileRegistries: значения декодируются как у менеджера, неоднозначное — находка', async () => {
+  const { scanLockfileRegistries } = await import('../lib/lockfile-registry.mjs');
+  const NOT_RESOLVED = 'не разобран однозначно';
+  // [lockfile, добавленная строка, подстрока заголовка находки | null — находки нет]
+  const cases = [
+    // декодирование и fail-closed
+    ['package-lock.json', '"resolved": "https:\\/\\/evil.example\\/x.tgz",', `${NOT_RESOLVED} — обратный слэш`],
+    ['package-lock.json', '"resolved": "https:\\/\\/registry.npmjs.org\\/x.tgz",', `${NOT_RESOLVED} — обратный слэш`],
+    ['package-lock.json', '"resolved": "https://registry.npmjs.org@evil.example/x.tgz",', `${NOT_RESOLVED} — userinfo`],
+    ['package-lock.json', '"resolved": "https://registry.npmjs.org%40evil.example/x.tgz",', `${NOT_RESOLVED} — %-escape`],
+    ['package-lock.json', '"resolved": "https://registry.npmjs.org:8443/x.tgz",', `${NOT_RESOLVED} — порт`],
+    ['yarn.lock', '  resolved "https://evil\\u002eexample/x.tgz"', `${NOT_RESOLVED} — обратный слэш`],
+    ['yarn.lock', '  resolved "https://evil.example/x.tgz', `${NOT_RESOLVED} — кавычка без пары`],
+    ['pnpm-lock.yaml', "    resolution: {tarball: 'https://evil.example/x.tgz'}", 'не из разрешённого реестра — evil.example'],
+    // любое значение, не только resolved/tarball
+    ['package-lock.json', '"version": "git+ssh://git@github.com/x/y.git#abc",', `${NOT_RESOLVED} — userinfo`],
+    ['package-lock.json', '"y": "git+https://github.com/x/y.git#abc",', 'не из реестра по https — git+https://github.com'],
+    ['package-lock.json', '"from": "github:x/y",', 'из git/хостинга кода — github:'],
+    ['package-lock.json', '"x": "gitlab:a/b",', 'из git/хостинга кода — gitlab:'],
+    ['package-lock.json', '"x": "git@github.com:org/repo.git",', 'из git/хостинга кода — git@host:path'],
+    ['yarn.lock', '"left-pad@https://evil.example/lp.tgz", left-pad@^1.3.0:', 'не из разрешённого реестра — evil.example'],
+    ['yarn.lock', '"@s/x@bitbucket:o/r":', 'из git/хостинга кода — bitbucket:'],
+    ['yarn.lock', '"x@exec:./build.js":', 'из git/хостинга кода — exec:'],
+    ['package-lock.json', '"repository": "ssh://registry.npmjs.org/x",', 'не из реестра по https — ssh://registry.npmjs.org'],
+    ['pnpm-lock.yaml', '    version: link:../outside', 'вне репозитория — link:../outside'],
+    ['app/pnpm-lock.yaml', '    version: link:../packages/a', null],
+    ['pnpm-lock.yaml', '    version: file:/etc/x', 'вне репозитория — file:/etc/x'],
+    ['package-lock.json', '"resolved": "packages/local",', null],
+    ['yarn.lock', '"left-pad@^1.3.0", left-pad@npm:1.3.0:', null],
+    ['pnpm-lock.yaml', '  /left-pad@1.3.0:', null],
+    ['package-lock.json', '"integrity": "sha512-abc+/=",', null],
+    // funding — ссылки на донаты, но только строка ровно такой формы
+    ['package-lock.json', '"url": "https://github.com/sponsors/x"', null],
+    ['package-lock.json', '"funding": "https://opencollective.com/x",', null],
+    ['package-lock.json', '"url": "https://github.com/sponsors/x", "resolved": "https://evil.example/y.tgz"', 'не из разрешённого реестра — evil.example'],
+  ];
+  for (const [file, line, want] of cases) {
+    const titles = scanLockfileRegistries(lockSection(file, [line])).map((x) => x.title);
+    if (want === null) assert.deepEqual(titles, [], `${file}: ${line}`);
+    else assert.ok(titles.some((t) => t.includes(want)), `${file}: ${line} → ${JSON.stringify(titles)}`);
+  }
+  // многострочная запись funding пропускается целиком; чужой ключ внутри снимает режим
+  const fundingBlock = ['"funding": [', '{', '"type": "github",', '"url": "https://github.com/sponsors/x"', '},', '"https://opencollective.com/x"', '],'];
+  assert.deepEqual(scanLockfileRegistries(lockSection('package-lock.json', fundingBlock)), []);
+  const smuggled = ['"funding": {', '"type": "github",', '"resolved": "https://evil.example/z.tgz"', '}'];
+  assert.equal(scanLockfileRegistries(lockSection('package-lock.json', smuggled)).length, 1);
 });
 
 // ---------------------------------------------------------------------------
@@ -153,14 +205,24 @@ test('resolveInputSource: доверие только с валидным REVIEW
     assert.equal(off.requested, false);
     assert.equal(off.readText(join(root, 'ops/ai-review/repo-rules.md')), 'PR RULES', 'недоверенный — рабочее дерево');
 
-    for (const [ref, reason] of [['', 'REVIEW_BASE_REF не задан'], ['-x', 'невалиден'], ['a..b', 'невалиден'], ['nope', 'не резолвится']]) {
+    // короткие и DWIM-имена отвергаются ДО git: их резолв зависит от ref'ов checkout'а PR
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    const bad = ['-x', 'a..b', 'main', 'origin/main', 'HEAD', 'HEAD~1', 'refs/tags/v1', 'refs/heads/', 'refs/heads/a..b',
+      'refs/heads/x.lock', 'refs/remotes//x', 'refs/heads/main@{1}', 'abc123', 'refs/heads/main^{tree}'];
+    for (const [ref, reason] of [['', 'REVIEW_BASE_REF не задан'], ...bad.map((r) => [r, 'невалиден']), ['refs/heads/nope', 'не резолвится'], ['0'.repeat(40), 'не резолвится']]) {
       const s = resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: ref }, { cwd: root });
       assert.equal(s.trusted, false, ref);
       assert.equal(s.requested, true, ref);
       assert.ok(s.reason.includes(reason), `${ref}: ${s.reason}`);
     }
 
-    const src = resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'main' }, { cwd: root });
+    const headSha = git(root, 'rev-parse', 'HEAD').trim();
+    for (const ok of ['refs/remotes/origin/main', headSha]) {
+      const s = resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: ok }, { cwd: root });
+      assert.equal(s.trusted, true, ok);
+      assert.equal(s.sha, headSha, ok);
+    }
+    const src = resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'refs/heads/main' }, { cwd: root });
     assert.equal(src.trusted, true);
     assert.equal(src.readText(join(root, 'ops/ai-review/repo-rules.md')), 'BASE RULES');
     assert.equal(src.readText('AGENTS.md'), 'BASE AGENTS', 'относительный путь — от cwd');
@@ -169,7 +231,7 @@ test('resolveInputSource: доверие только с валидным REVIEW
     assert.ok(src.readText(new URL('../package.json', import.meta.url).pathname).includes('"ai-reviewer"'), 'вне cwd — диск');
     // пакет движка внутри cwd потребителя (.ai-reviewer-engine/) читается с диска
     put(root, '.ai-reviewer-engine/x.txt', 'ENGINE');
-    const nested = resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'main' }, { cwd: root, pkgRoot: join(root, '.ai-reviewer-engine') });
+    const nested = resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'refs/heads/main' }, { cwd: root, pkgRoot: join(root, '.ai-reviewer-engine') });
     assert.equal(nested.readText(join(root, '.ai-reviewer-engine/x.txt')), 'ENGINE');
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -184,7 +246,7 @@ test('доверенный прогон: профиль, repoRulesFile, AGENTS.m
   const cwd = process.cwd();
   try {
     process.chdir(root);
-    setInputSource(resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'main' }, { cwd: root }));
+    setInputSource(resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'refs/heads/main' }, { cwd: root }));
     const p = loadProfileFile(join(root, 'ops/ai-review/profile.json'));
     assert.equal(p.name, 'base', 'сам профиль — из base');
     assert.equal(p.layout.reviewSkip.source, '^docs\\/gen\\/');
@@ -212,10 +274,10 @@ test('loadReviewConfig: REVIEW_BASE_REF включает чтение из base,
   try {
     process.chdir(root);
     resetProfile();
-    const env = { REVIEW_PROFILE: 'ops/ai-review/profile.json', REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'main' };
+    const env = { REVIEW_PROFILE: 'ops/ai-review/profile.json', REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'refs/heads/main' };
     const cli = { dryRun: true, repo: '', prNumber: 0 };
     const on = loadReviewConfig(env, cli);
-    assert.deepEqual({ ...on.trust }, { requested: true, trusted: true, baseRef: 'main', reason: '' });
+    assert.deepEqual({ ...on.trust }, { requested: true, trusted: true, baseRef: 'refs/heads/main', reason: '' });
     assert.equal(on.profile.repoRules, 'BASE RULES');
     resetProfile();
     const off = loadReviewConfig({ ...env, REVIEW_BASE_REF: '' }, cli);
@@ -236,7 +298,7 @@ test('ast-grep доверенного прогона: sgconfig и ruleDirs — �
   const { collectProfileProtected } = await import('../lib/router.mjs');
   const root = makeRepo();
   try {
-    const src = resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'main' }, { cwd: root });
+    const src = resolveInputSource({ REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: 'refs/heads/main' }, { cwd: root });
     const m = materializeAstgrepConfig(join(root, 'ops/sg/sgconfig.yml'), () => {}, src);
     try {
       assert.equal(readFileSync(m.configPath, 'utf8'), 'ruleDirs:\n  - rules\n');

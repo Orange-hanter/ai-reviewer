@@ -170,7 +170,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_ROUTER` | `1` | `0` — всегда полный прогон |
 | `REVIEW_PROFILE_TRUSTED` | `0` | `1` — профиль доверенный: движок читает его и его вход (repoRulesFile, AGENTS.md, fpPatterns, sgconfig + ruleDirs) из `REVIEW_BASE_REF`, и применяется `layout.reviewSkip` ([profiles.md](profiles.md#доверие)). Без `REVIEW_BASE_REF` флаг снимается |
-| `REVIEW_BASE_REF` | — | ref base-ветки для доверенного профиля (`origin/main`); git обязан резолвить его в коммит, иначе доверие снимается |
+| `REVIEW_BASE_REF` | — | base для доверенного профиля: SHA коммита (40/64 hex; в CI — `${{ github.event.pull_request.base.sha }}`) или полный ref `refs/remotes/origin/<base>` / `refs/heads/<base>`. Короткое имя (`origin/main`, `main`, `HEAD`), иная форма или ref, который `git rev-parse --verify --end-of-options <ref>^{commit}` не резолвит, — доверие снимается с причиной в логе |
 | `REVIEW_LOCKFILE_REGISTRIES` | — | хосты через запятую сверх `registry.npmjs.org`, `registry.yarnpkg.com` для проверки источников в npm/yarn/pnpm lockfile ([profiles.md](profiles.md#layoutreviewskip-и-доверие)) |
 
 Классы: lockfile / generated / rename-only (`similarity index 100%` или секция без строк `+`/`-`; rename с правками — обычный файл, RFC 17) → **skip**; удалённый файл классифицируется по своему пути; docs-only → **light**; ни одного

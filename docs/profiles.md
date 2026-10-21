@@ -115,8 +115,10 @@ TS/JS в корне репозитория, блок правил проекта
 ## `layout.reviewSkip` и доверие
 
 **Trust gate.** `reviewSkip` применяется, только когда потребитель объявил профиль доверенным:
-`REVIEW_PROFILE_TRUSTED=1` **и** назвал base ref: `REVIEW_BASE_REF` (например
-`origin/main`). Без флага `reviewSkip` игнорируется целиком, в логе одна строка
+`REVIEW_PROFILE_TRUSTED=1` **и** назвал base: `REVIEW_BASE_REF` — SHA коммита (40/64 hex,
+в CI — `github.event.pull_request.base.sha`) или полный ref `refs/remotes/origin/main` /
+`refs/heads/main`. Короткое имя (`origin/main`, `main`, `HEAD`) отвергается до git: git
+резолвит его по правилам DWIM, и ref с тем же именем из checkout'а PR подменил бы base. Без флага `reviewSkip` игнорируется целиком, в логе одна строка
 `reviewSkip ignored: profile not marked trusted (REVIEW_PROFILE_TRUSTED)`. Флаг без
 `REVIEW_BASE_REF`, с невалидным ref или ref, который git не резолвит в коммит, **снимается**:
 `REVIEW_PROFILE_TRUSTED=1 снят: <причина>` в логе, дальше — как без флага.
@@ -151,15 +153,18 @@ CI-шаблон дополнительно восстанавливает эти
 [`examples/ci/pr-review.yml`](../examples/ci/pr-review.yml):
 
 ```sh
+BASE="$BASE_SHA"   # github.event.pull_request.base.sha; без события PR — refs/remotes/origin/$BASE_REF
 # файлы: нет в base — удалить из рабочего дерева
 for f in ops/ai-review/profile.json ops/ai-review/repo-rules.md AGENTS.md agents.md ops/pr-review/feedback/fp-patterns.jsonl; do
-  git show "origin/$BASE_REF:$f" > "$f" 2>/dev/null || rm -f "$f"
+  git show "$BASE:$f" > "$f" 2>/dev/null || rm -f "$f"
 done
 # каталоги ast-grep: целиком из base (добавленное в PR — удалить)
 for d in ops/pr-review/ast-grep; do
-  rm -rf "$d"; git ls-tree -d --name-only "origin/$BASE_REF" -- "$d" | grep -q . && git checkout "origin/$BASE_REF" -- "$d"
+  rm -rf "$d"; git ls-tree -d --name-only "$BASE" -- "$d" | grep -q . && git checkout "$BASE" -- "$d"
 done
-# и в env шага ревью: REVIEW_PROFILE_TRUSTED: '1', REVIEW_BASE_REF: origin/${{ github.base_ref }}
+# env шага ревью:
+#   REVIEW_PROFILE_TRUSTED: '1'
+#   REVIEW_BASE_REF: ${{ github.event.pull_request.base.sha || format('refs/remotes/origin/{0}', github.base_ref || 'main') }}
 ```
 
 **Встроенный skip** (без профиля) убирает из входа моделей только npm/yarn/pnpm lockfile
@@ -168,12 +173,26 @@ done
 Голый `*.map` (nginx-карты, данные) не skip. Остальной класс skip роутера (`dist/`, `build/`,
 `*.generated.*`, произвольный `*.lock`) решает только маршрут PR.
 
-**Источники пакетов в lockfile** проверяются детерминированно, не моделью: в добавленных
-строках npm/yarn/pnpm lockfile ищется URL источника (`resolved`, `tarball`, `resolution`,
-`repo`). Хост вне `registry.npmjs.org`, `registry.yarnpkg.com` и списка env
-`REVIEW_LOCKFILE_REGISTRIES` (через запятую) или нешифрованный `http:` — находка **major**
-`lockfile: пакет ставится не из разрешённого реестра — <host>` в форме prescan
-(`ruleId: lockfile-foreign-registry`, `prescanBlock: true`). Она отменяет router skip/light
+**Источники пакетов в lockfile** проверяются детерминированно, не моделью. Каждое значение
+добавленной строки npm/yarn/pnpm lockfile — не только `resolved`/`tarball`, но и ключи
+записей yarn, `version`, `requires`, `repo`, любые поля — декодируется так, как его прочтёт
+менеджер пакетов (двойные кавычки — JSON-литерал, одинарные — YAML, иначе plain-токен), и
+хост берётся из `new URL()` декодированного значения. Находка **major** в форме prescan
+(`ruleId: lockfile-foreign-registry`, `prescanBlock: true`), если источник:
+
+| Источник | Заголовок |
+|----------|-----------|
+| `https://` на хосте вне `registry.npmjs.org`, `registry.yarnpkg.com`, env `REVIEW_LOCKFILE_REGISTRIES` | `…не из разрешённого реестра — <host>` |
+| `http://` на разрешённом хосте | `…по нешифрованному http — <host>` |
+| другая схема с `//`: `git+ssh://`, `git+https://`, `ssh://`, `file://` | `…не из реестра по https — <scheme>//<host>` |
+| `git:`/`git+…`, `github:`/`gitlab:`/`bitbucket:`/`gist:`, `git@host:path`, `exec:`, `patch:` | `…из git/хостинга кода — <prefix>` |
+| `file:`/`link:`/`portal:` с абсолютным путём, `~` или выходом выше корня репозитория | `…локальный источник пакета вне репозитория` |
+| обратный слэш в значении, `%`-escape, userinfo (`@`) или порт в адресе, URL не парсится, кавычка без пары | `…источник пакета не разобран однозначно — <причина>` (fail-closed) |
+
+`npm:`-алиасы и `workspace:` — реестр и монорепо, не находка. В `package-lock.json`
+пропускаются ссылки на донаты: строка ровно вида `"url": "…"`/`"funding": "…"` и
+многострочная запись `"funding": [ … ]` из `type`/`url`/строк; любой другой ключ внутри
+снимает пропуск. Yarn berry с `patch:` даёт находку всегда (в его спецификации `%3A`). Она отменяет router skip/light
 (PR из одного lockfile идёт полным путём гейта) и, как major eslint, блокирует merge при
 `REVIEW_BLOCK_SINGLE`, включающем `major`. Профилем список реестров не расширяется: профиль
 недоверенного прогона пишет автор PR. `composer.lock`, `Cargo.lock`, `poetry.lock`,

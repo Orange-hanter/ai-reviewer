@@ -15,7 +15,8 @@ last_updated: 2026-09-10
 Доработка `layout.reviewSkip` (PR #62) по итогам security-ревью, три пункта:
 
 - **Граница доверия** (`lib/trusted-input.mjs`). `REVIEW_PROFILE_TRUSTED=1` теперь требует
-  `REVIEW_BASE_REF` (`origin/main`): движок сам читает из base через git файл профиля,
+  `REVIEW_BASE_REF` — SHA коммита или полный ref `refs/remotes/…`/`refs/heads/…` (короткое
+  `origin/main` отвергается: DWIM-резолв зависит от ref'ов checkout'а PR). Движок сам читает из base через git файл профиля,
   `repoRulesFile`, `AGENTS.md`/`agents.md` (каталог профиля и корень), `paths.fpPatterns`, а
   sgconfig ast-grep с его `ruleDirs`/`utilDirs` копирует из base во временный каталог и
   запускает ast-grep с копией. Файла нет в base — он отсутствует, копия из PR не
@@ -29,14 +30,16 @@ last_updated: 2026-09-10
   такие строки пропускались, и `"ruleDirs":` уводил каталоги правил из-под защиты.
 - **Встроенный skip уже.** Source map — только `*.{js,mjs,cjs,jsx,ts,tsx,css}.map` (голый
   `*.map` — nginx-карты, данные — уходит моделям и не инертен для `reviewSkip`). Lockfile —
-  только npm/yarn/pnpm, и в их добавленных строках `resolved`/`tarball`/`resolution`/`repo` с
-  хостом вне `registry.npmjs.org`, `registry.yarnpkg.com` и env `REVIEW_LOCKFILE_REGISTRIES`
-  (или с `http:`) — детерминированная находка major `lockfile: пакет ставится не из
-  разрешённого реестра — <host>` (prescan, `ruleId: lockfile-foreign-registry`). Она отменяет
-  router skip/light. `composer.lock`/`Cargo.lock`/`poetry.lock`/`Gemfile.lock` проверки не
+  только npm/yarn/pnpm, и КАЖДОЕ значение их добавленных строк (ключи yarn, `version`,
+  `requires`, не только `resolved`) декодируется как у менеджера пакетов и классифицируется:
+  https вне `registry.npmjs.org`, `registry.yarnpkg.com` и env `REVIEW_LOCKFILE_REGISTRIES`,
+  `http:`, иные схемы, git/`github:`-подобные спецификации, `file:`/`link:` вне репозитория, а
+  fail-closed — обратный слэш, `%`, userinfo, порт, непарная кавычка — дают детерминированную
+  находку major (prescan, `ruleId: lockfile-foreign-registry`). Она отменяет router skip/light. `composer.lock`/`Cargo.lock`/`poetry.lock`/`Gemfile.lock` проверки не
   имеют и снова уходят моделям.
 
-**Для потребителя:** добавить в env шага ревью `REVIEW_BASE_REF: origin/${{ github.base_ref || 'main' }}`
+**Для потребителя:** добавить в env шага ревью
+`REVIEW_BASE_REF: ${{ github.event.pull_request.base.sha || format('refs/remotes/origin/{0}', github.base_ref || 'main') }}`
 — без него `reviewSkip` перестанет применяться. Шаг «Take review profile from base branch»
 обновить по шаблону. Частный реестр npm — в `REVIEW_LOCKFILE_REGISTRIES`.
 

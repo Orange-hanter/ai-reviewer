@@ -1125,10 +1125,13 @@ ${LOCK_DIFF}`;
 // sgconfig reference-профиля (ops/pr-review/…) в этом репозитории нет — без override защита
 // уходит в fail-closed и прячет от skip любой YAML. Даём существующий конфиг пакета.
 // Доверие требует base ref (lib/trusted-input.mjs); cwd тестов — пакет движка, его файлы
-// читаются с диска, так что HEAD здесь только делает доверие действительным.
+// читаются с диска, так что SHA HEAD здесь только делает доверие действительным (короткие
+// имена вроде `HEAD` REVIEW_BASE_REF не принимает).
+const { execFileSync: execGit } = await import('node:child_process');
+const PKG_HEAD_SHA = execGit('git', ['rev-parse', 'HEAD'], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8' }).trim();
 const TRUSTED = {
   REVIEW_PROFILE_TRUSTED: '1',
-  REVIEW_BASE_REF: 'HEAD',
+  REVIEW_BASE_REF: PKG_HEAD_SHA,
   REVIEW_ASTGREP_CONFIG: fileURLToPath(new URL('../ast-grep/sgconfig.yml', import.meta.url)),
 };
 
@@ -1280,6 +1283,7 @@ test('pipeline: reviewSkip ".*" не прячет конфиги сборки, s
   git('init', '-q');
   git('add', '-A');
   git('commit', '-q', '-m', 'base');
+  const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const kept = ['app/server/x.ts', 'package.json', 'Dockerfile', 'scripts/deploy.sh',
     'ops/ai-review/repo-rules.md', 'ops/ai-review/fp-patterns.json'];
   let chunks = null;
@@ -1288,7 +1292,7 @@ test('pipeline: reviewSkip ".*" не прячет конфиги сборки, s
     const { calls } = await runPipeline({
       diff: [...kept, SKIP_YAML].map((p) => section(p)).join(''),
       reviews: [okEmpty('m1')],
-      env: { ...TRUSTED, REVIEW_PROFILE: profileFile },
+      env: { ...TRUSTED, REVIEW_BASE_REF: baseSha, REVIEW_PROFILE: profileFile },
       mutateDeps: (deps) => {
         const orig = deps.engine.reviewAllModels;
         deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
