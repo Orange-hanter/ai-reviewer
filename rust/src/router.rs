@@ -77,6 +77,15 @@ pub fn classify_file_path(path: &str) -> &'static str {
     "other"
 }
 
+/// Путь с расширением исходника (LOGIC или CODE) — независимо от каталога и имени.
+/// Нужен там, где имя файла решает, увидит ли его модель: `x.generated.ts` и `dist/a.js`
+/// классифицируются как skip, но из входа LLM код по одному имени не выпадает — имя
+/// выбирает автор PR.
+pub fn is_code_path(path: &str) -> bool {
+    let res = path_regexes();
+    res.logic.is_match(path) || res.code.is_match(path)
+}
+
 // ---------------------------------------------------------------------------
 // Секции диффа
 // ---------------------------------------------------------------------------
@@ -269,6 +278,19 @@ mod tests {
         assert_eq!(classify_file_path("Cargo.toml"), "config");
         assert_eq!(classify_file_path("LICENSE"), "other");
         assert_eq!(classify_file_path("assets/logo.png"), "other");
+    }
+
+    #[test]
+    fn is_code_path_by_extension_only() {
+        assert!(is_code_path("src/x.generated.ts"));
+        assert!(is_code_path("dist/bundle.js"));
+        assert!(is_code_path("app/server/api.ts"));
+        assert!(is_code_path("crates/a/src/lib.rs"));
+        assert!(is_code_path("X.PY"));
+        assert!(!is_code_path("package-lock.json"));
+        assert!(!is_code_path("docs/openapi/api.yaml"));
+        assert!(!is_code_path("dist/app.js.map"));
+        assert!(!is_code_path("Cargo.lock"));
     }
 
     #[test]

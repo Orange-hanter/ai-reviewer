@@ -7,7 +7,7 @@ import { runEvalHarness, runFixtureCase, loadFixtures } from '../lib/eval.mjs';
 import { clusterFindings, normalizeConfidence, resolveBlockers, createFindingsFormatter } from '../lib/findings.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from '../lib/verifier.mjs';
 import { loadReviewConfig } from '../lib/config.mjs';
-import { routeDiff, isRenameOnlySection, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote } from '../lib/router.mjs';
+import { routeDiff, isRenameOnlySection, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath, reviewSkipProtection } from '../lib/router.mjs';
 import { applyRefutation, decideRefutation, parseSpecialistAssignments, mergeSpecialistReferences } from '../lib/specialists.mjs';
 import {
   eslintJsonToFindings, dedupeAgainstPrescan, selectLintablePaths, selectLintableEntries,
@@ -31,7 +31,7 @@ import { sanitizeFixtureId, resolveFixtureDir, matchPrFilePatch, promoteCandidat
 import { groupFpEntries, fpAggregateKey, inferPatternId } from '../feedback/promote-patterns.mjs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseDiff, collectDeletedPaths } from '../lib/diff.mjs';
+import { parseDiff, collectDeletedPaths, splitDiffByParsedPath } from '../lib/diff.mjs';
 import { createObservability, slimFindings, countBySeverity } from '../lib/observability.mjs';
 import {
   collectFeedbackEntries, parseReviewCommentFinding, parseReviewCommentFindings,
@@ -808,16 +808,60 @@ test('routeDiff R4: skipPaths профиля — класс skip, маршрут
 });
 
 test('collectReviewSkipped: встроенный skip-класс + reviewSkip профиля, порядок changedPaths', () => {
-  const paths = ['app/server/x.ts', 'package-lock.json', 'docs/08-technical/openapi/a.yaml', 'src/x.generated.ts', 'docs/a.md'];
+  const paths = ['app/server/x.ts', 'package-lock.json', 'docs/08-technical/openapi/a.yaml', 'src/x.generated.ts', 'docs/a.md', 'dist/app.js.map'];
   const r = collectReviewSkipped(paths, { reviewSkip: /^docs\/08-technical\/openapi\//i });
   assert.deepEqual(r.byProfile, ['docs/08-technical/openapi/a.yaml']);
-  assert.deepEqual(r.builtIn, ['package-lock.json', 'src/x.generated.ts']);
-  assert.deepEqual([...r.all], ['docs/08-technical/openapi/a.yaml', 'package-lock.json', 'src/x.generated.ts']);
+  assert.deepEqual(r.builtIn, ['package-lock.json', 'dist/app.js.map']);
+  assert.deepEqual([...r.all], ['docs/08-technical/openapi/a.yaml', 'package-lock.json', 'dist/app.js.map']);
+  // generated по имени, но с расширением кода — остаётся во входе LLM (имя выбирает автор PR)
+  assert.deepEqual(r.ignored, [{ path: 'src/x.generated.ts', reason: 'code', by: 'builtIn' }]);
   assert.equal(collectReviewSkipped(['app/server/x.ts']).all.size, 0, 'без профиля и skip-класса — пусто');
   assert.equal(formatReviewSkippedNote(collectReviewSkipped(['app/server/x.ts'])), '');
   const many = collectReviewSkipped(['a.lock', 'b.lock', 'c.lock', 'd.lock', 'x.ts']);
   assert.equal(formatReviewSkippedNote(many),
     'Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 4 файл(ов) — `a.lock`, `b.lock`, `c.lock` и ещё 1.');
+});
+
+test('reviewSkip из профиля PR не прячет код, .github, пин движка, профиль и sensitive', () => {
+  const paths = [
+    'app/server/auth.ts', 'scripts/x.py', 'dist/foo.js', '.github/workflows/ci.yml', '.github/CODEOWNERS',
+    'ops/ai-reviewer-ref', 'ops/ai-review/profile.json', '.ai-reviewer.json', 'ops/deploy/run.yml',
+    'docs/08-technical/openapi/a.yaml',
+  ];
+  const r = collectReviewSkipped(paths, {
+    reviewSkip: /.*/,
+    protectedPaths: new Set(['ops/ai-review/profile.json', '.ai-reviewer.json']),
+    sensitive: /(?:^|\/)ops\/deploy/i,
+  });
+  assert.deepEqual(r.byProfile, ['docs/08-technical/openapi/a.yaml'], 'исключён только не-код вне защищённых зон');
+  assert.deepEqual(r.ignored.map((x) => [x.path, x.reason]), [
+    ['app/server/auth.ts', 'code'], ['scripts/x.py', 'code'], ['dist/foo.js', 'code'],
+    ['.github/workflows/ci.yml', '.github'], ['.github/CODEOWNERS', '.github'],
+    ['ops/ai-reviewer-ref', 'engine-pin'], ['ops/ai-review/profile.json', 'profile'], ['.ai-reviewer.json', 'profile'],
+    ['ops/deploy/run.yml', 'sensitive'],
+  ]);
+  // встроенный skip-класс проходит ту же защиту: каталог `build/` под .github — не повод молчать
+  assert.equal(reviewSkipProtection('.github/workflows/build/x.yml'), '.github');
+  assert.deepEqual(collectReviewSkipped(['.github/workflows/build/x.yml']).ignored.map((x) => x.by), ['builtIn']);
+  assert.equal(isCodePath('src/x.generated.ts'), true);
+  assert.equal(isCodePath('package-lock.json'), false);
+});
+
+test('splitDiffByParsedPath: ключ секции — путь parseDiff, текст собирается байт в байт', () => {
+  const diff = [
+    'preamble',
+    'diff --git a/x.ts b/x.ts', '--- a/x.ts', '+++ b/x.ts', '@@ -1 +1 @@', '+++ b/fake.ts', '+a',
+    'diff --git a/old.ts b/new.ts', 'similarity index 100%', 'rename from old.ts', 'rename to new.ts',
+    'diff --git a/gone.ts b/gone.ts', 'deleted file mode 100644', '--- a/gone.ts', '+++ /dev/null', '@@ -1 +0,0 @@', '-x',
+    'diff --git a/hdr.yaml b/hdr.yaml', '--- a/foo.ts', '+++ b/foo.ts', '@@ -1 +1 @@', '+y',
+    '',
+  ].join('\n');
+  const parts = splitDiffByParsedPath(diff);
+  assert.deepEqual(parts.map((s) => s.path), [null, 'x.ts', null, 'gone.ts', 'foo.ts'],
+    '`+++` внутри хунка — не заголовок; rename-only без `+++` — null; ключ из `+++`, не из `diff --git`');
+  assert.equal(parts.map((s) => s.text).join('\n'), diff);
+  const { files } = parseDiff(diff);
+  for (const p of files.keys()) assert.ok(parts.some((s) => s.path === p), `секция для ${p}`);
 });
 
 test('routeDiff R4: docs-only → light', () => {

@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
+import { relative, isAbsolute } from 'node:path';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
-import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths, collectDeletedPaths } from './lib/diff.mjs';
+import { parseDiff, collectBlastSymbols, readChangedFiles, buildChunks, collectAddedPaths, collectDeletedPaths, splitDiffByParsedPath } from './lib/diff.mjs';
 import { createLlmClient } from './lib/llm.mjs';
 import { createCostTracker, efficiencyMetrics } from './lib/cost.mjs';
 import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
@@ -21,7 +22,8 @@ import {
 } from './lib/symbol-cards.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
 import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
-import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote } from './lib/router.mjs';
+import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath } from './lib/router.mjs';
+import { PROFILE_FILENAMES } from './lib/profile.mjs';
 import { createObservability, slimFindings, countBySeverity, PR_TITLE_LOG_MAX } from './lib/observability.mjs';
 import { buildSummary, buildRouterSummary, buildLlmUnavailableSummary } from './lib/report.mjs';
 import { buildReviewJson, writeReviewExports } from './lib/export.mjs';
@@ -88,6 +90,21 @@ function logActionabilityDistribution(obs, { findings, inlineCount, outside, thr
     histogram,
     topOutsideReasons,
   });
+}
+
+/**
+ * Пути профиля прогона в дереве репозитория — их reviewSkip исключить не может: профиль из
+ * checkout'а PR иначе прятал бы от моделей собственную правку. Файл профиля (REVIEW_PROFILE
+ * или найденный автопоиском, относительно рабочего каталога) и имена автопоиска в корне.
+ */
+function profileProtectedPaths(profile, cwd = process.cwd()) {
+  const out = new Set(PROFILE_FILENAMES);
+  const src = String(profile?.source || '');
+  if (src && isAbsolute(src)) {
+    const rel = relative(cwd, src).split('\\').join('/');
+    if (rel && !rel.startsWith('..')) out.add(rel);
+  }
+  return out;
 }
 
 /** Sticky при `REVIEW_BLAST_REQUIRED=1` и непосчитанном blast-radius (LLM не вызывался). */
@@ -520,9 +537,35 @@ export function createReviewPipeline(cfg, deps = {}) {
       // источником. Модели читают такие файлы кусками и спорят с отступами на границе
       // чанка, а дефект в них — всегда дефект генератора, видимый в его исходнике.
       // Prescan, blast-radius и карта PR их по-прежнему видят: меняется только вход LLM.
-      const reviewSkipped = collectReviewSkipped(changedPaths, {
-        reviewSkip: cfg.profile?.layout?.reviewSkip || null, fileClass,
+      // Профиль и имена файлов приходят из checkout'а PR, поэтому код по расширению,
+      // `.github/`, пин движка, сам профиль и `layout.sensitive` не исключаются никогда
+      // (reviewSkipProtection в lib/router.mjs) — совпадение с ними только пишется в лог.
+      const isCodeCache = new Map();
+      const isCode = (path) => {
+        if (!isCodeCache.has(path)) isCodeCache.set(path, isCodePath(path));
+        return isCodeCache.get(path);
+      };
+      let reviewSkipped = collectReviewSkipped(changedPaths, {
+        reviewSkip: cfg.profile?.layout?.reviewSkip || null,
+        fileClass,
+        isCode,
+        protectedPaths: profileProtectedPaths(cfg.profile),
+        sensitive: cfg.profile?.layout?.sensitive || null,
       });
+      if (reviewSkipped.ignored.length) {
+        log(`skip-пути: ${reviewSkipped.ignored.length} совпадений проигнорировано — защищённые пути остаются во входе LLM`,
+          reviewSkipped.ignored.map((x) => `${x.path} (${x.by}: ${x.reason})`));
+      }
+      // Секции диффа под LLM ключуются ТЕМ ЖЕ путём, что `files`/`changedPaths` (parseDiff).
+      // Путь PR без своей секции — сужать нельзя: выкинули бы чужую секцию вместе с
+      // реальным файлом. Fail-closed: skip-пути отключаются, модели получают полный дифф.
+      const diffByPath = splitDiffByParsedPath(annotated);
+      const sectionPaths = new Set(diffByPath.map((s) => s.path).filter(Boolean));
+      const unmatchedPaths = changedPaths.filter((p) => !sectionPaths.has(p));
+      if (unmatchedPaths.length && reviewSkipped.all.size) {
+        log(`skip-пути: у ${unmatchedPaths.length} файл(ов) PR нет своей секции в диффе — сужение отключено, моделям уходит полный дифф`, unmatchedPaths);
+        reviewSkipped = { byProfile: [], builtIn: [], ignored: reviewSkipped.ignored, all: new Set() };
+      }
       const route = routeDiff(changedPaths, diff, { ...cfg.router, skipPaths: reviewSkipped.byProfile });
       log(`router R4: ${formatRouteLog(route)}`);
       obs.logEvent('run_start', {
@@ -735,9 +778,16 @@ export function createReviewPipeline(cfg, deps = {}) {
       // (неизменившиеся файлы) и skip-пути (lockfile/generated/reviewSkip).
       const toLlm = (p) => !reviewSkipped.all.has(p)
         && (incrementalPlan.mode !== 'incremental' || incrementalPlan.reviewPaths.has(p));
-      const narrowLlm = incrementalPlan.mode === 'incremental' || reviewSkipped.all.size > 0;
+      const changedSet = new Set(changedPaths);
+      const wantNarrow = incrementalPlan.mode === 'incremental' || reviewSkipped.all.size > 0;
+      if (wantNarrow && unmatchedPaths.length) {
+        log(`инкрементальность: у ${unmatchedPaths.length} файл(ов) PR нет своей секции в диффе — моделям уходит полный дифф`, unmatchedPaths);
+      }
+      const narrowLlm = wantNarrow && !unmatchedPaths.length;
+      // Секция, чей путь не из changedPaths (преамбула, rename-only, бинарь), не выбрасывается:
+      // сужение убирает только то, что точно известно как skip или неизменившееся.
       const annotatedForLlm = narrowLlm
-        ? [...diffSections.entries()].filter(([p]) => toLlm(p)).map(([, s]) => s).join('\n')
+        ? diffByPath.filter((s) => !s.path || !changedSet.has(s.path) || toLlm(s.path)).map((s) => s.text).join('\n')
         : annotated;
       const contextForLlm = narrowLlm
         ? new Map([...ctxWindows.map.entries()].filter(([p]) => toLlm(p)))

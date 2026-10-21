@@ -175,14 +175,22 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 [`lib/router.mjs`](../lib/router.mjs), паритетно в `rust/src/router.rs`); `layout.logic`
 профиля его не меняет.
 
-Skip-класс работает и внутри full-маршрута. Lockfile, generated (по пути) и пути из
-`layout.reviewSkip` профиля ([profiles.md](profiles.md)) в LLM-чанки не попадают, даже когда
-PR содержит код. Пути из `reviewSkip` роутер считает skip, поэтому PR из одних таких путей —
+Skip-класс работает и внутри full-маршрута. Lockfile, generated (по пути, только без
+расширения кода) и пути из `layout.reviewSkip` профиля ([profiles.md](profiles.md)) в LLM-чанки
+не попадают, даже когда PR содержит код. Файл с расширением кода (`x.generated.ts`,
+`dist/foo.js`) для маршрута остаётся skip, но моделям уходит: имя файла выбирает автор PR.
+Защищённые пути (код, `.github/`, пин движка, профиль, `layout.sensitive`) не исключаются
+никогда — см. [profiles.md](profiles.md#layoutreviewskip-и-доверие). Пути из `reviewSkip` роутер считает skip, поэтому PR из одних таких путей —
 маршрут **skip**. Prescan, blast-radius и карта PR эти файлы видят по-прежнему. Находки моделей
 о них, перенос из прошлого прогона и prior findings в промпте отбрасываются. В sticky
 выводится строка «Не ревьюились моделями (generated/lockfile/reviewSkip профиля): N файл(ов)»,
 в observability — `plan.reviewSkipped`. При `REVIEW_ROUTER=0` маршрут всегда full, но
 skip-пути из чанков всё равно исключаются.
+
+Сужение диффа fail-closed. Секции ключуются тем же путём, что `changedPaths` (заголовок `+++`,
+как в `parseDiff`). Если у какого-то пути PR нет своей секции, сужение отключается, и модели
+получают полный дифф; в логе об этом строка. Секции, чей путь не из `changedPaths` (преамбула,
+rename-only, бинарь), не выбрасываются никогда.
 
 ## Specialists / refutation
 

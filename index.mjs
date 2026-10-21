@@ -1,6 +1,6 @@
 // Канонический публичный API движка (import 'ai-reviewer' / 'ai-reviewer/lib/*').
 
-export { parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, collectAddedPaths, parseDiffNewPath, parseDiffGitPath, unescapeGitPath } from './lib/diff.mjs';
+export { parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, collectAddedPaths, parseDiffNewPath, parseDiffGitPath, unescapeGitPath, splitDiffByParsedPath } from './lib/diff.mjs';
 export { extractJsonObject } from './lib/json.mjs';
 export { windowFileEntry, buildVerifierFileContents, windowChunkFileContents } from './lib/context-window.mjs';
 export { filterFalsePositiveFindings, matchesKnownFalsePositive, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers, applyPrescanBlockPolicy, filterStalePriorFindings, filterFindingsFixedInDiff, dedupeSameModelFindings, findingFingerprint, attachFingerprints } from './lib/findings.mjs';
@@ -102,5 +102,5 @@ export {
   applyStructureWaivers, triageStructureFindings,
 } from './lib/structure-drift.mjs';
 export { decideAutoTriage, buildTriageContext, runAutoTriage, findingLocationKey as triageLocationKey } from './lib/triage.mjs';
-export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog, collectReviewSkipped, formatReviewSkippedNote } from './lib/router.mjs';
+export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog, collectReviewSkipped, formatReviewSkippedNote, isCodePath, reviewSkipProtection } from './lib/router.mjs';
 export { createReviewPipeline, runGateResolution, runReview, PipelineSoftFail } from './pipeline.mjs';

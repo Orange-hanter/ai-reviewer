@@ -1023,6 +1023,54 @@ test('pipeline: роутер выключен, в PR только skip-пути 
   assert.ok(calls.upsertSticky.at(-1).includes('Не ревьюились моделями'));
 });
 
+const section = (p, body = '+x') => `diff --git a/${p} b/${p}\n--- a/${p}\n+++ b/${p}\n@@ -1,1 +1,2 @@\n ctx\n${body}\n`;
+
+test('pipeline: reviewSkip из профиля PR не прячет код, .github, пин движка и сам профиль', async () => {
+  // Профиль в потребителе приходит из checkout'а PR: автор PR пишет reviewSkip ".*".
+  const { setProfile } = await import('../lib/profile.mjs');
+  const { referenceProfile } = await import('./helpers/reference-profile.mjs');
+  const dir = await mkdtemp(join(tmpdir(), 'pr-review-skip-guard-'));
+  const profileFile = join(dir, 'evil.json');
+  await writeFile(profileFile, JSON.stringify({ name: 'evil', layout: { reviewSkip: '.*' } }));
+  const guarded = ['app/server/auth.ts', 'dist/foo.js', '.github/workflows/ci.yml', 'ops/ai-reviewer-ref', '.ai-reviewer.json'];
+  let chunks = null;
+  try {
+    const { calls } = await runPipeline({
+      diff: [...guarded, SKIP_YAML].map((p) => section(p)).join(''),
+      reviews: [okEmpty('m1')],
+      env: { REVIEW_PROFILE: profileFile },
+      mutateDeps: (deps) => {
+        const orig = deps.engine.reviewAllModels;
+        deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
+      },
+    });
+    assert.deepEqual(chunks.flatMap((c) => c.paths).sort(), [...guarded].sort(), 'защищённые пути ушли моделям');
+    assert.ok(calls.upsertSticky.at(-1).includes('Не ревьюились моделями (generated/lockfile/reviewSkip профиля): 1 файл(ов)'));
+  } finally {
+    setProfile(referenceProfile);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('pipeline: путь PR без своей секции в диффе — сужение отключено, моделям полный дифф', async () => {
+  // Два заголовка `+++` в одной секции: parseDiff заводит оба пути, секция ключуется
+  // последним — у package-lock.json своей секции нет. Сужать по такому диффу нельзя.
+  const twoHeaders = 'diff --git a/x b/x\n--- a/x\n+++ b/package-lock.json\n--- a/foo.ts\n+++ b/foo.ts\n@@ -1,1 +1,2 @@\n ctx\n+y\n';
+  let chunks = null;
+  const { calls } = await runPipeline({
+    diff: twoHeaders + section(SKIP_YAML),
+    reviews: [okEmpty('m1')],
+    mutateDeps: (deps) => {
+      const orig = deps.engine.reviewAllModels;
+      deps.engine.reviewAllModels = async (cs, ctx) => { chunks = cs; return orig(cs, ctx); };
+    },
+  });
+  const llmText = chunks.map((c) => c.annotated).join('\n');
+  assert.ok(llmText.includes(SKIP_YAML), 'fail-closed: и skip-путь в полном диффе');
+  assert.ok(llmText.includes('+++ b/foo.ts'));
+  assert.ok(!calls.upsertSticky.at(-1).includes('Не ревьюились моделями'), 'заметки нет — сужения не было');
+});
+
 test('engine: индексы чанков, упавших у модели, доходят до результата (RFC 19)', async () => {
   const { createReviewEngine } = await import('../lib/engine.mjs');
   const { createPromptBuilder } = await import('../lib/prompt.mjs');

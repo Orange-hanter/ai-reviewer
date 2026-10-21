@@ -16,7 +16,8 @@
  *      (changedPaths — ключи секций + добавленные вручную пути без секций),
  *      литеральные кейсы из test/pr-review.eval.test.mjs, enabled/пустые пути;
  *   5. formatRouteLog для каждого прогона routeDiff;
- *   6. routeDiff со skipPaths (пути layout.reviewSkip профиля).
+ *   6. routeDiff со skipPaths (пути layout.reviewSkip профиля);
+ *   7. isCodePath на батарее путей корпуса 1.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
@@ -108,6 +109,9 @@ const PATHS = [
   'LICENSE', 'assets/logo.png', '.gitignore', 'Makefile', 'Dockerfile', '',
 ];
 for (const [i, p] of PATHS.entries()) checkClassify(`#${i} ${p}`, p);
+for (const [i, p] of PATHS.entries()) {
+  compare(`isCodePath #${i} ${p}`, runJs(R.isCodePath, p).value, R.isCodePath(p));
+}
 
 // ---------------------------------------------------------------------------
 // Корпус 2: extractFileDiffSections
