@@ -8,7 +8,14 @@ last_updated: 2026-09-10
 
 # Changelog
 
-## Unreleased
+## 0.6.4 — reviewSkip для сгенерированного, запасной verifier, проверка blast — 2026-10-21
+
+Пин потребителя — `v0.6.4`. Новое для потребителя: `layout.reviewSkip` действует только с
+`REVIEW_PROFILE_TRUSTED=1` и `REVIEW_BASE_REF` (SHA base или полный ref) — CI-шаблон
+восстанавливает входы ревью из base; lockfile снова уходят моделям, к ним добавлена
+детерминированная проверка реестров; `REVIEW_VERIFIER_FALLBACK_MODEL` (#60); проверка
+blast-находок verifier'ом (RFC 21, #61). Формат футера sticky и контракты `swarm` /
+`export` / `structure` с `v0.6.3` не менялись.
 
 ### Безопасность — вход доверенного профиля из base, fail-closed sgconfig, проверка lockfile
 
