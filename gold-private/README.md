@@ -42,6 +42,13 @@ REVIEW_GOLD_DIR=gold-private OLLAMA_API_KEY=… node bin/pr-review-gold.mjs [--c
 `.graphify/graphify-out/graph.json` внутри дерева, если его там построить; без графа карточек
 нет. `REVIEW_GOLD_CHECKOUT=0` — прогон без дерева.
 
+Blast-radius в gold заглушен. `REVIEW_GOLD_BLAST=1` (нужен `GRAPHIFY_BIN`) строит граф в дереве
+кейса (`graphify update`, один раз на пин) и считает blast по-настоящему — так меряется проверка
+blast-находок ([RFC 21](../proposals/21-blast-verification.md)): вместе с
+`REVIEW_BLAST_VERIFY=shadow` и `REVIEW_GOLD_OBSERVABILITY_DIR` события `blast_would_block`
+показывают, что гейт заблокировал бы. Кейс без дерева идёт с заглушкой; в выводе раннера у
+кейса с настоящим blast — пометка `blast=live`.
+
 Пересобрать набор (перезапишет `meta.json` кандидатов):
 
 ```bash
