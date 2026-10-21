@@ -6,10 +6,12 @@
 //!
 //! Операции:
 //!   classifyFilePath       {path}                     → "skip"|"docs"|"logic"|"config"|"other"
+//!   isCodePath             {path}                     → bool (расширение исходника)
 //!   extractFileDiffSections {diff}                    → {path: section} (порядок Map)
 //!   isRenameOnlySection    {section}                  → bool (null/"" → false)
 //!   classifyChangedFile    {path, section?}           → класс как у classifyFilePath
-//!   routeDiff              {changedPaths, diff?, enabled?} → {route, reason, files}
+//!   routeDiff              {changedPaths, diff?, enabled?, skipPaths?} → {route, reason, files}
+//!                          skipPaths — пути класса skip из layout.reviewSkip профиля
 //!   formatRouteLog         {route}                    → string
 
 use std::io::Read;
@@ -18,8 +20,8 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use ai_reviewer::router::{
-    classify_changed_file, classify_file_path, extract_file_diff_sections, format_route_log,
-    is_rename_only_section, route_diff, RouteResult,
+    classify_changed_file, classify_file_path, extract_file_diff_sections, format_route_log, is_code_path,
+    is_rename_only_section, route_diff_with_skip, RouteResult,
 };
 
 fn main() {
@@ -47,6 +49,7 @@ fn run() -> Result<()> {
 
     let out = match op {
         "classifyFilePath" => json!(classify_file_path(arg_str("path")?)),
+        "isCodePath" => json!(is_code_path(arg_str("path")?)),
         "extractFileDiffSections" => {
             let sections = extract_file_diff_sections(arg_str("diff").unwrap_or(""));
             json!(sections)
@@ -67,7 +70,12 @@ fn run() -> Result<()> {
                 None | Some(Value::Null) => true,
                 Some(b) => b.as_bool().context("enabled должен быть bool")?,
             };
-            serde_json::to_value(route_diff(&changed_paths, diff, enabled))?
+            let skip_paths: Vec<String> = match obj.get("skipPaths") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(v) => serde_json::from_value(v.clone())
+                    .context("skipPaths: нужен массив строк")?,
+            };
+            serde_json::to_value(route_diff_with_skip(&changed_paths, diff, enabled, &skip_paths))?
         }
         "formatRouteLog" => {
             let route: RouteResult = serde_json::from_value(

@@ -26,7 +26,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 
 use ai_reviewer::llm::cascade::{run_cascade, CascadeRequest};
-use ai_reviewer::llm::{chat, ChatRequest, LlmError};
+use ai_reviewer::llm::{chat, quota_scope, ChatRequest, LlmError};
 
 fn main() {
     if let Err(e) = run() {
@@ -41,7 +41,11 @@ fn run() -> Result<()> {
     let raw: serde_json::Value = serde_json::from_str(&input).context("вход должен быть JSON")?;
     if raw.get("cascade").is_some() {
         let req: CascadeRequest = serde_json::from_value(raw).context("вход должен быть CascadeRequest JSON")?;
-        let (ok, payload) = run_cascade(&req).to_json(req.cascade);
+        let (ok, mut payload) = run_cascade(&req).to_json(req.cascade);
+        if payload["quota"] == json!(true) {
+            let scope = quota_scope(&req.base.model, payload["error"].as_str().unwrap_or(""));
+            payload["quotaScope"] = json!(scope);
+        }
         if ok {
             println!("{payload}");
             return Ok(());
@@ -73,6 +77,7 @@ fn run() -> Result<()> {
                     "networky": networky,
                     "throttled": throttled,
                     "quota": quota,
+                    "quotaScope": if quota { Some(quota_scope(&req.model, &error)) } else { None },
                     "usage": usage,
                 })
             );

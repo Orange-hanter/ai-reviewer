@@ -440,6 +440,34 @@ fn regex_candidate(v: Option<&Value>, fallback: &str) -> Value {
     }
 }
 
+/// `layout.reviewSkip`: строка-регекс или массив строк-регексов → один источник.
+/// Массив склеивается в `(?:a)|(?:b)`, пустые/нестроковые элементы отбрасываются;
+/// пусто → null (фича выключена). Валидирует диалектом JS сторона lib/profile.mjs.
+fn review_skip_candidate(v: Option<&Value>) -> Value {
+    match v {
+        Some(Value::String(s)) if !s.trim().is_empty() => Value::String(s.clone()),
+        Some(Value::Array(items)) => {
+            let parts: Vec<&str> = items
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .collect();
+            match parts.len() {
+                0 => Value::Null,
+                1 => Value::String(parts[0].to_string()),
+                _ => Value::String(
+                    parts
+                        .iter()
+                        .map(|p| format!("(?:{p})"))
+                        .collect::<Vec<_>>()
+                        .join("|"),
+                ),
+            }
+        }
+        _ => Value::Null,
+    }
+}
+
 /// `String(raw.appDir ?? '').replace(/^\.\/+|\/+$/g, '')`:
 /// ровно одно ведущее '.' + прогон '/', хвостовые '/' снимаются все.
 fn strip_app_dir(s: &str) -> String {
@@ -594,6 +622,7 @@ pub fn normalize_profile_facts(raw: &Value, base_dir: &str, source: &str) -> Val
             "sensitive": regex_candidate(layout_raw.get("sensitive"), ""),
             "e2eSpec": regex_candidate(layout_raw.get("e2eSpec"), DEFAULT_E2E_SPEC),
             "logic": regex_candidate(layout_raw.get("logic"), DEFAULT_LOGIC),
+            "reviewSkip": review_skip_candidate(layout_raw.get("reviewSkip")),
         },
         "astgrep": { "scopes": scopes, "allow": allow },
         "strict": raw.get("strict") == Some(&Value::Bool(true)),
@@ -685,6 +714,10 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
     };
     let verifier_enabled = env_flag(env, "REVIEW_VERIFIER", true);
     let verifier_model = or_env(env, "REVIEW_VERIFIER_MODEL", DEFAULT_REVIEW_VERIFIER_MODEL).trim().to_string();
+    let verifier_fallback_model = {
+        let f = or_env(env, "REVIEW_VERIFIER_FALLBACK_MODEL", "").trim().to_string();
+        if f == verifier_model { String::new() } else { f }
+    };
     let verifier_temp = nn_nonnegative(env, "REVIEW_VERIFIER_TEMPERATURE", 0.2);
     let router_enabled = env_flag(env, "REVIEW_ROUTER", true);
     let prescan_enabled = env_flag(env, "REVIEW_PRESCAN", true);
@@ -843,6 +876,10 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
         json!({
             "enabled": verifier_enabled,
             "model": verifier_model,
+            // Запасная модель verifier'а (RFC 20, § 7): сбой основной — тот же батч уходит ей,
+            // а не в «verifier недоступен» (RFC 18 — degraded-блок при REVIEW_LLM_REQUIRED=1).
+            // Пусто или совпадает с основной — запасной нет.
+            "fallbackModel": verifier_fallback_model,
             "maxCandidates": num_json(num_env(env, "REVIEW_VERIFIER_MAX", 12.0)),
             // Блокеры сверх капа одного вызова — следующими батчами, а не молча в minor (RFC 17).
             "maxBatches": num_json(num_env(env, "REVIEW_VERIFIER_BATCHES", 3.0)),
@@ -857,7 +894,13 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "symbolCards": env_flag(env, "REVIEW_VERIFIER_SYMBOL_CARDS", false),
         }),
     );
-    out.insert("router".into(), json!({ "enabled": router_enabled }));
+    // REVIEW_PROFILE_TRUSTED=1: профиль взят из base-ветки, а не из checkout'а PR —
+    // только тогда layout.reviewSkip применяется (lib/router.mjs#collectReviewSkipped).
+    let profile_trusted = env_flag(env, "REVIEW_PROFILE_TRUSTED", false);
+    out.insert(
+        "router".into(),
+        json!({ "enabled": router_enabled, "profileTrusted": profile_trusted }),
+    );
     out.insert(
         "specialists".into(),
         json!({
@@ -1182,6 +1225,23 @@ mod tests {
     }
 
     #[test]
+    fn normalize_profile_review_skip() {
+        let f = |v: Value| normalize_profile_facts(&json!({ "layout": { "reviewSkip": v } }), "/r", "s");
+        // не задан / пусто / не строка — фича выключена
+        assert_eq!(normalize_profile_facts(&json!({}), "/r", "s")["layout"]["reviewSkip"], Value::Null);
+        assert_eq!(f(json!("  "))["layout"]["reviewSkip"], Value::Null);
+        assert_eq!(f(json!(5))["layout"]["reviewSkip"], Value::Null);
+        assert_eq!(f(json!([]))["layout"]["reviewSkip"], Value::Null);
+        // строка — как есть; массив из одного — сам элемент; несколько — альтернатива групп
+        assert_eq!(f(json!("^docs/openapi/"))["layout"]["reviewSkip"], "^docs/openapi/");
+        assert_eq!(f(json!(["^a/", "", 3]))["layout"]["reviewSkip"], "^a/");
+        assert_eq!(
+            f(json!(["^docs/08-technical/openapi/", "^app/x(\\.p)?\\.json$"]))["layout"]["reviewSkip"],
+            "(?:^docs/08-technical/openapi/)|(?:^app/x(\\.p)?\\.json$)"
+        );
+    }
+
+    #[test]
     fn normalize_profile_tool_name_fallbacks_and_broken_regex() {
         let raw = json!({
             "markerNamespace": "  ",
@@ -1313,6 +1373,13 @@ mod tests {
         assert_eq!(parts["ollama"]["modelSettings"], json!({}));
         assert_eq!(parts["ollama"]["modelSettingsErrors"], json!([]));
         assert_eq!(parts["verifier"]["contextMargin"], 80);
+        assert_eq!(parts["verifier"]["fallbackModel"], "");
+        let e = env(&[("REVIEW_VERIFIER_MODEL", "a/free:free"), ("REVIEW_VERIFIER_FALLBACK_MODEL", " b/pro ")]);
+        let p = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(p["verifier"]["fallbackModel"], "b/pro");
+        let e = env(&[("REVIEW_VERIFIER_MODEL", "same"), ("REVIEW_VERIFIER_FALLBACK_MODEL", "same")]);
+        let p = load_review_config_parts(&e, &profile_bits(&default_profile()));
+        assert_eq!(p["verifier"]["fallbackModel"], "", "запасная = основная — запасной нет");
         let e = env(&[
             ("REVIEW_AGGREGATOR_REASONING_EFFORT", " none "),
             ("REVIEW_VERIFIER_CONTEXT_MARGIN", "20"),

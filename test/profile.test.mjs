@@ -220,6 +220,26 @@ test('нормализация профиля: битый regex не роняе�
   assert.ok(profile.astgrep.allow.get('r1').has('app/server/ok.ts'), 'строка допустима вместо массива');
 });
 
+test('layout.reviewSkip: строка или массив регексов; без него и при битом — выключено', () => {
+  assert.equal(normalizeProfile({}).layout.reviewSkip, null, 'дефолт — ничего не пропускаем');
+  assert.equal(normalizeProfile({ layout: { reviewSkip: '([unclosed' } }).layout.reviewSkip, null);
+  assert.equal(normalizeProfile({ layout: { reviewSkip: [] } }).layout.reviewSkip, null);
+  const one = normalizeProfile({ layout: { reviewSkip: '^gen/' } }).layout.reviewSkip;
+  assert.ok(one.test('gen/a.ts') && !one.test('src/gen/a.ts'));
+  const many = normalizeProfile({
+    layout: { reviewSkip: ['^docs/08-technical/openapi/', '', 5, '^app/server/apiDocs/openapi(?:\\.platform)?\\.json$'] },
+  }).layout.reviewSkip;
+  assert.equal(many.source, new RegExp('(?:^docs/08-technical/openapi/)|(?:^app/server/apiDocs/openapi(?:\\.platform)?\\.json$)').source,
+    'массив склеивается в альтернативу групп');
+  assert.ok(many.test('docs/08-technical/openapi/orakul-api.yaml'));
+  assert.ok(many.test('app/server/apiDocs/openapi.platform.json'));
+  assert.ok(!many.test('app/server/apiDocs/index.ts'), 'исходник генератора ревьюится');
+  // reference-профиль Orakul объявляет сгенерированный OpenAPI и индекс эндпоинтов
+  const orakul = loadProfileFile(ORAKUL_PROFILE).layout.reviewSkip;
+  assert.ok(orakul.test('docs/dev/reference/api-endpoints-index.md'));
+  assert.ok(orakul.test('app/server/apiDocs/openapi.json'));
+});
+
 test('явно назначенный профиль не перетирается автопоиском', () => {
   const explicit = setProfile(loadProfileFile(ORAKUL_PROFILE));
   const resolved = resolveProfile({});

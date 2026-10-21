@@ -1,6 +1,6 @@
 // Канонический публичный API движка (import 'ai-reviewer' / 'ai-reviewer/lib/*').
 
-export { parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, readOutsideFile, collectAddedPaths, parseDiffNewPath, parseDiffGitPath, unescapeGitPath } from './lib/diff.mjs';
+export { parseDiff, extractChangedSymbols, collectBlastSymbols, splitSegmentByHunks, buildChunks, readChangedFiles, readOutsideFile, collectAddedPaths, parseDiffNewPath, parseDiffGitPath, unescapeGitPath, splitDiffByParsedPath } from './lib/diff.mjs';
 export { extractJsonObject } from './lib/json.mjs';
 export { windowFileEntry, buildVerifierFileContents, findCallLines, windowChunkFileContents } from './lib/context-window.mjs';
 export { filterFalsePositiveFindings, matchesKnownFalsePositive, clusterFindings, normalizeFinding, normalizeConfidence, resolveBlockers, applyPrescanBlockPolicy, filterStalePriorFindings, filterFindingsFixedInDiff, dedupeSameModelFindings, findingFingerprint, attachFingerprints } from './lib/findings.mjs';
@@ -53,6 +53,8 @@ export {
   DEFAULT_PROFILE, PROFILE_FILENAMES, createMarkers, normalizeProfile, loadProfileFile,
   getProfile, setProfile, resetProfile, resolveProfile,
 } from './lib/profile.mjs';
+export { resolveInputSource, worktreeSource, getInputSource, setInputSource, readInputText, materializeFromBase } from './lib/trusted-input.mjs';
+export { scanLockfileRegistries, parseLockfileRegistries, DEFAULT_LOCKFILE_REGISTRIES, LOCKFILE_REGISTRY_RULE } from './lib/lockfile-registry.mjs';
 export { publicErrorLabel, createAdaptiveSemaphore, redactSecretsForLog } from './lib/util.mjs';
 export { parseJsonl, aggregateMetrics, formatMetricsReport } from './lib/metrics.mjs';
 export { createGraphifyClient, blastUnavailableReason } from './lib/graphify.mjs';
@@ -102,5 +104,5 @@ export {
   applyStructureWaivers, triageStructureFindings,
 } from './lib/structure-drift.mjs';
 export { decideAutoTriage, buildTriageContext, runAutoTriage, findingLocationKey as triageLocationKey } from './lib/triage.mjs';
-export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog } from './lib/router.mjs';
+export { routeDiff, classifyFilePath, classifyChangedFile, extractFileDiffSections, isRenameOnlySection, formatRouteLog, collectReviewSkipped, formatReviewSkippedNote, isCodePath, reviewSkipProtection, isInertPath, isBuiltInSkipPath, collectProfileProtected, parseSgconfigDirs } from './lib/router.mjs';
 export { createReviewPipeline, runGateResolution, runReview, PipelineSoftFail } from './pipeline.mjs';

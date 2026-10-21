@@ -20,7 +20,12 @@
     "lintable": "^app/(?:shared|server|client|integrations|ops|scripts|tests|e2e)/.+\\.(?:ts|tsx)$|^app/[^/]+\\.ts$",
     "e2eSpec": "^app/e2e/.*\\.spec\\.ts$",
     "logic": "^(?:app/)?(?:server|shared|client)/.+\\.(?:ts|tsx|js|jsx|mjs|cjs)$",
-    "sensitive": "(?:^|/)ops/(?:pr-merge|pr-review|backup|deploy)"
+    "sensitive": "(?:^|/)ops/(?:pr-merge|pr-review|backup|deploy)",
+    "reviewSkip": [
+      "^docs/08-technical/openapi/",
+      "^app/server/apiDocs/openapi(?:\\.platform)?\\.json$",
+      "^docs/dev/reference/api-endpoints-index\\.md$"
+    ]
   },
   "astgrep": {
     "scopes": {

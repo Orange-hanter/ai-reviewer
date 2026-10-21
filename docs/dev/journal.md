@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-10-15
+last_updated: 2026-10-21
 audience: [next-session-agent, maintainers]
 ---
 
@@ -12,6 +12,22 @@ audience: [next-session-agent, maintainers]
 
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
+
+## 2026-10-21 — 0.6.4
+
+**Сделано:** релиз `v0.6.4` — запасной verifier (#60), RFC 21 (#61), `layout.reviewSkip` (#62)
+и его доработка по security-ревью (#63).
+
+**Причина reviewSkip:** у Orakul (#632) каждый прогон блокировал PR одной и той же ложной major:
+«description не на том уровне / дубликаты ключей» в сгенерированном OpenAPI YAML на 26 тыс.
+строк — модели читали его кусками и путали отступы на границе чанка. Файл сверяет с
+источником CI потребителя (`gen-openapi --check`).
+
+**Модель доверия** складывалась за четыре круга security-ревью: allowlist инертных файлов
+вместо denylist, защита всего, что движок читает, `REVIEW_PROFILE_TRUSTED` + `REVIEW_BASE_REF`
+(входы ревью из base), lockfile обратно в LLM (проверка реестров только добавочная).
+Известный хвост — комментарий в #63: protocol-токен после `@`/`,` в значении lockfile не
+классифицируется как неоднозначный; на скрытие это не влияет.
 
 ## 2026-10-21 — RFC 21: живая проверка verifier'а на blast-кандидате
 

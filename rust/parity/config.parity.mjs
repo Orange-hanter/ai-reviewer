@@ -68,11 +68,19 @@ const failures = [];
  * считает и не получит. Срезаются с rust-стороны перед сравнением — остальное сверяется как раньше.
  */
 const RUST_OWNED_OLLAMA_KEYS = ['modelSettings', 'modelSettingsErrors'];
+const RUST_OWNED_VERIFIER_KEYS = ['fallbackModel'];
 function stripRustOwned(x) {
-  if (!x || typeof x !== 'object' || !x.ollama || typeof x.ollama !== 'object') return x;
-  const ollama = { ...x.ollama };
-  for (const k of RUST_OWNED_OLLAMA_KEYS) delete ollama[k];
-  return { ...x, ollama };
+  if (!x || typeof x !== 'object') return x;
+  const out = { ...x };
+  if (x.ollama && typeof x.ollama === 'object') {
+    out.ollama = { ...x.ollama };
+    for (const k of RUST_OWNED_OLLAMA_KEYS) delete out.ollama[k];
+  }
+  if (x.verifier && typeof x.verifier === 'object') {
+    out.verifier = { ...x.verifier };
+    for (const k of RUST_OWNED_VERIFIER_KEYS) delete out.verifier[k];
+  }
+  return out;
 }
 
 function compare(label, jsResult, rustResult) {
@@ -362,6 +370,7 @@ const reduceProfile = (pr) => ({
     sensitive: pr.layout.sensitive ? pr.layout.sensitive.source : null,
     e2eSpec: pr.layout.e2eSpec ? pr.layout.e2eSpec.source : null,
     logic: pr.layout.logic ? pr.layout.logic.source : null,
+    reviewSkip: pr.layout.reviewSkip ? pr.layout.reviewSkip.source : null,
   },
   astgrep: {
     scopes: Object.fromEntries([...pr.astgrep.scopes.entries()].map(([k, re]) => [k, re.source])),
@@ -400,6 +409,13 @@ const rawProfiles = [
     strict: true,
     paths: { exportDir: 'x/out', astgrepConfig: 'x/sg.yml' },
   }],
+  ['reviewSkip array', {
+    layout: { reviewSkip: ['^docs/08-technical/openapi/', '', 7, '^app/server/apiDocs/openapi(\\.platform)?\\.json$'] },
+  }],
+  ['reviewSkip string', { layout: { reviewSkip: '^gen/' } }],
+  ['reviewSkip single-item array', { layout: { reviewSkip: ['^gen/'] } }],
+  ['reviewSkip broken + non-string', { layout: { reviewSkip: '([unclosed' } }],
+  ['reviewSkip object', { layout: { reviewSkip: { a: 1 } } }],
   ['custom valid regexes', {
     layout: { lintable: '^app/.*\\.ts$', e2eSpec: '^e2e/', logic: '\\.ts$', sensitive: 'money' },
   }],

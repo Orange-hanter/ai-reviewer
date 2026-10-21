@@ -131,6 +131,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 |------------|---------|----------|
 | `REVIEW_VERIFIER` | `1` | Второй проход по кандидатам в блокеры |
 | `REVIEW_VERIFIER_MODEL` | `deepseek-v4-pro` | Модель-судья (вне пула advisors) |
+| `REVIEW_VERIFIER_FALLBACK_MODEL` | — | Запасная модель verifier'а: любой сбой основной (сеть, лимит бесплатного тарифа, сорванный JSON) отдаёт тот же батч ей вместо «verifier недоступен» (RFC 18). Пусто или равна основной — запасной нет. В observability вызов запасной помечен `fallbackFrom`. Работает только с Rust-конфигом |
 | `REVIEW_VERIFIER_MAX` | `12` | Максимум кандидатов в одном вызове verifier |
 | `REVIEW_VERIFIER_BATCHES` | `3` | Сколько вызовов verifier допустимо на прогон. Блокеры сверх `REVIEW_VERIFIER_MAX` идут следующими батчами; не влезшие в `MAX × BATCHES`, при `REVIEW_VERIFIER_STRICT=1` понижаются до minor (`verifierStatus: overflow`); не дошедшие из-за тайм-бюджета или сбоя хвостового батча — `verifierStatus: unavailable` (RFC 18) |
 | `REVIEW_VERIFIER_TEMPERATURE` | `0.2` | — |
@@ -168,12 +169,37 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | Переменная | Default | Описание |
 |------------|---------|----------|
 | `REVIEW_ROUTER` | `1` | `0` — всегда полный прогон |
+| `REVIEW_PROFILE_TRUSTED` | `0` | `1` — профиль доверенный: движок читает его и его вход (repoRulesFile, AGENTS.md, fpPatterns, sgconfig + ruleDirs) из `REVIEW_BASE_REF`, и применяется `layout.reviewSkip` ([profiles.md](profiles.md#доверие)). Без `REVIEW_BASE_REF` флаг снимается |
+| `REVIEW_BASE_REF` | — | base для доверенного профиля: SHA коммита (40/64 hex; в CI — `${{ github.event.pull_request.base.sha }}`) или полный ref `refs/remotes/origin/<base>` / `refs/heads/<base>`. Короткое имя (`origin/main`, `main`, `HEAD`), иная форма или ref, который `git rev-parse --verify --end-of-options <ref>^{commit}` не резолвит, — доверие снимается с причиной в логе |
+| `REVIEW_LOCKFILE_REGISTRIES` | — | хосты через запятую сверх `registry.npmjs.org`, `registry.yarnpkg.com` для проверки источников в npm/yarn/pnpm lockfile ([profiles.md](profiles.md#layoutreviewskip-и-доверие)) |
 
 Классы: lockfile / generated / rename-only (`similarity index 100%` или секция без строк `+`/`-`; rename с правками — обычный файл, RFC 17) → **skip**; удалённый файл классифицируется по своему пути; docs-only → **light**; ни одного
 файла-кода (только config `yml/yaml/json/toml/sh/sql`, docs, прочее) → **light**; хоть один
 файл-код → **full**. Список «кода» зашит в роутер (`LOGIC`/`CODE` в
 [`lib/router.mjs`](../lib/router.mjs), паритетно в `rust/src/router.rs`); `layout.logic`
 профиля его не меняет.
+
+Skip-класс работает и внутри full-маршрута, но вход LLM сужают только двое:
+- встроенный skip — только source map JS/TS/CSS; lockfile уходят моделям (источники
+  пакетов в npm/yarn/pnpm lockfile ещё и проверяются детерминированно, добавочно), прочий
+  класс skip (lockfile, `dist/`, `*.generated.*`, `*.lock`) решает лишь маршрут;
+- `layout.reviewSkip` профиля — **только при `REVIEW_PROFILE_TRUSTED=1` и `REVIEW_BASE_REF`**,
+  без них он игнорируется (строка в логе).
+
+Исключить можно только инертный файл (allowlist: lockfile, source map JS/TS/CSS, `md`/`mdx`/`rst`, данные
+`json`/`yaml` кроме dotfile, конфигов сборки/CI и каталогов инфраструктуры). Код, `.github/`,
+пин движка, всё, что читает движок, и `layout.sensitive` не исключаются никогда — см.
+[profiles.md](profiles.md#layoutreviewskip-и-доверие). Пути из `reviewSkip` роутер считает
+skip, поэтому PR из одних таких путей — маршрут **skip**. Prescan, blast-radius и карта PR эти файлы видят по-прежнему. Находки моделей
+о них, перенос из прошлого прогона и prior findings в промпте отбрасываются. В sticky
+выводится строка «Не ревьюились моделями (generated/lockfile/reviewSkip профиля): N файл(ов)»,
+в observability — `plan.reviewSkipped`. При `REVIEW_ROUTER=0` маршрут всегда full, но
+skip-пути из чанков всё равно исключаются.
+
+Сужение диффа fail-closed. Секции ключуются тем же путём, что `changedPaths` (заголовок `+++`,
+как в `parseDiff`). Если у какого-то пути PR нет своей секции, сужение отключается, и модели
+получают полный дифф; в логе об этом строка. Секции, чей путь не из `changedPaths` (преамбула,
+rename-only, бинарь), не выбрасываются никогда.
 
 ## Specialists / refutation
 

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { loadReviewConfig, parseCli } from './lib/config.mjs';
 import { createLogger, publicErrorLabel } from './lib/util.mjs';
-import { parseDiff, collectBlastSymbols, readChangedFiles, readOutsideFile, buildChunks, collectAddedPaths, collectDeletedPaths } from './lib/diff.mjs';
+import { parseDiff, collectBlastSymbols, readChangedFiles, readOutsideFile, buildChunks, collectAddedPaths, collectDeletedPaths, splitDiffByParsedPath } from './lib/diff.mjs';
 import { createLlmClient } from './lib/llm.mjs';
 import { createCostTracker, efficiencyMetrics } from './lib/cost.mjs';
 import { emitBlastRadiusFindings } from './lib/blast-findings.mjs';
@@ -21,7 +21,8 @@ import {
 } from './lib/symbol-cards.mjs';
 import { applyRefutation, formatRefutationLog } from './lib/specialists.mjs';
 import { createPrescanRunner, dedupeAgainstPrescan, formatPrescanLog } from './lib/prescan.mjs';
-import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath } from './lib/router.mjs';
+import { scanLockfileRegistries } from './lib/lockfile-registry.mjs';
+import { routeDiff, formatRouteLog, extractFileDiffSections, classifyFilePath, collectReviewSkipped, formatReviewSkippedNote, isCodePath, collectProfileProtected } from './lib/router.mjs';
 import { createObservability, slimFindings, countBySeverity, PR_TITLE_LOG_MAX } from './lib/observability.mjs';
 import { buildSummary, buildRouterSummary, buildLlmUnavailableSummary } from './lib/report.mjs';
 import { buildReviewJson, writeReviewExports } from './lib/export.mjs';
@@ -572,7 +573,59 @@ export function createReviewPipeline(cfg, deps = {}) {
 
       const { files, annotated, changedText } = parseDiff(diff);
       const changedPaths = [...files.keys()];
-      const route = routeDiff(changedPaths, diff, cfg.router);
+      // Класс пути считает Rust-бинарь через отдельный процесс на вызов, а спрашивают его
+      // четверо (отбор skip-путей, actionability по каждой находке, план чанков, маршрутизация
+      // ролей) — мемоизация превращает десятки запусков процесса в один на файл.
+      const fileClassCache = new Map();
+      const fileClass = (path) => {
+        if (!fileClassCache.has(path)) fileClassCache.set(path, classifyFilePath(path));
+        return fileClassCache.get(path);
+      };
+      // Пути, которые не уходят в LLM-чанки: lockfile/generated (класс skip) и
+      // `layout.reviewSkip` профиля — сгенерированное, что CI потребителя сверяет с
+      // источником. Модели читают такие файлы кусками и спорят с отступами на границе
+      // чанка, а дефект в них — всегда дефект генератора, видимый в его исходнике.
+      // Prescan, blast-radius и карта PR их по-прежнему видят: меняется только вход LLM.
+      // Профиль и имена файлов приходят из checkout'а PR, поэтому код по расширению,
+      // `.github/`, пин движка, сам профиль и `layout.sensitive` не исключаются никогда
+      // (reviewSkipProtection в lib/router.mjs) — совпадение с ними только пишется в лог.
+      const isCodeCache = new Map();
+      const isCode = (path) => {
+        if (!isCodeCache.has(path)) isCodeCache.set(path, isCodePath(path));
+        return isCodeCache.get(path);
+      };
+      // Доверие — только когда движок сам читает профиль и его вход из REVIEW_BASE_REF
+      // (lib/trusted-input.mjs); без base ref REVIEW_PROFILE_TRUSTED=1 снимается.
+      if (cfg.trust?.requested && !cfg.trust.trusted) {
+        log(`REVIEW_PROFILE_TRUSTED=1 снят: ${cfg.trust.reason} — профиль и его файлы читаются из рабочего дерева как недоверенные`);
+      } else if (cfg.trust?.trusted) {
+        log(`профиль и его вход читаются из ${cfg.trust.baseRef} (REVIEW_PROFILE_TRUSTED=1)`);
+      }
+      let reviewSkipped = collectReviewSkipped(changedPaths, {
+        reviewSkip: cfg.profile?.layout?.reviewSkip || null,
+        trusted: cfg.router?.profileTrusted === true && cfg.trust?.trusted === true,
+        isCode,
+        protectedPaths: collectProfileProtected(cfg),
+        sensitive: cfg.profile?.layout?.sensitive || null,
+      });
+      if (reviewSkipped.reviewSkipIgnored) {
+        log('reviewSkip ignored: profile not marked trusted (REVIEW_PROFILE_TRUSTED)');
+      }
+      if (reviewSkipped.ignored.length) {
+        log(`skip-пути: ${reviewSkipped.ignored.length} совпадений проигнорировано — защищённые пути остаются во входе LLM`,
+          reviewSkipped.ignored.map((x) => `${x.path} (${x.by}: ${x.reason})`));
+      }
+      // Секции диффа под LLM ключуются ТЕМ ЖЕ путём, что `files`/`changedPaths` (parseDiff).
+      // Путь PR без своей секции — сужать нельзя: выкинули бы чужую секцию вместе с
+      // реальным файлом. Fail-closed: skip-пути отключаются, модели получают полный дифф.
+      const diffByPath = splitDiffByParsedPath(annotated);
+      const sectionPaths = new Set(diffByPath.map((s) => s.path).filter(Boolean));
+      const unmatchedPaths = changedPaths.filter((p) => !sectionPaths.has(p));
+      if (unmatchedPaths.length && reviewSkipped.all.size) {
+        log(`skip-пути: у ${unmatchedPaths.length} файл(ов) PR нет своей секции в диффе — сужение отключено, моделям уходит полный дифф`, unmatchedPaths);
+        reviewSkipped = { ...reviewSkipped, byProfile: [], builtIn: [], all: new Set() };
+      }
+      const route = routeDiff(changedPaths, diff, { ...cfg.router, skipPaths: reviewSkipped.byProfile });
       log(`router R4: ${formatRouteLog(route)}`);
       obs.logEvent('run_start', {
         pr: pr.number,
@@ -585,7 +638,17 @@ export function createReviewPipeline(cfg, deps = {}) {
       });
       obs.logEvent('router', { route: route.route, reason: route.reason, files: route.files?.map((f) => f.class) });
 
-      if (route.route === 'skip' || route.route === 'light') {
+      // Источники пакетов в lockfile — ещё и детерминированно (добавочно к LLM: смену реестра
+      // в тысячах строк модель пропустит, а это подмена зависимости). Находки — в
+      // форме prescan, дальше по тому же пути (гейт, inline, sticky). Считаются ДО маршрута:
+      // PR из одного lockfile — route skip, и находка обязана отменить короткий путь.
+      const lockfileFindings = scanLockfileRegistries(diff, { registries: cfg.lockfile?.registries || [] });
+      if (lockfileFindings.length) {
+        log(`lockfile: ${lockfileFindings.length} источник(ов) пакетов вне разрешённых реестров`
+          + (route.route === 'full' ? '' : ` — router ${route.route} отменён, полный прогон гейта`));
+      }
+
+      if ((route.route === 'skip' || route.route === 'light') && !lockfileFindings.length) {
         const md = buildRouterSummary(cfg, { route, pr, headSha, changedPaths });
         finalObs = { exitCode: 0, route: route.route, wouldBlock: false };
         await persistAndCapture(buildReviewJson({
@@ -619,7 +682,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       if (addedPaths.size) log(`контекст: ${addedPaths.size} добавленных файл(ов) — дифф уже содержит их целиком, полный текст не прикладываем`);
       // Сначала читаем файлы: collectBlastSymbols добирает exports из полного текста,
       // а не только из hunk-строк (иначе правка тела функции → 0 symbols → пустой blast).
-      const [contentMap, rawPriorFindings, prescanResult] = await Promise.all([
+      const [contentMap, rawPriorFindings, rawPrescan] = await Promise.all([
         readChangedFiles(files, limits, log, { addedPaths }),
         (github.readPriorStickyData
           ? github.readPriorStickyData()
@@ -632,6 +695,13 @@ export function createReviewPipeline(cfg, deps = {}) {
         // Удалённым файлам линтер не нужен: их нет в рабочем дереве (RFC 17).
         prescan.run(deletedPaths.size ? changedPaths.filter((p) => !deletedPaths.has(p)) : changedPaths),
       ]);
+      const prescanResult = lockfileFindings.length
+        ? {
+          ...rawPrescan,
+          findings: [...(rawPrescan.findings || []), ...lockfileFindings],
+          byTool: { ...(rawPrescan.byTool || {}), lockfile: lockfileFindings.length },
+        }
+        : rawPrescan;
       const symbols = collectBlastSymbols(changedText, contentMap, limits.maxSymbols);
       log(`файлов: ${files.size} · символов под blast-radius: ${symbols.length}`, symbols);
       // Окна контекста для advisors и жюри (RFC 07): в промпт едут окрестности изменённых
@@ -685,7 +755,10 @@ export function createReviewPipeline(cfg, deps = {}) {
         runs: Array.isArray(rawPriorFindings?.runs) ? rawPriorFindings.runs : [],
         sha: typeof rawPriorFindings?.sha === 'string' ? rawPriorFindings.sha : '',
       };
-      const priorFindings = filterStalePriorFindings(priorSticky.findings, files, log);
+      // Находки прошлого прогона по путям, которые модели теперь не видят, в промпт не идут:
+      // жюри без файла не может ни подтвердить, ни снять их — только повторить вслепую.
+      const priorFindings = filterStalePriorFindings(priorSticky.findings, files, log)
+        .filter((f) => !reviewSkipped.all.has(f?.file));
       if (priorFindings.length !== priorSticky.findings.length) {
         obs.logEvent('prior_findings', { loaded: priorSticky.findings.length, kept: priorFindings.length });
       }
@@ -693,14 +766,6 @@ export function createReviewPipeline(cfg, deps = {}) {
       // Контекст доказуемости для маршрутизации advisory: что уже было в прошлом прогоне,
       // что подтвердил prescan, какого класса файл. Строится ОДИН раз — его читают и
       // verifier-стадия (кого дополнительно проверить), и classify (кого поднять в строку).
-      // Класс пути считает Rust-бинарь через отдельный процесс на вызов, а спрашивают его
-      // трое (actionability по каждой находке, план чанков, маршрутизация ролей) — мемоизация
-      // превращает десятки запусков процесса в один на файл.
-      const fileClassCache = new Map();
-      const fileClass = (path) => {
-        if (!fileClassCache.has(path)) fileClassCache.set(path, classifyFilePath(path));
-        return fileClassCache.get(path);
-      };
       const chunkClasses = (chunk) => [...new Set((chunk?.paths || []).map(fileClass))].sort();
       const actionabilityCtx = {
         priorKeys: new Set(priorFindings.map(findingLocationKey)),
@@ -785,15 +850,32 @@ export function createReviewPipeline(cfg, deps = {}) {
         });
       }
       // Дифф для LLM сужаем до ревьюируемых файлов; `files`/`changedPaths` остаются полными —
-      // на них держатся карта PR, отпечатки, гейт и Δ-блок.
-      const annotatedForLlm = incrementalPlan.mode === 'incremental'
-        ? [...diffSections.entries()].filter(([p]) => incrementalPlan.reviewPaths.has(p)).map(([, s]) => s).join('\n')
+      // на них держатся карта PR, отпечатки, гейт и Δ-блок. Сужают двое: инкрементальный план
+      // (неизменившиеся файлы) и skip-пути (lockfile/generated/reviewSkip).
+      const toLlm = (p) => !reviewSkipped.all.has(p)
+        && (incrementalPlan.mode !== 'incremental' || incrementalPlan.reviewPaths.has(p));
+      const changedSet = new Set(changedPaths);
+      const wantNarrow = incrementalPlan.mode === 'incremental' || reviewSkipped.all.size > 0;
+      if (wantNarrow && unmatchedPaths.length) {
+        log(`инкрементальность: у ${unmatchedPaths.length} файл(ов) PR нет своей секции в диффе — моделям уходит полный дифф`, unmatchedPaths);
+      }
+      const narrowLlm = wantNarrow && !unmatchedPaths.length;
+      // Секция, чей путь не из changedPaths (преамбула, rename-only, бинарь), не выбрасывается:
+      // сужение убирает только то, что точно известно как skip или неизменившееся.
+      const annotatedForLlm = narrowLlm
+        ? diffByPath.filter((s) => !s.path || !changedSet.has(s.path) || toLlm(s.path)).map((s) => s.text).join('\n')
         : annotated;
-      const contextForLlm = incrementalPlan.mode === 'incremental'
-        ? new Map([...ctxWindows.map.entries()].filter(([p]) => incrementalPlan.reviewPaths.has(p)))
+      const contextForLlm = narrowLlm
+        ? new Map([...ctxWindows.map.entries()].filter(([p]) => toLlm(p)))
         : ctxWindows.map;
+      const llmPathCount = changedPaths.filter(toLlm).length;
+      if (reviewSkipped.all.size) {
+        log(`skip-пути: ${reviewSkipped.all.size} файл(ов) не уходят в LLM (generated/lockfile ${reviewSkipped.builtIn.length}, reviewSkip профиля ${reviewSkipped.byProfile.length})`, [...reviewSkipped.all]);
+      }
+      // Перенос по skip-пути — находка, сделанная до того, как путь объявили skip:
+      // показать её значит снова блокировать merge тем, что модели больше не читают.
       const carriedFindings = incrementalPlan.mode === 'incremental'
-        ? markCarried(incrementalPlan.carried, priorIncremental?.headSha || '')
+        ? markCarried(incrementalPlan.carried, priorIncremental?.headSha || '').filter((f) => !reviewSkipped.all.has(f?.file))
         : [];
       if (carriedFindings.length) log(`перенесено находок по неизменившимся файлам: ${carriedFindings.length}`);
 
@@ -825,6 +907,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           ? `PR большой — разбит на ${chunks.length} частей для полного охвата (каждая ревьюится отдельно).`
           : '',
         formatIncrementalNote(incrementalPlan),
+        formatReviewSkippedNote(reviewSkipped),
       ].filter(Boolean).join(' ');
       // Дедлайн LLM-фазы: после него новые чанки пропускаем и постим частичный отчёт —
       // процесс завершается штатно (sticky/export/observability) до убийства job раннером.
@@ -838,6 +921,8 @@ export function createReviewPipeline(cfg, deps = {}) {
       if (blastFindings.length) log(`blast-radius: +${blastFindings.length} детерминированных cross-layer/community caller(s)`);
       obs.logEvent('plan', {
         chunks: chunks.length,
+        // Пути PR, не отданные моделям: lockfile/generated и layout.reviewSkip профиля.
+        reviewSkipped: { builtIn: reviewSkipped.builtIn.length, profile: reviewSkipped.byProfile.length },
         symbols: symbols.length,
         blastBlocks: blastBlocks.length,
         models: models.list,
@@ -899,8 +984,15 @@ export function createReviewPipeline(cfg, deps = {}) {
       // Инкрементальный прогон, в котором не изменился ни один файл: ревьюить нечего, весь
       // отчёт собирается из перенесённых находок. Это не аутедж LLM — ветку fail-closed
       // ниже он не поднимает, иначе «ничего не поменялось» блокировало бы merge.
-      const nothingToReview = incrementalPlan.mode === 'incremental' && incrementalPlan.reviewPaths.size === 0;
-      if (nothingToReview) log('инкрементальность: изменившихся файлов нет — LLM не вызывается');
+      // То же, когда все оставшиеся пути — skip (lockfile/generated/reviewSkip): при выключенном
+      // роутере PR из одних таких путей доходит сюда, а модели в нём читать нечего.
+      const nothingToReview = (incrementalPlan.mode === 'incremental' && incrementalPlan.reviewPaths.size === 0)
+        || (reviewSkipped.all.size > 0 && llmPathCount === 0);
+      if (nothingToReview) {
+        log(incrementalPlan.mode === 'incremental' && incrementalPlan.reviewPaths.size === 0
+          ? 'инкрементальность: изменившихся файлов нет — LLM не вызывается'
+          : 'все изменившиеся файлы — skip-пути (generated/lockfile/reviewSkip) — LLM не вызывается');
+      }
       const reviews = nothingToReview ? [] : await engine.reviewAllModels(chunks, {
         // changedPaths, а не готовая секция: карту PR («что в этом чанке, что ревьюится
         // отдельно») движок рисует под каждый чанк сам. changedFilesSection остаётся для
@@ -940,7 +1032,15 @@ export function createReviewPipeline(cfg, deps = {}) {
           paths: [...new Set(failedUncovered.flatMap((ci) => chunks[ci]?.paths || []))].slice(0, 20),
         });
       }
-      const llmFindings = ok.flatMap((r) => r.findings);
+      // Находка модели о skip-пути сделана вслепую (файл в чанк не попадал, модель видела
+      // только его имя в карте PR) — в отчёт не идёт.
+      const llmFindingsAll = ok.flatMap((r) => r.findings);
+      const llmFindings = reviewSkipped.all.size
+        ? llmFindingsAll.filter((f) => !reviewSkipped.all.has(f?.file))
+        : llmFindingsAll;
+      if (llmFindings.length !== llmFindingsAll.length) {
+        log(`skip-пути: снято ${llmFindingsAll.length - llmFindings.length} находок модели о файлах, которых она не видела`);
+      }
       let allFindings = [
         ...prescanResult.findings,
         ...blastFindings,

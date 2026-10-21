@@ -115,6 +115,19 @@ pub fn is_quota_exhausted(status: u16, body: &str) -> bool {
         .any(|needle| b.contains(needle))
 }
 
+/// Чья квота кончилась: `"model"` — лимит бесплатного тарифа одной модели (OpenRouter
+/// `:free`: «free-models-per-day … Add 10 credits»), `"key"` — квота всего ключа (кредиты,
+/// недельный лимит Ollama). От этого зависит, что глушит клиент LLM: лимит `:free`-модели не
+/// должен отключать платные модели того же ключа — иначе запасной verifier падал бы вместе
+/// с основным бесплатным.
+pub fn quota_scope(model: &str, error: &str) -> &'static str {
+    if model.ends_with(":free") || error.to_lowercase().contains("free-models") {
+        "model"
+    } else {
+        "key"
+    }
+}
+
 /// JS `\s` (String#trim): Unicode WhiteSpace ∪ LineTerminator ∪ U+FEFF, БЕЗ U+0085 (NEL).
 fn is_js_ws(c: char) -> bool {
     matches!(

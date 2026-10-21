@@ -8,8 +8,63 @@ last_updated: 2026-09-10
 
 # Changelog
 
-## Unreleased
+## 0.6.4 — reviewSkip для сгенерированного, запасной verifier, проверка blast — 2026-10-21
 
+Пин потребителя — `v0.6.4`. Новое для потребителя: `layout.reviewSkip` действует только с
+`REVIEW_PROFILE_TRUSTED=1` и `REVIEW_BASE_REF` (SHA base или полный ref) — CI-шаблон
+восстанавливает входы ревью из base; lockfile снова уходят моделям, к ним добавлена
+детерминированная проверка реестров; `REVIEW_VERIFIER_FALLBACK_MODEL` (#60); проверка
+blast-находок verifier'ом (RFC 21, #61). Формат футера sticky и контракты `swarm` /
+`export` / `structure` с `v0.6.3` не менялись.
+
+### Безопасность — вход доверенного профиля из base, fail-closed sgconfig, проверка lockfile
+
+Доработка `layout.reviewSkip` (PR #62) по итогам security-ревью, три пункта:
+
+- **Граница доверия** (`lib/trusted-input.mjs`). `REVIEW_PROFILE_TRUSTED=1` теперь требует
+  `REVIEW_BASE_REF` — SHA коммита или полный ref `refs/remotes/…`/`refs/heads/…` (короткое
+  `origin/main` отвергается: DWIM-резолв зависит от ref'ов checkout'а PR). Движок сам читает из base через git файл профиля,
+  `repoRulesFile`, `AGENTS.md`/`agents.md` (каталог профиля и корень), `paths.fpPatterns`, а
+  sgconfig ast-grep с его `ruleDirs`/`utilDirs` копирует из base во временный каталог и
+  запускает ast-grep с копией. Файла нет в base — он отсутствует, копия из PR не
+  подставляется. Без `REVIEW_BASE_REF`, с невалидным или нерезолвящимся ref доверие
+  снимается (строка `REVIEW_PROFILE_TRUSTED=1 снят: …` в логе), `reviewSkip` не применяется.
+  CI-шаблон восстанавливает из base профиль, `repoRulesFile`, `AGENTS.md`, fpPatterns и
+  каталог sgconfig (пути — из профиля base) и передаёт `REVIEW_BASE_REF`.
+- **`parseSgconfigDirs` fail-closed.** Строка, которую подмножество YAML не понимает (ключ в
+  кавычках, `---`, `?`, флоу-маппинг, якорь/алиас, `<<`, вложение под незнакомым ключом,
+  кавычки внутри значения), даёт null → защищается каталог конфига и любой YAML PR. Раньше
+  такие строки пропускались, и `"ruleDirs":` уводил каталоги правил из-под защиты.
+- **Встроенный skip — только source map** `*.{js,mjs,cjs,jsx,ts,tsx,css}.map` (голый
+  `*.map` — nginx-карты, данные — уходит моделям и не инертен для `reviewSkip`). **Lockfile
+  уходят моделям**, как до `reviewSkip`; скрыть их может только `reviewSkip` доверенного
+  профиля. Маршрут PR не менялся (PR из одних lockfile — skip). Добавочно в npm/yarn/pnpm
+  lockfile КАЖДОЕ значение добавленных строк (ключи yarn, `version`, `requires`, не только
+  `resolved`) декодируется как у менеджера пакетов и классифицируется с начала значения или
+  после `name@` (URL в середине, нераскодированная строка, управляющий символ — fail-closed):
+  https вне `registry.npmjs.org`, `registry.yarnpkg.com` и env `REVIEW_LOCKFILE_REGISTRIES`,
+  `http:`, иные схемы, git/`github:`-подобные спецификации, `file:`/`link:` вне репозитория, а
+  fail-closed — обратный слэш, `%`, userinfo, порт, непарная кавычка — дают детерминированную
+  находку major (prescan, `ruleId: lockfile-foreign-registry`). Она отменяет router skip/light.
+  Пробел в этой проверке ничего не прячет: lockfile видят и модели.
+
+**Для потребителя:** добавить в env шага ревью
+`REVIEW_BASE_REF: ${{ github.event.pull_request.base.sha || format('refs/remotes/origin/{0}', github.base_ref || 'main') }}`
+— без него `reviewSkip` перестанет применяться. Шаг «Take review profile from base branch»
+обновить по шаблону. Частный реестр npm — в `REVIEW_LOCKFILE_REGISTRIES`.
+
+### Добавлено — запасная модель verifier'а, `REVIEW_VERIFIER_FALLBACK_MODEL`
+
+Раньше любой сбой основной модели verifier'а — сеть, лимит бесплатного тарифа, сорванный
+JSON — давал «verifier недоступен» (RFC 18). При `REVIEW_LLM_REQUIRED=1` это degraded-блок
+PR. Теперь тот же батч уходит запасной модели; в observability её вызов помечен `fallbackFrom`.
+
+### Исправлено — лимит бесплатной модели больше не глушит весь ключ
+
+Лимит `:free`-модели OpenRouter (`429 … free-models-per-day. Add 10 credits…`) считался
+исчерпанием квоты ключа, и клиент отключал все вызовы прогона, включая платные. Теперь Rust
+`quota_scope` различает лимит одной модели и квоту ключа: при лимите модели отключается
+только она (RFC 20, § 7).
 **Для потребителя — что меняется при обновлении пина с `v0.6.3`:**
 
 - Ничего, пока не задана новая `REVIEW_BLAST_VERIFY` (дефолт `0` — прежнее поведение).
@@ -18,6 +73,9 @@ last_updated: 2026-09-10
 - Артефакт экспорта — `EXPORT_VERSION` **3**: у находки появилось поле `wouldBlockBlast`,
   у статистики verifier'а — `bySource`. Аддитивно; потребитель, сверяющий версию на
   «известна ли», а не на равенство, ничего не замечает.
+- Новое необязательное поле профиля `layout.reviewSkip` (действует при
+  `REVIEW_PROFILE_TRUSTED=1`); без него меняется одно — source map JS/TS/CSS больше не
+  уходят моделям в PR с кодом (ниже; lockfile — уходят, см. раздел «Безопасность» выше).
 - Формат футера sticky, namespace маркеров, контракты `swarm` / `structure` — без изменений.
 
 ### Добавлено — проверка blast-находок verifier'ом ([RFC 21](proposals/21-blast-verification.md))
@@ -36,6 +94,42 @@ strict-refutation понижал её до `minor` за отсутствие `ad
   `deepseek-v4-pro`: смена сигнатуры → verified ×2, необязательный параметр → rejected ×2.
 
 Дефолт переключится после замера на gold (план `blast-verification`, BLV-007/008).
+
+### Сгенерированные файлы не уходят моделям — `layout.reviewSkip`
+
+Класс skip роутера (lockfile, generated) решал только маршрут PR. Когда в PR рядом с ним был
+код, skip-файл всё равно нарезался в чанки. Orakul коммитит 26k-строчный OpenAPI YAML и его
+JSON-копии, которые CI сверяет с источником (`gen-openapi.mjs --check`). Жюри получало куски
+YAML, читало отступы через границу чанка и на каждом прогоне поднимало блокирующий major
+(«duplicate key», «description на неверном уровне»).
+
+Теперь:
+- файл, который роутер по имени считает generated (`x.generated.ts`, `dist/foo.js`), моделям
+  уходит — маршрут PR по-прежнему считает его skip, но вход LLM по одному имени не сужается;
+- trust gate: `reviewSkip` применяется только при `REVIEW_PROFILE_TRUSTED=1` (профиль взят
+  из base-ветки; шаг — в `examples/ci/pr-review.yml`), без флага игнорируется со строкой в логе;
+- встроенный skip сужает вход LLM только для source map JS/TS/CSS (после security-ревью;
+  lockfile уходят моделям);
+- allowlist инертных файлов (и для доверенного профиля): lockfile, `*.map`, `md`/`mdx`/`rst`,
+  данные `json`/`yaml` — кроме dotfile, каталогов CI/IDE/инфраструктуры, инструкций агентам и
+  конфигов сборки; код по расширению, `.github/`, пин движка `ai-reviewer-ref`, всё, что читает
+  движок (профиль, `repoRulesFile`, `AGENTS.md`, каждое значение `paths.*`, путевые поля cfg,
+  каталоги из `ruleDirs`/`utilDirs`/`testConfigs` sgconfig — fail-closed), и `layout.sensitive`
+  не исключаются никогда; проигнорированные совпадения пишутся в лог;
+- сужение диффа fail-closed: секции ключуются путём из `parseDiff`; путь PR без своей
+  секции — модели получают полный дифф;
+- новое поле профиля `layout.reviewSkip` (регекс или массив регексов) объявляет пути, которые
+  никогда не уходят моделям. Роутер считает их skip (`routeDiff` получает `skipPaths`, паритетно
+  в Rust), поэтому PR из одних таких путей — маршрут skip;
+- находки моделей о skip-путях, их перенос из инкрементального state и prior findings в
+  промпте отбрасываются; Δ-блок покажет такие находки снятыми;
+- в sticky появляется строка «Не ревьюились моделями (generated/lockfile/reviewSkip профиля):
+  N файл(ов)», в событии `plan` — `reviewSkipped: {builtIn, profile}`;
+- prescan, blast-radius и карта PR skip-пути видят по-прежнему: меняется только вход LLM.
+
+Reference-профиль Orakul (`profiles/orakul.json`, `examples/consumers/orakul/profile.json`)
+объявляет `docs/08-technical/openapi/`, `app/server/apiDocs/openapi(.platform).json` и
+`docs/dev/reference/api-endpoints-index.md`.
 
 ## 0.6.3 — Walkthrough отчёта не противоречит блоку — 2026-10-16
 
