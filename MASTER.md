@@ -4,12 +4,12 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-10-13
+last_updated: 2026-10-22
 ---
 
 # 🧭 Project Navigator: ai-reviewer
 
-> 📊 Meta: `{"version": "0.6.4", "last_updated": "2026-10-21", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
+> 📊 Meta: `{"version": "0.7.0", "last_updated": "2026-10-22", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
 
 > L0 для агента. Истина по гейту — architecture. Журнал разработки — `docs/dev/journal.md`. RFC — `proposals/`.
 
@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:61c634f763c6`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:e8feeba8d826`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:5c075cb0d8eb`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:68d2c3d0854c`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -132,17 +132,17 @@ graph TD
 
 ### Индекс RFC
 - **Описание:** таблица решений 01–13.
-- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:7c7508155f96`
+- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:c4b8f7ab543e`
 - **Статус:** `🟢 VERIFIED`
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:6ef94ee71ec9`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:d6a25a2e87c8`
 - **Статус:** `🟢 VERIFIED`
 
 ### README
 - **Описание:** точка входа потребителя: установка, CLI, подключение к CI.
-- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:534374df102f`
+- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:fcf8e487e567`
 - **Статус:** `🟢 VERIFIED`
 
 ### Индекс документации
