@@ -3,7 +3,9 @@
 // В отличие от eval.mjs (fixtures, post-processing без LLM) — здесь вызываются модели.
 // Запуск: OLLAMA_API_KEY=… npx pr-review-gold [--case <id>] [--jsonl out.jsonl]
 // Каталог набора — REVIEW_GOLD_DIR; диффы публичных кейсов тянутся по пину в REVIEW_GOLD_CACHE.
-// Blast-radius в gold-прогонах заглушен (детерминизм; на находки влияет слабо).
+// Blast-radius в gold-прогонах заглушен (детерминизм; на находки влияет слабо). Исключение —
+// REVIEW_GOLD_BLAST=1 у кейса со своим деревом: граф Graphify строится в дереве, blast считается
+// по-настоящему (замер RFC 21, REVIEW_BLAST_VERIFY). Нужен GRAPHIFY_BIN.
 import { readdir, readFile, writeFile, mkdir, access } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +15,8 @@ import { MARKERS } from '../lib/constants.mjs';
 import { scoreGoldCase } from '../lib/benchmark.mjs';
 import { ensureCaseDiff, localRepoPath } from '../lib/gold-fetch.mjs';
 import { spawn } from 'node:child_process';
-import { buildGraphIndex } from '../lib/graphify.mjs';
+import { buildGraphIndex, createGraphifyClient } from '../lib/graphify.mjs';
+import { envFlag } from '../lib/util.mjs';
 
 const GOLD_DIR = process.env.REVIEW_GOLD_DIR
   ? resolve(process.cwd(), process.env.REVIEW_GOLD_DIR)
@@ -45,6 +48,40 @@ async function treeGraphIndex(tree) {
     return buildGraphIndex(JSON.parse(await readFile(join(tree, '.graphify/graphify-out/graph.json'), 'utf8')));
   } catch { return null; }
 }
+
+/**
+ * Граф Graphify в дереве кейса для настоящего blast-radius (REVIEW_GOLD_BLAST=1). Строится один
+ * раз: дерево неизменно для пина кейса, повторный прогон берёт готовый граф. null — нет
+ * GRAPHIFY_BIN или сборка упала: кейс идёт с заглушкой, как без флага, и об этом пишется в stderr.
+ */
+async function ensureTreeGraph(tree, id) {
+  const out = join(tree, '.graphify/graphify-out');
+  const graph = join(out, 'graph.json');
+  try { await access(graph); return graph; } catch { /* построить */ }
+  const bin = process.env.GRAPHIFY_BIN;
+  if (!bin) {
+    console.error(`[gold] ${id}: REVIEW_GOLD_BLAST без GRAPHIFY_BIN — blast заглушен`);
+    return null;
+  }
+  const code = await new Promise((ok) => {
+    const p = spawn(resolve(cwdAtStart, bin), ['update', tree, '--force'], {
+      cwd: tree,
+      env: { ...process.env, GRAPHIFY_OUT: out, GRAPHIFY_NO_TIPS: '1' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let err = '';
+    p.stderr.on('data', (d) => { err += d; });
+    p.on('close', (c) => {
+      if (c !== 0) console.error(`[gold] ${id}: graphify update ${c}: ${err.slice(-300)}`);
+      ok(c);
+    });
+    p.on('error', (e) => { console.error(`[gold] ${id}: graphify: ${e.message}`); ok(1); });
+  });
+  if (code !== 0) return null;
+  try { await access(graph); return graph; } catch { return null; }
+}
+
+const cwdAtStart = process.cwd();
 
 function footerFindings(text) {
   const m = MARKERS.dataRe.exec(text);
@@ -100,6 +137,17 @@ async function runCase(id) {
   // построили), общий REVIEW_GOLD_GRAPH относится к другому коду.
   const graphIndex = !cfg.limits.symbolCards ? null
     : tree ? await treeGraphIndex(tree) : await goldGraphIndex(cfg);
+  // Настоящий blast-radius — только у кейса со своим деревом: без дерева граф был бы чужим кодом.
+  let graphify = { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex }) };
+  let blastLive = false;
+  if (tree && envFlag('REVIEW_GOLD_BLAST', false, process.env)) {
+    const graph = await ensureTreeGraph(tree, meta.id);
+    if (graph) {
+      const g = { ...cfg.graphify, bin: resolve(cwdAtStart, process.env.GRAPHIFY_BIN), graph, report: join(dirname(graph), 'GRAPH_REPORT.md') };
+      graphify = createGraphifyClient({ ...cfg, graphify: g });
+      blastLive = true;
+    }
+  }
   const captured = [];
   const origLog = console.log;
   console.log = (...a) => { captured.push(a.join(' ')); };
@@ -109,9 +157,9 @@ async function runCase(id) {
   try {
     if (tree) process.chdir(tree);
     const pipeline = createReviewPipeline(cfg, {
-      // Blast-radius заглушен, но при карточках символов (RFC 14) индекс графа нужен — без
-      // него сравнение REVIEW_SYMBOL_CARDS=0/1 дало бы два одинаковых прогона.
-      graphify: { buildBlastRadius: async () => ({ blocks: [], metrics: null, graphIndex }) },
+      // Blast-radius заглушен (кроме REVIEW_GOLD_BLAST), но при карточках символов (RFC 14)
+      // индекс графа нужен — без него сравнение REVIEW_SYMBOL_CARDS=0/1 дало бы два одинаковых прогона.
+      graphify,
       die: (m) => { throw new Error(`die: ${m}`); },
     });
     code = await pipeline.run();
@@ -126,6 +174,7 @@ async function runCase(id) {
     wallMs: Date.now() - t0,
     diffSource: diff.source,
     tree: Boolean(tree),
+    blastLive,
   };
 }
 
@@ -151,13 +200,13 @@ const records = [];
 for (const id of ids) {
   process.stdout.write(`[gold] ${id} … `);
   try {
-    const { meta, code, findings, wallMs, diffSource } = await runCase(id);
+    const { meta, code, findings, wallMs, diffSource, blastLive } = await runCase(id);
     const wouldBlock = code === 1;
     const score = scoreGoldCase(meta, { wouldBlock, findings });
     const errors = score.precisionHints;
     const stat = errors.length ? '❌' : '✅';
-    console.log(`${stat} wouldBlock=${code === 1} findings=${findings.length} wall=${(wallMs / 1000).toFixed(0)}с`);
-    records.push({ id, meta, findings, wouldBlock, code, wallMs, diffSource });
+    console.log(`${stat} wouldBlock=${code === 1} findings=${findings.length} wall=${(wallMs / 1000).toFixed(0)}с${blastLive ? " blast=live" : ""}`);
+    records.push({ id, meta, findings, wouldBlock, code, wallMs, diffSource, blastLive });
     for (const e of errors) {
       console.log(`   ✗ ${e}`);
       failed++;

@@ -15,7 +15,7 @@ import { buildRepoPathIndex, listRepoFiles } from './lib/absent-path.mjs';
 import { BLAST_FINDING_SOURCE, MARKERS } from './lib/constants.mjs';
 import { selectVerifierCandidates, applyVerifierVerdicts } from './lib/verifier.mjs';
 import { routeFindings, findingLocationKey, ACTIONABILITY_SIGNALS } from './lib/actionability.mjs';
-import { buildVerifierFileContents, windowChunkFileContents } from './lib/context-window.mjs';
+import { buildVerifierFileContents, windowChunkFileContents, findCallLines } from './lib/context-window.mjs';
 import {
   buildSymbolCards, createLineReader, selectChunkCards, symbolCardsHashInput, symbolCardsOutcome, isAbsenceClaim,
 } from './lib/symbol-cards.mjs';
@@ -189,6 +189,17 @@ async function runVerifierStage(allFindings, {
     for (const path of blastFiles) {
       const entry = await readOutside(path).catch(() => null);
       if (entry) outside.set(path, entry);
+    }
+    // Строка из графа — место ребра (бывает строкой импорта), а не вызова: окно verifier'а
+    // встало бы мимо вызова, и он честно отклонил бы находку. Переносим её на ближайший вызов
+    // символа; прежнюю строку храним. Вызова в файле нет (импорт, ре-экспорт) — строка прежняя.
+    for (const f of allFindings) {
+      if (f.source !== BLAST_FINDING_SOURCE || !outside.has(f.file) || !f.blastSymbol) continue;
+      const calls = findCallLines(outside.get(f.file), f.blastSymbol);
+      if (!calls.length || calls.includes(Number(f.line))) continue;
+      const near = calls.reduce((a, b) => (Math.abs(b - f.line) < Math.abs(a - f.line) ? b : a));
+      f.blastGraphLine = f.line;
+      f.line = near;
     }
     let unreadable = 0;
     for (const f of allFindings) {
@@ -387,6 +398,17 @@ async function runVerifierStage(allFindings, {
   }
   applied.stats.bySource = bySource;
   obs.logEvent('verifier', applied.stats);
+  // RFC 21: по blast-находкам — что именно судил verifier и почему. Материал замера: без
+  // строки и причины «rejected» нельзя отличить честный отказ от окна мимо вызова.
+  const blastSent = sent.filter((f) => f.source === BLAST_FINDING_SOURCE);
+  if (blastSent.length) {
+    obs.logEvent('verifier_blast_verdicts', {
+      verdicts: blastSent.map((f) => ({
+        file: f.file, line: f.line, graphLine: f.blastGraphLine ?? null, symbol: f.blastSymbol || null,
+        status: f.verifierStatus || 'none', reason: String(f.verifierReason || '').slice(0, 300),
+      })),
+    });
+  }
   logFindingsStage(obs, 'after_verifier', applied.findings);
   return { findings: applied.findings, stats: applied.stats, unavailable: tailUnavailable };
 }
@@ -701,7 +723,7 @@ export function createReviewPipeline(cfg, deps = {}) {
       }
       // Freshness измеряем даже если diff не содержит экспортов: иначе `graph_fresh`
       // был бы неизвестен именно в тех review-plans, где blast-radius пустой.
-      const blastResult = await graphify.buildBlastRadius(symbols);
+      const blastResult = await graphify.buildBlastRadius(symbols, { changedPaths });
       const { blocks: blastBlocks, metrics: blastMetrics, graphIndex } = normalizeBlastRadius(blastResult, symbols);
       log(`prep parallel: ${Date.now() - prepT0}мс (graphify+files+prior+prescan)`);
       // REVIEW_BLAST_REQUIRED: без code graph гейт не видит callers вне диффа → fail-closed

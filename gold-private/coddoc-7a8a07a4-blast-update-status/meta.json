@@ -1,0 +1,39 @@
+{
+  "id": "coddoc-7a8a07a4-blast-update-status",
+  "type": "tp",
+  "tags": [
+    "blast"
+  ],
+  "description": "PR сменил дефолт strict у task_service.update_status на True; веб-эндпоинт смены статуса (вне PR) не передаёт strict",
+  "source": {
+    "local": "coddoc",
+    "branch": "origin/main",
+    "sha": "7a8a07a4c95c93dc632342aadf50ccac86130d58",
+    "base": "7185897ea87a96287f36f030959e59e0bf9641f6",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "1910dbd18ce14f7d7683dca0ad9e81bc5c4d9290",
+        "ref": null,
+        "title": "fix: web status endpoint uses strict=False (user may skip intermediate states)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 87 строк в 10 файл(ах)",
+      "сигнатура update_status в cod_doc/services/task_service.py: «def update_status( session: Session, *, task_id: str, new_status: TaskStatus, author: str, reason: str | None = None, expected_parent_revision_id: str | None | object = rev.NO_PARENT_CHECK, via_checkout: bool = False, strict: bool = False, force: bool = False) -> Task» → «def update_status( session: Session, *, task_id: str, new_status: TaskStatus, author: str, reason: str | None = None, expected_parent_revision_id: str | None | object = rev.NO_PARENT_CHECK, via_checkout: bool = False, strict: bool = True, force: bool = False) -> Task»",
+      "локации: строка вызова в файле вне PR на дереве PR; git blame на родителе фикса — вызов старше PR"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "cod_doc/api/web/fragments/tasks_status.py",
+        "lines": [
+          52,
+          52
+        ]
+      }
+    ],
+    "note": "S=update_status, A=cod_doc/services/task_service.py, фикс 1910dbd18ce14f7d7683dca0ad9e81bc5c4d9290: дефолт strict=False → True, и вызов из веб-фрагмента без strict начал отвергать прямые переходы статуса (pending→done), которые веб-доска обязана разрешать"
+  }
+}

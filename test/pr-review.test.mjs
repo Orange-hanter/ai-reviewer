@@ -25,7 +25,7 @@ const {
   scoreFromRecord, locationMatches, DEFAULT_LOCATION_TOLERANCE,
   emitBlastRadiusFindings, resolveBlockers, normalizeFinding, setProfile, resetProfile,
   matchesKnownFalsePositive, redactSecretsForLog,
-  windowFileEntry, buildVerifierFileContents, windowChunkFileContents,
+  windowFileEntry, buildVerifierFileContents, windowChunkFileContents, findCallLines,
 } = await import('../index.mjs');
 const {
   buildGraphIndex, resolveUniqueNode, enrichAffectedDep, bareLabel, formatBlastBlock,
@@ -227,6 +227,45 @@ test('Graphify: blastUnavailableReason — инфра-сбой отличает�
   }).buildBlastRadius([]);
   assert.equal(blastUnavailableReason(noSymbols.metrics), null);
   assert.equal(blastUnavailableReason({ skip_reason: 'client_did_not_report', graph_status: 'unknown' }), null);
+});
+
+test('Graphify: омоним разрешается по файлу из PR — запрос по id узла', async () => {
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const graphJson = JSON.stringify({
+    nodes: [
+      { id: 'svc_a_update', label: 'update()', source_file: 'svc/a.py', community: 1 },
+      { id: 'svc_c_update', label: 'update()', source_file: 'svc/c.py', community: 1 },
+      { id: 'web_caller', label: 'handler()', source_file: 'web/h.py', community: 2 },
+    ],
+    links: [{ source: 'web_caller', target: 'svc_a_update', relation: 'calls', confidence: 'EXTRACTED', source_file: 'web/h.py' }],
+  });
+  const queries = [];
+  const client = (changedPaths) => createGraphifyClient(cfg, {
+    execFileP: async (bin, args) => {
+      if (bin !== 'gf') return { stdout: 'abcdef12' };
+      queries.push(args[1]);
+      return { stdout: args[1] === 'svc_a_update' ? '- handler() [calls] web/h.py:L52\n' : 'No unique node match for update\n' };
+    },
+    readFile: async (path) => (String(path).endsWith('graph.json') ? graphJson : '# Graph Report\n- Built from commit: `abcdef12`\n'),
+    access: async () => {},
+  }).buildBlastRadius(['update'], { changedPaths });
+
+  const own = await client(['svc/a.py']);
+  assert.deepEqual(queries, ['update', 'svc_a_update'], 'второй запрос — по id узла из изменённого файла');
+  assert.equal(own.metrics.symbols_resolved, 1);
+  assert.match(own.blocks[0], /web\/h\.py/);
+
+  queries.length = 0;
+  const both = await client(['svc/a.py', 'svc/c.py']);
+  assert.deepEqual(queries, ['update'], 'оба омонима в PR — не угадываем');
+  assert.equal(both.metrics.skip_reasons.symbol_unresolved, 1);
+
+  queries.length = 0;
+  await client(null);
+  assert.deepEqual(queries, ['update'], 'без путей PR — прежнее поведение');
 });
 
 test('Graphify: нет символов в диффе → честный skip no_symbols_in_diff', async () => {
@@ -1521,6 +1560,18 @@ test('emitBlastRadiusFindings: путь с `_` из blast-блока совпа�
   resetProfile();
 });
 
+test('emitBlastRadiusFindings: файл, зависящий от двух изменённых символов, — две находки (RFC 21)', () => {
+  setProfile({ layout: { layerDirs: ['apps', 'packages'] } });
+  const blocks = [
+    '- `queueAlerts` → 1 зависимостей вне диффа: `server.js` @ apps/web/server.js:10 [imports_from][EXTRACTED] cross-community',
+    '- `getToken` → 1 зависимостей вне диффа: `server.js` @ apps/web/server.js:10 [imports_from][EXTRACTED] cross-community',
+  ];
+  const findings = emitBlastRadiusFindings(blocks, ['packages/core/telegram.js'], { symbols: ['queueAlerts', 'getToken'] });
+  assert.deepEqual(findings.map((f) => f.blastSymbol).sort(), ['getToken', 'queueAlerts'],
+    'по находке на символ: иначе verifier судит контракт первого символа, а сломанный вызов второго теряется');
+  resetProfile();
+});
+
 test('emitBlastRadiusFindings: DROP_AMBIGUOUS=0 оставляет AMBIGUOUS', () => {
   setProfile({ layout: { layerDirs: ['apps', 'packages'] } });
   const blocks = [
@@ -2072,6 +2123,14 @@ test('buildVerifierFileContents: только файлы кандидатов, �
   assert.ok(r.text.includes('… (lines 121–169 not shown)'), 'два окна a.ts не слились');
   assert.ok(!r.text.includes('### b.ts\n```\n… ('), 'b.ts отдан целиком: центрировать окно не на чем');
   assert.ok(r.after < r.before, `окна короче целых файлов: ${r.before} → ${r.after}`);
+});
+
+test('findCallLines: строки вызова символа, а не импорт и не имя-префикс (RFC 21)', () => {
+  const entry = '### a.js\n```\nimport * as telegram from "./t.js";\nif (telegram.getTgToken()) start();\nconst getTgTokenX = 1;\nx.getTgToken ();\n```';
+  assert.deepEqual(findCallLines(entry, 'getTgToken'), [2, 4]);
+  assert.deepEqual(findCallLines(entry, 'telegram'), [], 'обращение к модулю — не вызов');
+  assert.deepEqual(findCallLines(entry, 'a.b'), [], 'не идентификатор — пусто, без регулярки из ввода');
+  assert.deepEqual(findCallLines('не запись', 'x'), []);
 });
 
 test('buildVerifierFileContents: файл вызывающего кода вне PR — только окно у blast-кандидата (RFC 21)', () => {

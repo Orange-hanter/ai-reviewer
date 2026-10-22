@@ -1,0 +1,39 @@
+{
+  "id": "orakul-d128046c-blast-gettgtoken",
+  "type": "tp",
+  "tags": [
+    "blast"
+  ],
+  "description": "PR сделал getTgToken async; автостарт Telegram в app/server.js (вне PR) остался синхронным",
+  "source": {
+    "local": "orakul",
+    "branch": "origin/main",
+    "sha": "d128046c7fabc79836e414817934a1d15eff98b1",
+    "base": "a4806ceced7715354174639b60b134cbf07bb78d",
+    "ref": null,
+    "fixes": [
+      {
+        "sha": "c226ad26f532ebd5bda4395087df289a804a47aa",
+        "ref": null,
+        "title": "fix(m1): server.js — await getTgToken при автостарте telegram (P1 из ревью C17)"
+      }
+    ],
+    "evidence": [
+      "дифф виновника: 55 строк в 2 файл(ах)",
+      "сигнатура getTgToken в app/server/telegram.js: «export function getTgToken()» → «export async function getTgToken()»",
+      "локации: строка вызова в файле вне PR на дереве PR; git blame на родителе фикса — вызов старше PR"
+    ]
+  },
+  "expect": {
+    "mustFindLocations": [
+      {
+        "file": "app/server.js",
+        "lines": [
+          90,
+          90
+        ]
+      }
+    ],
+    "note": "S=getTgToken, A=app/server/telegram.js, фикс c226ad26f532ebd5bda4395087df289a804a47aa: getTgToken стал async, и `if (telegram.getTgToken())` в server.js проверяет Promise — всегда truthy, polling стартует без токена и падает в ретраи каждые 2 с"
+  }
+}
