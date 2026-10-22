@@ -20,7 +20,7 @@ const {
   extractFileDiffSections, selectVerifierCandidates, applyVerifierVerdicts,
   parseJsonl, aggregateMetrics, formatMetricsReport,
   parseDiffNewPath, parseDiffGitPath, unescapeGitPath, buildSummary, filterStalePriorFindings,
-  filterFindingsFixedInDiff, findingFingerprint, createGraphifyClient, blastUnavailableReason, buildChangedFilesSection,
+  filterFindingsFixedInDiff, findingFingerprint, createGraphifyClient, blastUnavailableReason, findNamespaceCalls, buildChangedFilesSection,
   dedupeSameModelFindings, createCostTracker, formatCostStickyLine, scoreGoldCase, aggregateBenchmark,
   scoreFromRecord, locationMatches, DEFAULT_LOCATION_TOLERANCE,
   emitBlastRadiusFindings, resolveBlockers, normalizeFinding, setProfile, resetProfile,
@@ -266,6 +266,55 @@ test('Graphify: омоним разрешается по файлу из PR — 
   queries.length = 0;
   await client(null);
   assert.deepEqual(queries, ['update'], 'без путей PR — прежнее поведение');
+});
+
+test('findNamespaceCalls: вызов через namespace-импорт и require, а не через чужой алиас (BLV-009)', () => {
+  const text = [
+    "import * as telegram from './server/telegram.js';",
+    "import * as other from './x.js';",
+    'if (telegram.getTgToken()) telegram.startTelegram();',
+    'const a = notelegram.getTgToken();',
+    'other.getTgToken();',
+    'telegram.getTgTokenX();',
+  ].join('\n');
+  assert.deepEqual(findNamespaceCalls(text, 'app/server.js', 'app/server/telegram.js', 'getTgToken'), [3]);
+  assert.deepEqual(findNamespaceCalls("const tg = require('../server/telegram');\ntg.getTgToken(1);", 'app/x/y.js', 'app/server/telegram.js', 'getTgToken'), [2],
+    'require без расширения');
+  assert.deepEqual(findNamespaceCalls("import * as m from './lib';\nm.f();", 'a.ts', 'lib/index.ts', 'f'), [2], 'каталог → index');
+  assert.deepEqual(findNamespaceCalls(text, 'app/server.py', 'app/server/telegram.js', 'getTgToken'), [], 'Python граф связывает сам');
+  assert.deepEqual(findNamespaceCalls(text, 'app/server.js', 'app/server/telegram.js', 'a.b'), [], 'не идентификатор');
+});
+
+test('Graphify: graphify зависимых не видит — фолбэк находит вызов через namespace-импорт (BLV-009)', async () => {
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const graphJson = JSON.stringify({
+    nodes: [
+      { id: 'tg_file', label: 'telegram.js', source_file: 'app/server/telegram.js', community: 1 },
+      { id: 'tg_get', label: 'getTgToken()', source_file: 'app/server/telegram.js', community: 1 },
+      { id: 'srv_file', label: 'server.js', source_file: 'app/server.js', community: 2 },
+    ],
+    links: [{ source: 'srv_file', target: 'tg_file', relation: 'imports_from', confidence: 'EXTRACTED', source_file: 'app/server.js' }],
+  });
+  const files = {
+    'graph.json': graphJson,
+    'GRAPH_REPORT.md': '# Graph Report\n- Built from commit: `abcdef12`\n',
+    'app/server.js': "import * as telegram from './server/telegram.js';\n\nif (telegram.getTgToken()) telegram.startTelegram();\n",
+  };
+  const client = createGraphifyClient(cfg, {
+    execFileP: async (bin) => ({ stdout: bin === 'gf' ? 'No affected nodes found for getTgToken\n' : 'abcdef12' }),
+    readFile: async (path) => { if (path in files) return files[path]; throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+    access: async () => {},
+  });
+  const { blocks, metrics } = await client.buildBlastRadius(['getTgToken'], { changedPaths: ['app/server/telegram.js'] });
+  assert.equal(blocks.length, 1);
+  assert.match(blocks[0], /app\/server\.js:3 \[calls\]\[EXTRACTED\] cross-community/);
+  assert.equal(metrics.affected_nonempty, 1);
+
+  const inPr = await client.buildBlastRadius(['getTgToken'], { changedPaths: ['app/server/telegram.js', 'app/server.js'] });
+  assert.equal(inPr.blocks.length, 0, 'импортёр в PR — не «вне диффа»');
 });
 
 test('Graphify: нет символов в диффе → честный skip no_symbols_in_diff', async () => {

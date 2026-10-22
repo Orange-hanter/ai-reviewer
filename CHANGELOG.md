@@ -37,6 +37,15 @@ Shadow-замер на gold-private (20 clean-кейсов и 2 кейса «PR 
 Для замера: `REVIEW_GOLD_BLAST=1` — настоящий blast-radius в gold-раннере; режим `--blast`
 сборщика `pr-review-gold-harvest-local`; событие наблюдаемости `verifier_blast_verdicts`.
 
+### Добавлено — blast-radius видит вызов через namespace-импорт (BLV-009)
+
+Graphify не связывает `m.S()` при `import * as m from './A'` / `const m = require('./A')` с
+функцией `S` в JS/TS. Движок теперь сам находит такие вызовы: импортёры файла символа — по
+рёбрам `imports` графа, в каждом — алиас и строки `m.S(` (confidence `EXTRACTED`). Python не
+затронут — там граф справляется. На gold поймана вторая настоящая поломка (Orakul `getTgToken`
+→ `server.js:90`): 2 из 2. Тот же прогон нашёл класс ложных блоков — переименование `.jsx` →
+`.tsx` при резолвере сборки (BLV-010), поэтому дефолт `REVIEW_BLAST_VERIFY` остаётся `0`.
+
 ## 0.6.4 — reviewSkip для сгенерированного, запасной verifier, проверка blast — 2026-10-21
 
 Пин потребителя — `v0.6.4`. Новое для потребителя: `layout.reviewSkip` действует только с
