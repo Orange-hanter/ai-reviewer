@@ -847,7 +847,7 @@ pub fn load_review_config_parts(env: &Map<String, Value>, profile: &Value) -> Va
             "confidenceMin": num_json(confidence_min),
             "llmRequired": env_flag(env, "REVIEW_LLM_REQUIRED", true),
             "blastRequired": env_flag(env, "REVIEW_BLAST_REQUIRED", false),
-            "blastVerify": env_mode(env, "REVIEW_BLAST_VERIFY", "0"),
+            "blastVerify": env_mode(env, "REVIEW_BLAST_VERIFY", "1"),
             "strict": strict,
             "requireQuote": require_quote,
         }),
