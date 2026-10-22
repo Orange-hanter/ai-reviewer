@@ -121,6 +121,12 @@ test('loadReviewConfig: REVIEW_VERIFIER off', () => {
   assert.equal(cfg.verifier.enabled, false);
 });
 
+test('loadReviewConfig: REVIEW_BLAST_VERIFY — дефолт 1 (BLV-008), 0 и shadow — явно', () => {
+  assert.equal(loadReviewConfig({ OLLAMA_API_KEY: 'x' }).gate.blastVerify, '1');
+  assert.equal(loadReviewConfig({ OLLAMA_API_KEY: 'x', REVIEW_BLAST_VERIFY: '0' }).gate.blastVerify, '0', 'откат');
+  assert.equal(loadReviewConfig({ OLLAMA_API_KEY: 'x', REVIEW_BLAST_VERIFY: 'shadow' }).gate.blastVerify, 'shadow');
+});
+
 test('loadReviewConfig: REVIEW_CONFIDENCE_MIN', () => {
   const cfg = loadReviewConfig({ REVIEW_CONFIDENCE_MIN: '0.65', OLLAMA_API_KEY: 'x' });
   assert.equal(cfg.gate.confidenceMin, 0.65);

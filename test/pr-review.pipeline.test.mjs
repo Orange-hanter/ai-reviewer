@@ -869,7 +869,7 @@ test('blast-verify (RFC 21): файл вызывающего кода не пр�
 });
 
 test('blast-verify (RFC 21): REVIEW_BLAST_VERIFY=0 — файлы вне PR не читаются', async () => {
-  const { reads } = await runBlastVerify({ readOutsideFile: async () => CALLER_ENTRY });
+  const { reads } = await runBlastVerify({ env: { REVIEW_BLAST_VERIFY: '0' }, readOutsideFile: async () => CALLER_ENTRY });
   assert.deepEqual(reads, [], 'при 0 нынешнее поведение без лишнего чтения');
 });
 
@@ -941,7 +941,7 @@ test('blast-verify moa: shadow + verified → exit 0 и событие blast_wou
 });
 
 test('blast-verify moa: REVIEW_BLAST_VERIFY=0 — прежнее поведение: refutation понижает, verifier её не видит', { skip: skipNoRust }, async () => {
-  const { code, seen, reads } = await runBlastVerify({ env: { ...MOA }, readOutsideFile: withCaller });
+  const { code, seen, reads } = await runBlastVerify({ env: { ...MOA, REVIEW_BLAST_VERIFY: '0' }, readOutsideFile: withCaller });
   assert.equal(seen.length, 0, 'до verifier\'а blast-находка не доходит');
   assert.deepEqual(reads, []);
   assert.equal(code, 0);
