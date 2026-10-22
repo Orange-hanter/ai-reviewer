@@ -190,13 +190,25 @@ async function runVerifierStage(allFindings, {
       const entry = await readOutside(path).catch(() => null);
       if (entry) outside.set(path, entry);
     }
-    // Строка из графа — место ребра (бывает строкой импорта), а не вызова: окно verifier'а
-    // встало бы мимо вызова, и он честно отклонил бы находку. Переносим её на ближайший вызов
-    // символа; прежнюю строку храним. Вызова в файле нет (импорт, ре-экспорт) — строка прежняя.
+    // Строка из графа — место ребра (бывает строкой импорта), а не использования: окно
+    // verifier'а встало бы мимо, и он судил бы путь импорта вместо контракта. Переносим её на
+    // ближайший вызов / JSX-тег символа; прежнюю строку храним. Использования в файле нет
+    // (только импорт, ре-экспорт, передача без вызова) — несовместимость контракта на импорте не
+    // проявляется: minor без verifier'а (RFC 21, BLV-010; ложный блок на `.jsx` → `.tsx`).
+    let noUsage = 0;
     for (const f of allFindings) {
       if (f.source !== BLAST_FINDING_SOURCE || !outside.has(f.file) || !f.blastSymbol) continue;
       const calls = findCallLines(outside.get(f.file), f.blastSymbol);
-      if (!calls.length || calls.includes(Number(f.line))) continue;
+      if (!calls.length) {
+        if (isBlockTier(f)) {
+          f.severity = 'minor';
+          f.verifierStatus = 'unverified';
+          f.verifierReason = `\`${f.blastSymbol}\` в файле не вызывается — только импорт; несовместимость контракта на импорте не проявляется, понижено до minor`;
+          noUsage++;
+        }
+        continue;
+      }
+      if (calls.includes(Number(f.line))) continue;
       const near = calls.reduce((a, b) => (Math.abs(b - f.line) < Math.abs(a - f.line) ? b : a));
       f.blastGraphLine = f.line;
       f.line = near;
@@ -211,7 +223,7 @@ async function runVerifierStage(allFindings, {
     }
     if (blastFiles.size) {
       log(`verifier: файлов вызывающего кода вне PR прочитано ${outside.size} из ${blastFiles.size}${unreadable ? `, ${unreadable} blast-находок → minor (unverified)` : ''}`);
-      obs.logEvent('verifier_blast_callers', { files: blastFiles.size, read: outside.size, unreadable });
+      obs.logEvent('verifier_blast_callers', { files: blastFiles.size, read: outside.size, unreadable, noUsage });
     }
   }
   // Сбой судит только strict-режим verifier'а: при REVIEW_VERIFIER_STRICT=0 находка без
