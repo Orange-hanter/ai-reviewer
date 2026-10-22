@@ -57,7 +57,7 @@ export { resolveInputSource, worktreeSource, getInputSource, setInputSource, rea
 export { scanLockfileRegistries, parseLockfileRegistries, DEFAULT_LOCKFILE_REGISTRIES, LOCKFILE_REGISTRY_RULE } from './lib/lockfile-registry.mjs';
 export { publicErrorLabel, createAdaptiveSemaphore, redactSecretsForLog } from './lib/util.mjs';
 export { parseJsonl, aggregateMetrics, formatMetricsReport } from './lib/metrics.mjs';
-export { createGraphifyClient, blastUnavailableReason } from './lib/graphify.mjs';
+export { createGraphifyClient, blastUnavailableReason, findNamespaceCalls } from './lib/graphify.mjs';
 export {
   analyzeStructure, STRUCTURE_TOOL_VERSION,
 } from './lib/structure.mjs';
