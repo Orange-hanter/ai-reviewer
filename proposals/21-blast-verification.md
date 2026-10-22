@@ -295,3 +295,10 @@ verifier судил путь импорта («файла больше нет»)
 Оба истинных блока замеров — на вызовах (`update_status(`, `getTgToken()`), правило 1 их не
 задевает. Цена — находки о символе, переданном без вызова (`arr.map(S)`), блокировать не будут;
 для blast-класса это редкость, и они остаются в отчёте как minor.
+
+**Проверка** (2026-10-22, gold shadow): clean-кейс `orakul-968d83e1` три прогона подряд —
+`blast_would_block` 0 в каждом. Находки по компонентам перенесены на JSX
+(`PrepsManager.jsx:303`, `FinanceTab.jsx:278`, `MenuTab.jsx:1028`), verifier судит контракт и
+отклоняет все три во всех прогонах («props products, excludeIds, onAdd, onClose сохранены»); ещё 4
+находки на прогон — только импорт, minor без verifier'а. Оба blast-кейса по-прежнему пойманы:
+cod-doc `tasks_status.py:52`, Orakul `server.js:90` — verified, `blast_would_block`.
