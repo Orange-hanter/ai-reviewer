@@ -67,7 +67,7 @@ graph TD
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:68d2c3d0854c`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:6de2f0856d23`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
