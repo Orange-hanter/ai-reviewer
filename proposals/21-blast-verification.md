@@ -256,3 +256,18 @@ Confidence таких рёбер — `EXTRACTED`: и импорт, и вызов
 `REVIEW_CONFIDENCE_MIN` = 0.8, и фолбэк ловил бы, но не блокировал. Слой/кластер — как у прочих
 зависимостей (обогащение по узлу файла); чтение — `deps.readFile`, лимит — 50 импортёров на
 символ. Python не трогаем: граф там справляется.
+
+**Проверка** (2026-10-22, gold Orakul: blast-кейс и 5 clean, остальные проекты фолбэк не
+затрагивает). Blast-кейс `getTgToken` **пойман**: зависимость `app/server.js:90
+[calls][EXTRACTED] cross-community`, verifier — verified («getTgToken стал async, server.js:90
+вызывает без await — Promise всегда truthy»), `blast_would_block` на `:90`. Попутно фолбэк
+нашёл `startTelegram` → `:90` и `register` → `:77` — verifier отклонил оба (контракт не менялся).
+Итог по настоящим поломкам — **2 из 2**.
+
+**Ложные блоки — не от фолбэка, но найдены этим прогоном.** Clean-кейс `orakul-968d83e1`:
+PR переименовал `IngredientPicker.jsx` → `.tsx`, импортёры вне PR остались с `'./IngredientPicker.jsx'`;
+verifier подтвердил «путь больше не существует» — 3 `blast_would_block`. Ложно: на этом коммите
+`vite.config.js` держит резолвер `jsToTsResolver`, подменяющий `.jsx` → `.tsx`; конфиг сборки
+verifier'у не показан. Это рёбра `imports` графа, а не namespace-вызовы; в предыдущем замере те
+же кандидаты получили rejected — вердикт по этому классу нестабилен. Условие «ноль ложных
+блоков» для дефолта больше не выполнено — BLV-010.
