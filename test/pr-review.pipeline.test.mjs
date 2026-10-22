@@ -769,7 +769,7 @@ const advisoryMinorReview = () => ({
 // RFC 21: blast-находка о caller'е вне PR. foo.ts меняется в CODE_DIFF, lib/caller.ts — нет.
 const BLAST_BLOCK = '- `foo` → 1 зависимостей вне диффа: `useFoo()` @ lib/caller.ts:5 [calls][EXTRACTED] cross-community';
 const blastGraphify = { buildBlastRadius: async () => [BLAST_BLOCK] };
-const CALLER_ENTRY = `### lib/caller.ts\n\`\`\`\n${Array.from({ length: 60 }, (_, i) => (i === 4 ? 'useFoo(1, 2);' : `// ${i + 1}`)).join('\n')}\n\`\`\``;
+const CALLER_ENTRY = `### lib/caller.ts\n\`\`\`\n${Array.from({ length: 60 }, (_, i) => (i === 4 ? 'const r = foo(1, 2);' : `// ${i + 1}`)).join('\n')}\n\`\`\``;
 const emptyReview = () => ({ model: 'm1', summary: '', verdict: 'comment', findings: [] });
 
 async function runBlastVerify({ env = {}, readOutsideFile, verdict = 'verified', verdicts, observabilityDir = '' } = {}) {
@@ -803,7 +803,7 @@ test('blast-verify (RFC 21): verifier видит окно файла вызыв�
   assert.deepEqual(reads, ['lib/caller.ts'], 'файл вне PR прочитан один раз');
   assert.equal(seen.length, 1);
   assert.deepEqual(seen[0].candidates, [{ file: 'lib/caller.ts', source: 'blast-radius' }]);
-  assert.ok(seen[0].ctx.fileContents.includes('useFoo(1, 2);'), 'строка вызова в контексте verifier\'а');
+  assert.ok(seen[0].ctx.fileContents.includes('const r = foo(1, 2);'), 'строка вызова в контексте verifier\'а');
   assert.ok(seen[0].ctx.annotated.includes('export function foo()'), 'хунк, где меняется символ');
 });
 
@@ -827,6 +827,37 @@ test('blast-verify (RFC 21): строка из графа мимо вызова 
   });
   assert.deepEqual(seen[0].lines, [[40, 1]], 'находка на строке вызова, строка графа сохранена');
   assert.ok(seen[0].ctx.fileContents.includes('const r = foo(1, 2);'), 'окно verifier\'а стоит на вызове');
+});
+
+test('blast-verify (BLV-010): символ в файле только импортирован — minor без verifier\'а', async () => {
+  // .jsx → .tsx при резолвере сборки: импортёр со старым путём, использования нет.
+  const entry = `### lib/caller.ts\n\`\`\`\nimport { foo } from '../foo.js';\nexport const bar = 1;\n\`\`\``;
+  const { code, seen, reads } = await runBlastVerify({
+    env: { REVIEW_BLAST_VERIFY: '1' }, readOutsideFile: async () => entry,
+  });
+  assert.deepEqual(reads, ['lib/caller.ts']);
+  assert.equal(seen.length, 0, 'нечего проверять: контракт на импорте не проявляется');
+  assert.equal(code, 0);
+});
+
+test('blast-verify (BLV-010): React-компонент — находка на JSX-теге, а не на строке импорта', async () => {
+  const lines = Array.from({ length: 40 }, (_, i) => `// ${i + 1}`);
+  lines[0] = "import Foo from './Foo.jsx';";
+  lines[29] = '  return <Foo value={1} />;';
+  const entry = `### lib/caller.ts\n\`\`\`\n${lines.join('\n')}\n\`\`\``;
+  const seen = [];
+  await runPipeline({
+    diff: CODE_DIFF,
+    reviews: [emptyReview()],
+    graphify: { buildBlastRadius: async () => [BLAST_BLOCK.replace('`foo`', '`Foo`').replace('lib/caller.ts:5', 'lib/caller.ts:1')] },
+    verifyFindings: async (candidates) => {
+      seen.push(candidates.map((c) => [c.line, c.blastGraphLine]));
+      return candidates.map((_, i) => ({ candidateIndex: i, decision: 'rejected', reason: 'r' }));
+    },
+    env: { REVIEW_VERIFIER: '1', REVIEW_BLAST_VERIFY: '1' },
+    mutateDeps: (deps) => { deps.readOutsideFile = async () => entry; },
+  });
+  assert.deepEqual(seen[0], [[30, 1]]);
 });
 
 test('blast-verify (RFC 21): файл вызывающего кода не прочитан → minor/unverified, verifier его не получает', async () => {

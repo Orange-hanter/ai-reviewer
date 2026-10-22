@@ -2180,6 +2180,9 @@ test('findCallLines: строки вызова символа, а не импо�
   assert.deepEqual(findCallLines(entry, 'telegram'), [], 'обращение к модулю — не вызов');
   assert.deepEqual(findCallLines(entry, 'a.b'), [], 'не идентификатор — пусто, без регулярки из ввода');
   assert.deepEqual(findCallLines('не запись', 'x'), []);
+  const jsx = '### a.jsx\n```\nimport Picker from "./Picker.jsx";\nconst a = <Picker\n<PickerX/>\n<Picker/>\n```';
+  assert.deepEqual(findCallLines(jsx, 'Picker'), [2, 4], 'BLV-010: JSX-тег — использование компонента, импорт и PickerX — нет');
+  assert.deepEqual(findCallLines('### a.js\n```\n<div/>\n```', 'div'), [], 'строчное имя — не компонент');
 });
 
 test('buildVerifierFileContents: файл вызывающего кода вне PR — только окно у blast-кандидата (RFC 21)', () => {

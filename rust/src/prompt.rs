@@ -728,6 +728,9 @@ context includes a window of the caller's file around the candidate line.
   is compatible with the new contract.
 - downgrade to minor — the contract changed, but the incompatibility cannot be proven from the shown
   code (the call goes through a wrapper or passes a dynamic value).
+Whether an import specifier resolves (file extension, alias, index file, path mapping) is decided by
+build configuration that is not shown, so a renamed or moved file is not evidence that an import
+breaks. Judge the contract at the line where the symbol is used, not the import line.
 </blast_candidate_rule>"#;
 
 const VERIFIER_HEAD: &str = r#"You are the verifier: the second, independent pass of a code review. You receive candidate findings
@@ -1256,6 +1259,7 @@ mod tests {
         let user = msgs[1]["content"].as_str().unwrap();
         assert!(system.contains("</blast_radius_rule>\n\n<blast_candidate_rule>\nCandidates marked [blast-radius]"));
         assert!(system.contains("<blast_radius_rule> does not apply to these candidates"));
+        assert!(system.contains("a renamed or moved file is not evidence that an import\nbreaks"), "BLV-010");
         assert!(system.contains("</blast_candidate_rule>\n\n<untrusted_input>"));
         assert!(user.contains("1. [major] [blast-radius] b.ts:7 — **caller**"));
         assert!(user.contains("0. [major] a.ts:1 — **llm**"), "LLM-кандидат без пометки");
