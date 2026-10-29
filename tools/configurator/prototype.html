@@ -10,7 +10,7 @@
   --bg: #eef1f4; --surface: #ffffff; --sunk: #f6f8fa; --ink: #17202b; --muted: #5a6575; --line: #d6dce4;
   --accent: #1d6a73; --accent-ink: #ffffff; --accent-soft: #d9eced;
   --ok: #1d7a45; --ok-soft: #dcf0e3; --warn: #9a5800; --warn-soft: #fbeed8; --err: #b0261d; --err-soft: #f9dfdc;
-  --add: #e3f3e8; --del: #fbe4e1;
+  --add: #e3f3e8; --del: #fbe4e1; --zone-ok: #b9dfc6; --zone-edge: #f1d3a6;
   --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
   --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -19,12 +19,12 @@
   --bg: #0e131a; --surface: #151c25; --sunk: #111820; --ink: #e2e8ef; --muted: #93a0b0; --line: #283241;
   --accent: #56b4bd; --accent-ink: #08191b; --accent-soft: #163a3e;
   --ok: #57c486; --ok-soft: #12301f; --warn: #e5a443; --warn-soft: #36270f; --err: #f2766c; --err-soft: #3a1714;
-  --add: #12301f; --del: #3a1714; color-scheme: dark } }
+  --add: #12301f; --del: #3a1714; --zone-ok: #23603f; --zone-edge: #6b4a17; color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #0e131a; --surface: #151c25; --sunk: #111820; --ink: #e2e8ef; --muted: #93a0b0; --line: #283241;
   --accent: #56b4bd; --accent-ink: #08191b; --accent-soft: #163a3e;
   --ok: #57c486; --ok-soft: #12301f; --warn: #e5a443; --warn-soft: #36270f; --err: #f2766c; --err-soft: #3a1714;
-  --add: #12301f; --del: #3a1714; color-scheme: dark }
+  --add: #12301f; --del: #3a1714; --zone-ok: #23603f; --zone-edge: #6b4a17; color-scheme: dark }
 
 * { box-sizing: border-box }
 body { background: var(--bg); color: var(--ink); font: 14px/1.55 var(--f-body); }
@@ -89,6 +89,31 @@ main { min-width: 0; padding-block: 22px 60px; padding-left: max(16px, env(safe-
 .field.wide .ctl > * { flex: 1 }
 .field.changed { background: linear-gradient(90deg, var(--accent-soft), transparent 60%) }
 .unit { font: 12px var(--f-mono); color: var(--muted); white-space: nowrap }
+
+.slider { display: grid; gap: 6px; width: 100%; min-width: 0 }
+.sl-row { display: flex; align-items: flex-start; gap: 14px; min-width: 0 }
+.sl-track { position: relative; flex: 1; min-width: 0; padding-top: 18px }
+.sl-def { position: absolute; top: 0; transform: translateX(-50%); font-size: 10.5px; color: var(--muted); white-space: nowrap; pointer-events: none }
+.sl-def::after { content: ""; position: absolute; left: 50%; top: 15px; width: 2px; height: 16px; background: var(--muted); opacity: .55; transform: translateX(-1px) }
+.sl-track input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 10px; margin: 0; border-radius: 999px; cursor: pointer; background:
+  linear-gradient(90deg, var(--zone-edge) 0 var(--a), var(--zone-ok) var(--a) var(--b), var(--zone-edge) var(--b) 100%) }
+.sl-track input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--accent), 0 1px 3px rgba(0,0,0,.25) }
+.sl-track input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--accent) }
+.sl-track input[type=range]::-moz-range-track { background: transparent }
+.sl-track input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px }
+.sl-zones { display: grid; grid-template-columns: var(--a) calc(var(--b) - var(--a)) 1fr; margin-top: 5px; font-size: 11px; color: var(--muted) }
+.sl-zones span { text-align: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
+.sl-zones span:nth-child(2) { color: var(--ok) }
+.sl-read { display: flex; align-items: center; gap: 6px; padding-top: 10px; flex: none }
+.sl-read input[type=number] { width: 96px }
+.sl-ends { display: flex; justify-content: space-between; font: 11px var(--f-mono); color: var(--muted); margin-right: 0 }
+.sl-hint { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; font-size: 12.5px; color: var(--muted) }
+.sl-hint b { color: var(--ink); font-weight: 600 }
+.sl-hint .r { text-align: right }
+.sl-zone { font-size: 13px; padding: 6px 10px; border-radius: 6px; margin: 0 }
+.sl-zone.z-ok { background: var(--ok-soft); color: var(--ok) }
+.sl-zone.z-lo, .sl-zone.z-hi { background: var(--warn-soft); color: var(--warn) }
+@media (max-width: 760px) { .sl-row { flex-direction: column; gap: 4px } .sl-read { padding-top: 0 } .sl-hint { grid-template-columns: 1fr } .sl-hint .r { text-align: left } }
 .tag { font: 500 10.5px var(--f-body); letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap }
 .tag.t-gate { border-color: var(--err); color: var(--err) }
 .tag.t-cost { border-color: var(--warn); color: var(--warn) }
@@ -438,6 +463,147 @@ const HIDDEN = [
 const OPTS = RAW.map(([k,t,d,st,l,fx,n,h,x={}]) => ({k,t,d,st,l,fx,n,h,...x}));
 const BY = Object.fromEntries(OPTS.map(o => [o.k, o]));
 
+// ── Ползунки: шкала, обычная зона [lo, hi] и что будет, если сдвинуть меньше или больше ──
+// less/more — подписи под шкалой; low/high — вывод, когда значение ушло в крайнюю зону;
+// zl — подписи трёх зон (по умолчанию «мало / обычно / много»); at — особые значения.
+const SL = {
+  REVIEW_CONTEXT_MARGIN: {min:0, max:200, step:5, lo:15, hi:120, zl:['мало','обычно','дорого'],
+    less:'модель видит меньше кода вокруг правки, запросы дешевле', more:'модель лучше понимает окружение, каждый запрос дороже',
+    low:'Модель будет часто не видеть, откуда берутся переменные и функции рядом с правкой.', high:'На больших файлах это почти файл целиком, а цена растёт пропорционально.',
+    at:{0:'Ноль — особый случай: окна выключены, файлы уходят целиком. Это самый дорогой вариант.'}},
+  REVIEW_GRAPHIFY_DEPTH: {min:1, max:5, step:1, lo:1, hi:3, zl:['','обычно','шумно'],
+    less:'только прямые вызовы: меньше шума, но косвенная поломка может пройти', more:'дальние зависимые места: шире охват, больше шума',
+    high:'На такой глубине в зависимые попадает много кода, не связанного с правкой.'},
+  REVIEW_CONTEXT_WINDOW_MIN_CHARS: {min:0, max:40000, step:1000, lo:2000, hi:20000,
+    less:'даже маленькие файлы режутся на окна', more:'больше файлов уходит целиком, дороже',
+    low:'Мелкие файлы режутся без всякой экономии, а модель теряет их целостность.', high:'Средние файлы перестают резаться, и запросы заметно тяжелеют.'},
+  REVIEW_MAX_FILE_LINES: {min:200, max:5000, step:100, lo:500, hi:3000,
+    less:'длинные файлы чаще режутся', more:'длинные файлы чаще уходят целиком, дорого',
+    high:'Файл в несколько тысяч строк целиком — это большая часть бюджета запроса.'},
+  REVIEW_MAX_CONTEXT_BYTES: {min:40000, max:400000, step:10000, lo:80000, hi:260000,
+    less:'модель видит меньше окружения', more:'запросы дороже и ближе к пределу модели',
+    low:'Контекст будет обрезаться даже на обычных PR.', high:'Часть моделей начинает хуже работать на таком длинном входе.'},
+  REVIEW_SYMBOL_CARDS_MAX: {min:0, max:60, step:1, lo:5, hi:40, less:'меньше подсказок о функциях', more:'больше подсказок, длиннее запрос',
+    at:{0:'Ноль — подсказки о функциях фактически выключены.'}, high:'Подсказки начинают вытеснять сам код из внимания модели.'},
+  REVIEW_SYMBOL_CARDS_MAX_CHARS: {min:0, max:10000, step:500, lo:1000, hi:6000, less:'подсказки обрезаются раньше', more:'больше места под подсказки, длиннее запрос',
+    low:'Влезет только пара заголовков.', high:'Подсказки занимают заметную часть запроса.'},
+  REVIEW_SYMBOL_CARDS_BODY_MAX_LINES: {min:0, max:40, step:1, lo:0, hi:15, less:'модель видит только заголовки функций', more:'модель видит тела коротких функций, запрос длиннее',
+    at:{0:['z-ok','Ноль — модель видит только заголовки функций, без тел. Так задумано по умолчанию.']}, high:'В подсказки попадают уже не короткие функции, а заметные куски кода.'},
+  REVIEW_MAX_SYMBOLS: {min:5, max:100, step:5, lo:10, hi:50, less:'зависимости ищутся только для части изменённых функций', more:'анализ полнее, но дольше',
+    low:'На среднем PR часть изменённых функций останется без проверки зависимых.', high:'Граф опрашивается долго, а выдача разрастается.'},
+  REVIEW_MAX_DEPS_PER_SYMBOL: {min:5, max:100, step:5, lo:5, hi:40, less:'меньше зависимых мест на функцию', more:'больше зависимых мест, больше шума',
+    high:'Для популярных функций список зависимых станет длинным и бесполезным.'},
+  REVIEW_GOD_NODE_THRESHOLD: {min:5, max:100, step:5, lo:10, hi:50, less:'центральными считается больше модулей', more:'центральными — только самые связанные',
+    low:'Почти любой модуль будет помечен как центральный.', high:'Пометка почти не будет срабатывать.'},
+  REVIEW_PRESCAN_MAX_FILES: {min:5, max:200, step:5, lo:15, hi:100, less:'линтеры проверяют меньше файлов, быстрее', more:'линтеры проверяют больше файлов, дольше',
+    low:'На среднем PR часть файлов не попадёт к линтерам.', high:'На больших PR линтеры заметно задержат ревью.'},
+  MOA_REFERENCE_TEMPERATURE: {min:0, max:1.5, step:0.05, lo:0.1, hi:0.7, zl:['сухо','обычно','шумно'],
+    less:'ответы суше и стабильнее, меньше надуманных замечаний', more:'больше идей, но больше шума и разброса между прогонами',
+    low:'Почти детерминированно: модель может проходить мимо нестандартных проблем.', high:'Замечания будут заметно меняться от прогона к прогону, появятся надуманные.'},
+  MOA_AGGREGATOR_TEMPERATURE: {min:0, max:1.5, step:0.05, lo:0.1, hi:0.7, zl:['сухо','обычно','шумно'],
+    less:'жюри решает стабильнее', more:'жюри решает менее предсказуемо',
+    low:'Жюри почти детерминировано — это нормально, но может хуже переформулировать замечания.', high:'Одно и то же замечание жюри может то принимать, то отклонять.'},
+  REVIEW_TEMPERATURE: {min:0, max:1.5, step:0.05, lo:0.1, hi:0.7, zl:['сухо','обычно','шумно'],
+    less:'голосующие модели отвечают стабильнее', more:'больше разброса между моделями',
+    high:'Модели будут чаще расходиться, и согласие нескольких станет редким.'},
+  MOA_REFERENCE_MAX_TOKENS: {min:1000, max:16000, step:500, lo:3000, hi:10000, less:'ответы короче, может обрываться', more:'длинные ответы не обрезаются, но дороже',
+    low:'Ответы ролей будут обрываться на полуслове, замечания потеряются.', high:'Разговорчивая модель будет тратить токены на пересказ кода.'},
+  REVIEW_VERIFIER_MAX: {min:1, max:30, step:1, lo:6, hi:20, less:'больше запросов, каждый проще', more:'один запрос разбирает много замечаний',
+    low:'Запросов станет много, перепроверка — дольше и дороже.', high:'Внимание перепроверщика рассеивается на длинном списке.'},
+  REVIEW_VERIFIER_BATCHES: {min:1, max:8, step:1, lo:2, hi:5, less:'дешевле, но лишние замечания не проверятся', more:'проверится всё, на больших PR дороже',
+    low:'На PR с большим числом серьёзных замечаний часть из них понизится без проверки.', high:'На огромных PR перепроверка станет заметной статьёй расходов.'},
+  REVIEW_VERIFIER_TEMPERATURE: {min:0, max:1, step:0.05, lo:0, hi:0.4, zl:['','обычно','шумно'], less:'вердикты стабильнее', more:'вердикты менее предсказуемы',
+    high:'Одно и то же замечание перепроверщик может то подтверждать, то отклонять.'},
+  REVIEW_VERIFIER_CONTEXT_MARGIN: {min:10, max:300, step:10, lo:40, hi:160, less:'перепроверщик видит меньше кода, дешевле', more:'видит больше кода, дороже',
+    low:'Перепроверщику может не хватить кода, чтобы подтвердить настоящую проблему.', high:'Почти целые файлы — дорого и без явной пользы.'},
+  REVIEW_BLAST_VERIFY_MARGIN: {min:5, max:100, step:5, lo:10, hi:50, less:'меньше кода вокруг места вызова', more:'больше кода вокруг места вызова',
+    low:'Места вызова может не хватить, чтобы понять, сломан ли он.', high:'Лишний код в каждом запросе.'},
+  REVIEW_VERIFY_ADVISORY: {min:0, max:20, step:1, lo:2, hi:10, less:'мелкие замечания реже доходят до строки кода', more:'больше мелких замечаний проверяется, дороже',
+    at:{0:'Ноль — мелкие замечания на проверку не идут совсем.'}, high:'Перепроверка мелочей начинает стоить больше, чем она даёт.'},
+  REVIEW_VERIFY_ADVISORY_MIN: {min:0, max:10, step:1, lo:0, hi:3, less:'на проверку идут и слабые мелкие замечания', more:'на проверку идут только сильные',
+    high:'Мелкому замечанию почти невозможно попасть на проверку и в строку кода.'},
+  REVIEW_CONFIDENCE_MIN: {min:0.5, max:1, step:0.05, lo:0.7, hi:0.9, zl:['много ложных','обычно','пропуски'],
+    less:'блокируют и сомнительные замечания', more:'блокирует только то, в чём модель очень уверена',
+    low:'Будет больше ошибочных блокировок: модели часто уверены «на две трети».', high:'Настоящие проблемы будут проходить, если модель хоть немного сомневается.'},
+  REVIEW_CONSENSUS: {min:1, max:6, step:1, lo:1, hi:3, zl:['','обычно','редко'], less:'хватает меньшего числа моделей', more:'нужно согласие большего числа моделей',
+    high:'Согласие стольких моделей случается редко: почти ничего не будет блокировать.'},
+  REVIEW_ACTIONABILITY_MIN: {min:0, max:12, step:1, lo:3, hi:7, zl:['шумно','обычно','тихо'],
+    less:'в строку кода попадает больше замечаний', more:'в строку попадает только хорошо доказанное',
+    low:'В коде будет много слабых замечаний, их перестанут читать.', high:'Почти всё уйдёт в сводку, даже подтверждённые замечания.'},
+  REVIEW_MAX_ADVISORY_INLINE: {min:0, max:20, step:1, lo:2, hi:10, less:'меньше мелочей в коде', more:'больше мелочей в коде',
+    at:{0:'Ноль — мелкие замечания только в сводке.'}, high:'Мелочи начнут заслонять важное.'},
+  REVIEW_MAX_INLINE: {min:5, max:200, step:5, lo:20, hi:80, less:'на большом PR часть замечаний не попадёт в код', more:'на большом PR в код может прийти очень много комментариев',
+    low:'Даже на среднем PR часть важных замечаний останется только в сводке.', high:'Большой PR может получить сотню комментариев — их не прочитают.'},
+  REVIEW_CHUNK_BYTES: {min:8000, max:200000, step:4000, lo:32000, hi:96000, zl:['дорого','обычно','поверхностно'],
+    less:'больше кусков и запросов: дороже, но внимательнее', more:'меньше запросов, но модель может упустить детали',
+    low:'Каждый PR превращается в десятки запросов.', high:'В длинном куске модель начинает пропускать проблемы в середине.'},
+  REVIEW_LLM_TIMEOUT_MS: {min:60000, max:900000, step:30000, lo:300000, hi:600000, zl:['обрывы','обычно','долго'],
+    less:'зависшая модель отпускается быстрее, но медленные не успевают', more:'медленные модели успевают, зависшие держат ревью дольше',
+    low:'Медленные модели отвечают за 5–6 минут и не успеют: запрос оплачен, ответа нет.', high:'Одна зависшая модель может съесть весь лимит времени ревью.'},
+  REVIEW_TIME_BUDGET_MIN: {min:5, max:30, step:1, lo:10, hi:22, zl:['мало','обычно','опасно'],
+    less:'ревью короче, на больших PR успеет меньше', more:'успеет больше, но ближе к лимиту job',
+    low:'На большом PR модели не успеют пройти все куски, отчёт будет частичным.', high:'Близко к лимиту job (25 мин): GitHub может остановить job раньше, и отчёт не опубликуется.'},
+  REVIEW_INCREMENTAL_FULL_EVERY: {min:1, max:50, step:1, lo:5, hi:20, less:'полные прогоны чаще, экономии меньше', more:'полные прогоны реже, ошибки переноса копятся дольше',
+    at:{1:'Единица — каждый прогон полный, экономии нет.'}, low:'Экономия от инкрементального ревью почти пропадает.', high:'Устаревшие перенесённые замечания будут жить долго.'},
+  REVIEW_MAX_CHUNKS: {min:5, max:100, step:5, lo:20, hi:60, less:'огромные PR режутся на меньшее число крупных кусков', more:'огромные PR — много кусков, долго и дорого',
+    low:'Большие PR будут резаться на очень крупные куски.', high:'Огромный PR может не уложиться в лимит времени.'},
+  REVIEW_MAX_DIFF_BYTES: {min:50000, max:1000000, step:50000, lo:100000, hi:500000, less:'большие диффы обрезаются раньше', more:'ревьюится больше диффа, дольше',
+    low:'Обрезаться будут даже обычные PR.', high:'Огромные диффы будут ревьюиться долго и дорого.'},
+  REVIEW_CONCURRENCY: {min:1, max:30, step:1, lo:4, hi:16, less:'меньше параллельно — дольше, мягче к провайдеру', more:'быстрее, но больше одновременных запросов',
+    low:'Большой PR будет ревьюиться долго.', high:'Провайдер начнёт отвечать «слишком много запросов».'},
+  REVIEW_PROVIDER_CONCURRENCY: {min:1, max:40, step:1, lo:6, hi:20, less:'спокойнее для провайдера, дольше', more:'быстрее, чаще «слишком много запросов»',
+    low:'Ревью упрётся в очередь запросов.', high:'Частые ответы «слишком много запросов», движок будет сам сбавлять темп.'},
+  REVIEW_PROVIDER_PER_MODEL: {min:1, max:20, step:1, lo:3, hi:10, less:'одна модель нагружается меньше', more:'одна модель обслуживает больше запросов сразу',
+    high:'Отдельная модель может упереться в лимит провайдера.'},
+  REVIEW_HTTP_RETRIES: {min:0, max:10, step:1, lo:2, hi:5, less:'сетевой сбой быстрее превращается в ошибку', more:'больше попыток, дольше ожидание при сбоях',
+    at:{0:'Ноль — без повторов: любой сетевой сбой сразу ошибка.'}, high:'При настоящем сбое ревью будет долго повторять запросы.'},
+  REVIEW_FP_PROMOTE_MIN: {min:1, max:10, step:1, lo:2, hi:5, less:'бот быстрее учится пропускать', more:'бот учится только на повторяющемся',
+    at:{1:'Единица — одно случайное 👎 сразу станет правилом.'}, high:'Правила почти не будут появляться.'},
+  REVIEW_FEEDBACK_SINCE_DAYS: {min:1, max:90, step:1, lo:7, hi:30, less:'учитываются только свежие PR', more:'учитывается больше истории',
+    low:'Реакции на PR недельной давности потеряются.', high:'Сбор будет перебирать много старых PR.'},
+};
+const pct = (s, v) => Math.max(0, Math.min(100, (v - s.min) / (s.max - s.min) * 100));
+const roundTo = (s, v) => { const d = (String(s.step).split('.')[1] || '').length; return String(Number((+v).toFixed(d))) };
+function numHuman(o, n) {
+  if (o.unit === 'ms') return n >= 60000 ? `${String(+(n / 60000).toFixed(1)).replace('.', ',')} мин` : `${Math.round(n / 1000)} с`;
+  if (o.unit === 'bytes') return n >= 1000000 ? `${String(+(n / 1e6).toFixed(1)).replace('.', ',')} МБ` : `${Math.round(n / 1000)} КБ`;
+  if (o.unit === 'min') return `${n} мин`;
+  return String(n).replace('.', ',');
+}
+function zoneOf(o, v) {
+  const s = SL[o.k], n = +v;
+  // Особое значение: строка — предупреждение, пара [класс, текст] — нейтральное пояснение.
+  if (s.at && s.at[n] != null) return Array.isArray(s.at[n]) ? s.at[n] : ['z-hi', s.at[n]];
+  if (n < s.lo) return ['z-lo', `Ниже обычного. ${s.low || 'Сильно ' + s.less + '.'}`];
+  if (n > s.hi) return ['z-hi', `Выше обычного. ${s.high || 'Сильно: ' + s.more + '.'}`];
+  return ['z-ok', `В обычном диапазоне (${numHuman(o, s.lo)}–${numHuman(o, s.hi)}).`];
+}
+function sliderHTML(o, v) {
+  const s = SL[o.k], a = pct(s, s.lo), b = pct(s, s.hi), d = pct(s, +o.d), [zc, zt] = zoneOf(o, v);
+  const zl = s.zl || ['мало', 'обычно', 'много'];
+  return `<div class="slider" data-slider="${o.k}" style="--a:${a}%;--b:${b}%">
+    <div class="sl-row">
+      <div class="sl-track">
+        <span class="sl-def" style="left:${d}%">по умолчанию</span>
+        <input type="range" data-sl="${o.k}" min="${s.min}" max="${s.max}" step="${s.step}" value="${esc(v)}" aria-label="${esc(o.n)}" aria-valuetext="${esc(numHuman(o, +v))}">
+        <div class="sl-zones"><span>${a > 8 ? zl[0] : ''}</span><span>${b - a > 12 ? zl[1] : ''}</span><span>${100 - b > 8 ? zl[2] : ''}</span></div>
+        <div class="sl-ends"><span>${numHuman(o, s.min)}</span><span>${numHuman(o, s.max)}</span></div>
+      </div>
+      <div class="sl-read"><input type="number" class="sl-num" data-k="${o.k}" value="${esc(v)}" step="${s.step}" aria-label="${esc(o.n)}: точное значение">${o.unit && o.unit !== 'lines' ? `<span class="unit">${numHuman(o, +v)}</span>` : o.unit === 'lines' ? '<span class="unit">строк</span>' : ''}</div>
+    </div>
+    <div class="sl-hint"><span>← <b>Меньше:</b> ${esc(s.less)}</span><span class="r"><b>Больше:</b> ${esc(s.more)} →</span></div>
+    <p class="sl-zone ${zc}">${esc(zt)}</p>
+  </div>`;
+}
+// Живое обновление во время перетаскивания: без полного перерендера, чтобы не терять захват ползунка.
+function updateSlider(el, o) {
+  const v = S.env[o.k], [zc, zt] = zoneOf(o, v), z = el.querySelector('.sl-zone');
+  el.querySelector('.sl-num').value = v;
+  const u = el.querySelector('.unit'); if (u && o.unit !== 'lines') u.textContent = numHuman(o, +v);
+  z.className = 'sl-zone ' + zc; z.textContent = zt;
+  el.closest('.field').classList.toggle('changed', v !== S.base[o.k]);
+}
+
 const STAGES = [
   {id:'repos', t:'Репозитории и версия', g:'Начало',
    p:'Выбери, какие репозитории настраиваешь. Здесь все, где ревьювер уже подключён, и те, куда его можно добавить. Если выбрать несколько, изменения применятся к каждому отдельным PR.',
@@ -680,12 +846,12 @@ function calls(e, wf) {
 // ── Поля ──────────────────────────────────────────────────────────────────────────
 const FX = {gate:['t-gate','влияет на блокировку'], cost:['t-cost','влияет на стоимость'], conv:['t-conv','влияет на перенос замечаний']};
 function fieldHTML(o) {
-  const v = S.env[o.k], ch = v !== S.base[o.k], wide = ['json','roles'].includes(o.t);
+  const v = S.env[o.k], ch = v !== S.base[o.k], wide = ['json','roles'].includes(o.t) || !!SL[o.k];
   const tags = o.fx.map(f => `<span class="tag ${FX[f][0]}">${FX[f][1]}</span>`).join('') + (o.since ? `<span class="tag">новое в ${o.since}</span>` : '');
   const now = o.t === 'flag' && (o.on || o.off) ? (v === '=strict' ? (strictOn(S.env) ? o.on : o.off) : flag(v) ? o.on : o.off) : '';
   return `<div class="field${ch ? ' changed' : ''}${wide ? ' wide' : ''}">
-    <div class="fh"><div class="ft">${esc(o.n)}</div><div class="ctl">${ctlHTML(o, v)}</div></div>
-    ${o.h ? `<p class="desc">${esc(o.h)}</p>` : ''}
+    ${SL[o.k] ? `<div class="ft">${esc(o.n)}</div>${o.h ? `<p class="desc">${esc(o.h)}</p>` : ''}${ctlHTML(o, v)}`
+      : `<div class="fh"><div class="ft">${esc(o.n)}</div><div class="ctl">${ctlHTML(o, v)}</div></div>${o.h ? `<p class="desc">${esc(o.h)}</p>` : ''}`}
     ${now ? `<p class="now">${esc(now)}</p>` : ''}
     ${o.when ? `<p class="when"><b>Когда менять.</b> ${esc(o.when)}</p>` : ''}
     <div class="meta"><code>${o.k}</code><span>по умолчанию: ${esc(human(o, o.d))}</span>${tags}${ch ? `<span class="chg">было: ${esc(human(o, S.base[o.k]))}</span><button class="linkbtn" data-reset="${o.k}">вернуть</button>` : ''}</div>
@@ -696,7 +862,7 @@ function ctlHTML(o, v) {
   switch (o.t) {
     case 'flag': if (v === '=strict') return `<span class="chip">${strictOn(S.env) ? 'вкл.' : 'выкл.'}, как строгий режим</span><button class="linkbtn" data-set="${o.k}" data-v="${strictOn(S.env) ? '0' : '1'}">задать отдельно</button>`;
       return `<label class="sw"><input type="checkbox" id="${id}" data-k="${o.k}" ${flag(v) ? 'checked' : ''} aria-label="${esc(o.n)}"><span></span></label>`;
-    case 'int': case 'float': return `<input type="number" id="${id}" data-k="${o.k}" value="${esc(v)}" ${o.min != null ? `min="${o.min}"` : ''} ${o.max != null ? `max="${o.max}"` : ''} step="${o.t === 'float' ? '0.05' : '1'}" aria-label="${esc(o.n)}">${o.unit ? `<span class="unit">${unitHint(o, v, false)}</span>` : ''}`;
+    case 'int': case 'float': if (SL[o.k]) return sliderHTML(o, v); return `<input type="number" id="${id}" data-k="${o.k}" value="${esc(v)}" ${o.min != null ? `min="${o.min}"` : ''} ${o.max != null ? `max="${o.max}"` : ''} step="${o.t === 'float' ? '0.05' : '1'}" aria-label="${esc(o.n)}">${o.unit ? `<span class="unit">${unitHint(o, v, false)}</span>` : ''}`;
     case 'enum': return `<div class="seg" role="group" aria-label="${esc(o.n)}">${o.en.map(x => `<button type="button" data-set="${o.k}" data-v="${x}" aria-pressed="${v === x}">${esc(o.enl?.[x] || x)}</button>`).join('')}</div>`;
     case 'sev': { const cur = list(v); return `<div class="checks">${SEV.map(s => `<label title="${SEV_L[s]}"><input type="checkbox" data-sev="${o.k}" value="${s}" ${cur.includes(s) ? 'checked' : ''}>${s}</label>`).join('')}</div>` }
     case 'model': return `<input type="text" class="mono" id="${id}" data-k="${o.k}" value="${esc(v)}" list="models" placeholder="не задана" style="width:220px" aria-label="${esc(o.n)}">`;
@@ -1010,9 +1176,17 @@ document.addEventListener('click', ev => {
   else return;
   render();
 });
+document.addEventListener('input', ev => {
+  const t = ev.target; if (!t.dataset.sl) return;
+  const o = BY[t.dataset.sl]; S.env[o.k] = roundTo(SL[o.k], t.value);
+  t.setAttribute('aria-valuetext', numHuman(o, +S.env[o.k]));
+  updateSlider(t.closest('.slider'), o);
+  document.getElementById('side').innerHTML = side();
+});
 document.addEventListener('change', ev => {
   const t = ev.target, d = t.dataset;
-  if (d.repo) { S.sel[d.repo] = t.checked; if (!selected().length) { S.sel[d.repo] = true; t.checked = true; toast('Нужен хотя бы один репозиторий'); return }
+  if (d.sl) S.env[d.sl] = roundTo(SL[d.sl], t.value);
+  else if (d.repo) { S.sel[d.repo] = t.checked; if (!selected().length) { S.sel[d.repo] = true; t.checked = true; toast('Нужен хотя бы один репозиторий'); return }
     if (selected().length === 1) loadFrom(primary()) }
   else if (d.k && t.type === 'checkbox') S.env[d.k] = t.checked ? '1' : '0';
   else if (d.k) S.env[d.k] = t.value.trim();
