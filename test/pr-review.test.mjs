@@ -10,6 +10,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFile, rm, readFile, mkdtemp, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { defaultRustBin } from '../lib/rust-bin.mjs';
 import { join } from 'node:path';
 import { MARKERS, extractStickyFooterRaw } from '../lib/constants.mjs';
 
@@ -2183,6 +2185,27 @@ test('findCallLines: строки вызова символа, а не импо�
   const jsx = '### a.jsx\n```\nimport Picker from "./Picker.jsx";\nconst a = <Picker\n<PickerX/>\n<Picker/>\n```';
   assert.deepEqual(findCallLines(jsx, 'Picker'), [2, 4], 'BLV-010: JSX-тег — использование компонента, импорт и PickerX — нет');
   assert.deepEqual(findCallLines('### a.js\n```\n<div/>\n```', 'div'), [], 'строчное имя — не компонент');
+});
+
+test('findCallLines: аннотация типа — использование, строка импорта — нет (BLV-011)', () => {
+  // Orakul PR #660: тип пропа, а не вызов — раньше «использования нет» и verifier не видел находку
+  const entry = '### D.tsx\n```\nimport type { OnUpdate, ShowToast } from "@/types.ts";\n'
+    + 'interface P {\n  onUpdate: OnUpdate;\n  showToast?: ShowToast;\n}\n'
+    + 'const x = y as OnUpdate;\nexport type { OnUpdate } from "./t";\nconst z: OnUpdateX = 1;\n```';
+  assert.deepEqual(findCallLines(entry, 'OnUpdate'), [3, 6], 'аннотация и as; импорт, ре-экспорт и OnUpdateX — нет');
+  assert.deepEqual(findCallLines(entry, 'ShowToast'), [4], 'необязательный проп `?:`');
+  assert.deepEqual(findCallLines('### a.ts\n```\nconst a = { k: onUpdate };\n```', 'onUpdate'), [], 'строчное имя — не тип');
+});
+
+test('collectBlastSymbols: с диффом — только экспорт, охватывающий правку (BLV-011)', { skip: !existsSync(defaultRustBin('diff')) || process.env.AI_REVIEWER_DIFF_FORCE_JS === '1' }, () => {
+  const body = 'export type ShowToast = (m: string) => void;\nexport interface OnCreate {\n  (d: unknown): void;\n}\n'
+    + 'export type OnUpdate = (\n  id: string,\n  base?: object,\n) => Promise<any>;\n';
+  const contentMap = new Map([['src/types.ts', `### src/types.ts\n\`\`\`\n${body}\n\`\`\``]]);
+  const diff = 'diff --git a/src/types.ts b/src/types.ts\n--- a/src/types.ts\n+++ b/src/types.ts\n'
+    + '@@ -5,3 +5,4 @@\n export type OnUpdate = (\n   id: string,\n+  base?: object,\n ) => Promise<any>;';
+  const changed = '  base?: object,';
+  assert.deepEqual(collectBlastSymbols(changed, contentMap, 25, { diff }), ['OnUpdate']);
+  assert.deepEqual(collectBlastSymbols(changed, contentMap, 25), ['ShowToast', 'OnCreate', 'OnUpdate'], 'без диффа — прежний добор');
 });
 
 test('buildVerifierFileContents: файл вызывающего кода вне PR — только окно у blast-кандидата (RFC 21)', () => {
