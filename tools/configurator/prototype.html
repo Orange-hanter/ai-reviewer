@@ -1,0 +1,811 @@
+<meta charset="utf-8">
+<title>Конфигуратор ai-reviewer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Раскладка: рельс стадий слева, форма стадии в центре, панель последствий справа (схема, правила, цена). */
+:root {
+  --bg: #eef1f4; --surface: #ffffff; --sunk: #f6f8fa; --ink: #17202b; --muted: #5a6575; --line: #d6dce4;
+  --accent: #1d6a73; --accent-ink: #ffffff; --accent-soft: #d9eced;
+  --ok: #1d7a45; --ok-soft: #dcf0e3; --warn: #9a5800; --warn-soft: #fbeed8; --err: #b0261d; --err-soft: #f9dfdc;
+  --add: #e3f3e8; --del: #fbe4e1;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e131a; --surface: #151c25; --sunk: #111820; --ink: #e2e8ef; --muted: #93a0b0; --line: #283241;
+  --accent: #56b4bd; --accent-ink: #08191b; --accent-soft: #163a3e;
+  --ok: #57c486; --ok-soft: #12301f; --warn: #e5a443; --warn-soft: #36270f; --err: #f2766c; --err-soft: #3a1714;
+  --add: #12301f; --del: #3a1714; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e131a; --surface: #151c25; --sunk: #111820; --ink: #e2e8ef; --muted: #93a0b0; --line: #283241;
+  --accent: #56b4bd; --accent-ink: #08191b; --accent-soft: #163a3e;
+  --ok: #57c486; --ok-soft: #12301f; --warn: #e5a443; --warn-soft: #36270f; --err: #f2766c; --err-soft: #3a1714;
+  --add: #12301f; --del: #3a1714; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body); }
+code, .mono { font-family: var(--f-mono); font-size: 12.5px }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; text-wrap: balance; margin: 0 }
+button, input, select, textarea { font: inherit; color: inherit }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--surface) }
+.top h1 { font-size: 19px; letter-spacing: .01em }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line);
+  font-size: 12px; color: var(--muted); background: var(--sunk); white-space: nowrap }
+.chip.proto { border-color: var(--warn); color: var(--warn); background: var(--warn-soft) }
+.top .spacer { flex: 1 }
+
+.shell { display: grid; grid-template-columns: 236px minmax(0, 1fr) 330px; gap: 0; align-items: start; min-height: calc(100vh - 60px) }
+.rail { position: sticky; top: env(safe-area-inset-top, 0px); padding: 14px 10px 24px max(10px, env(safe-area-inset-left, 0px));
+  border-right: 1px solid var(--line); max-height: 100vh; overflow-y: auto }
+.rail ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px }
+.rail button { width: 100%; display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 8px; text-align: left;
+  padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; color: var(--ink) }
+.rail button:hover { background: var(--sunk) }
+.rail button[aria-current="step"] { background: var(--accent-soft); }
+.rail .n { font: 500 11px var(--f-mono); color: var(--muted); text-align: right }
+.rail .t { font-size: 13.5px }
+.rail .b { font: 500 11px var(--f-mono); padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--accent-ink) }
+.rail .b.w { background: var(--warn); color: var(--surface) }
+.rail .b.e { background: var(--err); color: var(--surface) }
+.rail .grp { font: 600 11px var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 12px 8px 4px }
+
+main { min-width: 0; padding-block: 20px 60px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+.stage-head { display: grid; gap: 4px; margin-bottom: 16px; max-width: 760px }
+.stage-head .eyebrow { font: 500 12px var(--f-mono); color: var(--accent) }
+.stage-head h2 { font-size: 26px }
+.stage-head p { margin: 0; color: var(--muted); max-width: 68ch }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; max-width: 760px }
+.card + .card, .card + details, details + .card { margin-top: 14px }
+.card > h3 { font-size: 15px; padding: 12px 16px 0 }
+.card > .sub { margin: 2px 16px 0; color: var(--muted); font-size: 13px }
+
+.field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 12px 16px; border-top: 1px solid var(--line) }
+.card > h3 + .field, .card > .sub + .field { margin-top: 10px }
+.field:first-child { border-top: 0 }
+.field .k { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0 }
+.field .k code { font-weight: 500; overflow-wrap: anywhere }
+.field .help { grid-column: 1 / -1; color: var(--muted); font-size: 13px; max-width: 70ch; margin: 0 }
+.field .meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--muted) }
+.field .ctl { display: flex; align-items: center; gap: 8px; justify-content: flex-end; min-width: 0 }
+.field.changed { background: linear-gradient(90deg, var(--accent-soft), transparent 55%) }
+.field.wide .ctl { grid-column: 1 / -1; justify-content: stretch }
+.field.wide .ctl > * { flex: 1 }
+.tag { font: 500 10.5px var(--f-body); letter-spacing: .05em; text-transform: uppercase; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted) }
+.tag.t-gate { border-color: var(--err); color: var(--err) }
+.tag.t-cost { border-color: var(--warn); color: var(--warn) }
+.tag.t-conv { border-color: var(--accent); color: var(--accent) }
+.tag.closed { background: var(--err-soft); border-color: transparent; color: var(--err) }
+.chg { font: 500 11px var(--f-mono); color: var(--accent) }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; text-decoration: underline; text-underline-offset: 2px }
+
+input[type=text], input[type=number], input[type=password], select, textarea {
+  background: var(--sunk); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0 }
+input[type=number] { width: 120px; font-family: var(--f-mono); font-size: 13px }
+input[type=text].mono, textarea.mono { font-family: var(--f-mono); font-size: 12.5px }
+textarea { width: 100%; min-height: 84px; resize: vertical }
+input.bad, textarea.bad { border-color: var(--err); background: var(--err-soft) }
+
+.sw { position: relative; width: 40px; height: 22px; flex: none }
+.sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer }
+.sw span { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background .15s }
+.sw span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform .15s }
+.sw input:checked + span { background: var(--accent) }
+.sw input:checked + span::after { transform: translateX(18px) }
+.sw input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px }
+
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 6px; overflow: hidden }
+.seg button { border: 0; border-left: 1px solid var(--line); background: var(--sunk); padding: 5px 10px; cursor: pointer; font-size: 13px }
+.seg button:first-child { border-left: 0 }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink) }
+.checks { display: flex; flex-wrap: wrap; gap: 6px }
+.checks label { display: inline-flex; gap: 5px; align-items: center; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--sunk); font-size: 13px; cursor: pointer }
+
+details.expert { max-width: 760px; margin-top: 14px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface) }
+details.expert > summary { cursor: pointer; padding: 10px 16px; font-weight: 500; color: var(--muted) }
+details.expert[open] > summary { border-bottom: 1px solid var(--line) }
+
+.choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; padding: 12px 16px 16px }
+.choice { display: grid; gap: 4px; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sunk); cursor: pointer }
+.choice b { font-family: var(--f-display); font-size: 15px; font-weight: 600 }
+.choice span { font-size: 12.5px; color: var(--muted) }
+.choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft) }
+
+table.t { width: 100%; border-collapse: collapse; font-size: 13px }
+table.t th, table.t td { text-align: left; padding: 8px 16px; border-top: 1px solid var(--line); vertical-align: middle }
+table.t th { font-weight: 500; color: var(--muted); font-size: 12px }
+.tw { overflow-x: auto }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted) }
+.dot.ok { background: var(--ok) } .dot.warn { background: var(--warn) } .dot.err { background: var(--err) }
+
+.nav { display: flex; gap: 10px; margin-top: 18px; max-width: 760px; flex-wrap: wrap }
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 7px 14px; border-radius: 6px; cursor: pointer; font-weight: 500 }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent) }
+.btn:disabled { opacity: .45; cursor: not-allowed }
+
+aside { position: sticky; top: env(safe-area-inset-top, 0px); max-height: 100vh; overflow-y: auto; border-left: 1px solid var(--line);
+  padding: 16px max(16px, env(safe-area-inset-right, 0px)) 30px 16px; display: grid; gap: 18px; min-width: 0 }
+aside h3 { font-size: 13px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-family: var(--f-body); font-weight: 600; margin-bottom: 8px }
+.pipe { list-style: none; margin: 0; padding: 0; display: grid }
+.pipe li { position: relative; display: grid; grid-template-columns: 14px 1fr; gap: 10px; padding-bottom: 10px; cursor: pointer }
+.pipe li::before { content: ""; position: absolute; left: 6px; top: 16px; bottom: 0; width: 2px; background: var(--line) }
+.pipe li:last-child::before { display: none }
+.pipe .node { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--accent); background: var(--surface); margin-top: 3px; z-index: 1 }
+.pipe li.off .node { border-color: var(--line); background: var(--sunk) }
+.pipe li.off .pn { color: var(--muted); text-decoration: line-through }
+.pipe .pn { font-weight: 600; font-size: 13.5px }
+.pipe .pd { font-size: 12px; color: var(--muted); overflow-wrap: anywhere }
+.pipe .fm { font: 500 10px var(--f-body); letter-spacing: .05em; text-transform: uppercase; margin-left: 6px; padding: 0 5px; border-radius: 3px }
+.pipe .fm.closed { background: var(--err-soft); color: var(--err) }
+.pipe .fm.open { background: var(--ok-soft); color: var(--ok) }
+.rules { display: grid; gap: 6px }
+.rule { display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 8px 10px; border-radius: 6px; font-size: 12.5px; border: 0; text-align: left; cursor: pointer; background: var(--sunk); color: var(--ink) }
+.rule.warn { background: var(--warn-soft) } .rule.error { background: var(--err-soft) }
+.rule .lv { font: 600 10px var(--f-body); letter-spacing: .06em; text-transform: uppercase; padding-top: 2px }
+.rule.warn .lv { color: var(--warn) } .rule.error .lv { color: var(--err) } .rule.info .lv { color: var(--accent) }
+.cost { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; font-size: 13px; font-variant-numeric: tabular-nums }
+.cost .h { color: var(--muted); font-size: 11.5px }
+.cost .v { text-align: right; font-family: var(--f-mono); font-size: 12.5px }
+.cost .up { color: var(--warn) } .cost .down { color: var(--ok) }
+.note { font-size: 12px; color: var(--muted); margin: 6px 0 0 }
+
+.diff { font: 12.5px/1.55 var(--f-mono); margin: 0; padding: 10px 0; overflow-x: auto; background: var(--sunk); border-top: 1px solid var(--line) }
+.diff div { padding: 0 16px; white-space: pre }
+.diff .a { background: var(--add) } .diff .d { background: var(--del) } .diff .c { color: var(--muted) }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; padding: 10px 16px 0 }
+.tabs button { border: 1px solid var(--line); border-bottom: 0; border-radius: 6px 6px 0 0; padding: 5px 10px; background: var(--sunk); cursor: pointer; font-size: 13px }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--accent); font-weight: 600 }
+.match { font-size: 12px; color: var(--muted); grid-column: 1 / -1 }
+.match code { font-size: 11.5px }
+.banner { max-width: 760px; padding: 12px 16px; border-radius: 8px; margin-bottom: 14px; font-size: 13.5px }
+.banner.ok { background: var(--ok-soft); color: var(--ok) }
+.banner.err { background: var(--err-soft); color: var(--err) }
+.toast { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg);
+  padding: 10px 14px; border-radius: 6px; font-size: 13px; max-width: min(420px, calc(100vw - 32px)) }
+
+@media (max-width: 1180px) {
+  .shell { grid-template-columns: 220px minmax(0, 1fr) }
+  aside { grid-column: 1 / -1; position: static; max-height: none; border-left: 0; border-top: 1px solid var(--line);
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); padding-left: max(16px, env(safe-area-inset-left, 0px)) }
+}
+@media (max-width: 760px) {
+  .shell { grid-template-columns: minmax(0, 1fr) }
+  .rail { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--line); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); overflow-x: auto }
+  .rail ol { grid-auto-flow: column; grid-auto-columns: max-content }
+  .rail .grp { display: none }
+  .field { grid-template-columns: minmax(0, 1fr) }
+  .field .ctl { justify-content: flex-start }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+
+<header class="top">
+  <h1>Конфигуратор ai-reviewer</h1>
+  <span class="chip" id="hdr-repos"></span>
+  <span class="chip" id="hdr-pin"></span>
+  <span class="spacer"></span>
+  <span class="chip proto">прототип · данные — пример, ничего не записывается</span>
+</header>
+<div class="shell">
+  <nav class="rail" aria-label="Стадии"><ol id="rail"></ol></nav>
+  <main id="main"></main>
+  <aside id="side"></aside>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+'use strict';
+// ── Схема опций (подмножество будущего schemas/config-options.v1.json) ───────────────
+// [ключ, тип, дефолт, стадия, слой (m|e), эффекты, пояснение, доп.]
+const SEV = ['critical', 'major', 'minor', 'nit'];
+const RAW = [
+  // router
+  ['REVIEW_ROUTER','flag','1','router','m',['cost'],'skip для lockfile/сгенерированного/rename, light для docs и конфигов, full при любом коде. Выкл. — всегда полный прогон.'],
+  ['REVIEW_LOCKFILE_REGISTRIES','str','','router','e',[],'Хосты через запятую сверх registry.npmjs.org и registry.yarnpkg.com для проверки источников в lockfile.'],
+  // context
+  ['REVIEW_CONTEXT_MARGIN','int','40','context','m',['cost','conv'],'±строк вокруг изменённых строк в контексте advisors и жюри (RFC 07). 0 — файлы целиком.',{min:0,max:400,fp:1}],
+  ['REVIEW_SYMBOL_CARDS','flag','1','context','m',['conv'],'Строка объявления символа, который вызывает добавленный код (RFC 14). Без graph.json молча выключено.',{fp:1}],
+  ['GRAPHIFY_BIN','path','.graphify/gf','context','m',[],'Бинарь graphify для blast-radius.'],
+  ['GRAPH','path','.graphify/graphify-out/graph.json','context','m',[],'Граф кода. Нет файла — blast-radius пустой (или блок при BLAST_REQUIRED).'],
+  ['REVIEW_BLAST_REQUIRED','flag','0','context','m',['gate'],'Blast-radius не посчитан → exit 1 до LLM, sticky с причиной (RFC 16).',{fm:'closed'}],
+  ['REVIEW_GRAPHIFY_DEPTH','int','2','context','m',[],'--depth для graphify affected.',{min:1,max:5}],
+  ['GRAPHIFY_REPORT','path','.graphify/graphify-out/GRAPH_REPORT.md','context','e',[],'Отчёт графа (свежесть).'],
+  ['REVIEW_GRAPHIFY_DROP_AMBIGUOUS','flag','1','context','e',[],'Отбрасывать AMBIGUOUS-рёбра в blast.'],
+  ['REVIEW_SKIP_ADDED_FILE_CONTEXT','flag','1','context','e',['cost'],'Не прикладывать текст добавленных файлов: их дифф и есть содержимое.'],
+  ['REVIEW_CONTEXT_WINDOW_MIN_CHARS','int','8000','context','e',['cost'],'Файл короче — целиком, без окон.'],
+  ['REVIEW_MAX_FILE_LINES','int','1500','context','e',['cost'],'Полный текст файла в контекст до N строк.'],
+  ['REVIEW_MAX_CONTEXT_BYTES','int','180000','context','e',['cost'],'Потолок контекста.'],
+  ['REVIEW_SYMBOL_CARDS_MAX','int','20','context','e',[],'Карточек на чанк.'],
+  ['REVIEW_SYMBOL_CARDS_MAX_CHARS','int','3000','context','e',[],'Символов карточек на чанк.'],
+  ['REVIEW_SYMBOL_CARDS_BODY_MAX_LINES','int','0','context','e',[],'Тело не длиннее N строк едет целиком; 0 — только объявление.'],
+  ['REVIEW_MAX_SYMBOLS','int','25','context','e',[],'Символов в blast-radius.'],
+  ['REVIEW_MAX_DEPS_PER_SYMBOL','int','20','context','e',[],'Зависимостей на символ.'],
+  ['REVIEW_GOD_NODE_THRESHOLD','int','20','context','e',[],'Порог «god node» в графе.'],
+  // prescan
+  ['REVIEW_PRESCAN','flag','1','prescan','m',[],'eslint + ast-grep по изменённым файлам до LLM. Нет бинаря/конфига — молча пропускается.',{fm:'open'}],
+  ['REVIEW_PRESCAN_BLOCK','flag','1','prescan','m',['gate'],'Правила из block-списка блокируют merge без LLM.'],
+  ['REVIEW_PRESCAN_BLOCK_RULES','str','no-restricted-imports,no-restricted-globals','prescan','m',['gate'],'eslint-правила уровня блока.'],
+  ['REVIEW_PRESCAN_ASTGREP','flag','1','prescan','m',[],'ast-grep анти-паттерны.'],
+  ['REVIEW_PRESCAN_ASTGREP_BLOCK_RULES','str','raw-x-forwarded-for','prescan','m',['gate'],'ast-grep правила уровня блока.'],
+  ['REVIEW_APP_DIR','path','','prescan','m',[],'Каталог с node_modules для линтеров; пусто — layout.appDir профиля.'],
+  ['REVIEW_PRESCAN_MAX_FILES','int','30','prescan','e',[],'Потолок файлов на прогон.'],
+  ['REVIEW_ESLINT_BIN','str','npx','prescan','e',[],'Если нет локального node_modules/.bin/eslint.'],
+  ['REVIEW_ASTGREP_CONFIG','path','','prescan','e',[],'sgconfig.yml; пусто — paths.astgrepConfig профиля → ruleset пакета.'],
+  ['REVIEW_ASTGREP_BIN','str','ast-grep','prescan','e',[],'Путь к бинарю.'],
+  // moa
+  ['REVIEW_MODE','enum','moa','moa','m',['cost','conv'],'moa — роли + жюри-агрегатор; consensus — N моделей и голосование.',{en:['moa','consensus'],fp:1}],
+  ['REVIEW_SPECIALISTS','flag','1','moa','m',['cost','conv'],'Роли security / correctness / architecture вместо анонимных advisors.',{fp:1}],
+  ['MOA_SPECIALIST_MODELS','roles','security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3','moa','m',['cost','conv'],'Роль → модель.',{fp:1}],
+  ['REVIEW_SPECIALISTS_MERGE','enum','auto','moa','m',['cost'],'auto — один вызов на роли с одной моделью; always — сливать всегда; never — по отдельности.',{en:['auto','always','never'],fp:1}],
+  ['MOA_AGGREGATOR','model','minimax-m3','moa','m',['cost','conv'],'Жюри-агрегатор (JSON), вне пула advisors.',{fp:1}],
+  ['OLLAMA_MODELS_FALLBACK','model','deepseek-v4.1-flash','moa','m',[],'Аварийная замена упавшей модели.'],
+  ['MOA_REFERENCE_MODELS','str','kimi-k2.7-code,glm-5.3,glm-5.3-flash','moa','e',['cost'],'Advisors без ролей (REVIEW_SPECIALISTS=0).',{fp:1}],
+  ['OLLAMA_MODEL','model','kimi-k2.7-code','moa','e',[],'Одиночная модель (consensus).'],
+  ['OLLAMA_MODELS','str','','moa','e',['cost'],'Список моделей consensus.',{fp:1}],
+  ['MOA_REFERENCE_TEMPERATURE','float','0.3','moa','e',[],'Температура advisors.',{min:0,max:2}],
+  ['MOA_AGGREGATOR_TEMPERATURE','float','0.4','moa','e',[],'Температура агрегатора.',{min:0,max:2}],
+  ['REVIEW_TEMPERATURE','float','0.4','moa','e',[],'Температура consensus.',{min:0,max:2}],
+  ['MOA_REFERENCE_MAX_TOKENS','int','6000','moa','e',['cost'],'Потолок ответа advisor\'а.'],
+  ['REVIEW_REASONING_EFFORT','enum','low','moa','e',['cost'],'Effort advisor-вызовов.',{en:['none','minimal','low','medium','high']}],
+  ['REVIEW_AGGREGATOR_REASONING_EFFORT','enum','low','moa','e',['cost'],'Effort первой попытки JSON-вызовов (жюри, verifier).',{en:['none','minimal','low','medium','high']}],
+  ['LLM_MODEL_SETTINGS','json','','moa','e',['cost'],'{"<модель>": {effort, jsonEffort, maxTokens, provider}} — только с Rust-бинарём llm.'],
+  ['REVIEW_PROMPT_LAYOUT','enum','legacy','moa','e',['cost'],'shared-prefix — общий префикс ролей под кэш провайдера.',{en:['legacy','shared-prefix'],fp:1}],
+  ['REVIEW_JSON_MODE','flag','1','moa','e',[],'JSON-mode для structured output.'],
+  ['REVIEW_SEED','int','7','moa','e',[],'Seed, где поддерживается.'],
+  // verifier
+  ['REVIEW_VERIFIER','flag','1','verifier','m',['gate','cost'],'Второй проход по кандидатам в блокеры отдельной моделью.'],
+  ['REVIEW_VERIFIER_MODEL','model','deepseek-v4-pro','verifier','m',['gate'],'Модель-судья, вне пула advisors.'],
+  ['REVIEW_VERIFIER_FALLBACK_MODEL','model','','verifier','m',['gate'],'Запасная модель: сбой основной отдаёт батч ей вместо «verifier недоступен».'],
+  ['REVIEW_VERIFIER_STRICT','flag','1','verifier','m',['gate'],'Нет вердикта → находка понижается до minor; сбой verifier — исход по LLM_REQUIRED.',{fm:'closed'}],
+  ['REVIEW_BLAST_VERIFY','enum','1','verifier','m',['gate'],'Проверка blast-находок verifier\'ом (RFC 21). shadow — считать, но не блокировать.',{en:['0','shadow','1'],since:'0.7.0'}],
+  ['REVIEW_VERIFIER_MAX','int','12','verifier','e',['cost'],'Кандидатов в одном вызове.'],
+  ['REVIEW_VERIFIER_BATCHES','int','3','verifier','e',['cost'],'Вызовов verifier на прогон; не влезшие — overflow.'],
+  ['REVIEW_VERIFIER_TEMPERATURE','float','0.2','verifier','e',[],'Температура verifier.',{min:0,max:2}],
+  ['REVIEW_VERIFIER_CONTEXT_MARGIN','int','80','verifier','e',['cost'],'±строк вокруг строки-кандидата.'],
+  ['REVIEW_VERIFIER_SYMBOL_CARDS','flag','0','verifier','e',['conv'],'Карточки символов во входе verifier (выключено до gold ×3).',{fp:1}],
+  ['REVIEW_BLAST_VERIFY_MARGIN','int','20','verifier','e',[],'±строк вокруг строки вызова вне PR.',{since:'0.7.0'}],
+  ['REVIEW_VERIFY_ADVISORY','int','5','verifier','e',['cost'],'Сколько лучших advisory отдать verifier\'у.'],
+  ['REVIEW_VERIFY_ADVISORY_MIN','int','1','verifier','e',[],'Порог допуска advisory к verifier\'у (= ACTIONABILITY_MIN − 3).',{fp:1}],
+  // gate
+  ['REVIEW_BLOCK_ON','sev','critical,major','gate','m',['gate','conv'],'Severity, на которой exit 1.',{fp:1}],
+  ['REVIEW_BLOCK_SINGLE','sev','critical','gate','m',['gate'],'Severity, которой хватает одной модели.'],
+  ['REVIEW_CONFIDENCE_MIN','float','0.8','gate','m',['gate','conv'],'Блок только при собственной confidence находки ≥ порога.',{min:0,max:1,fp:1}],
+  ['REVIEW_LLM_REQUIRED','flag','1','gate','m',['gate'],'Полный аутедж LLM, сбой verifier при блокерах, неотревьюенные части PR → degraded-блок.',{fm:'closed'}],
+  ['REVIEW_STRICT','flag','0','gate','m',['gate'],'Блок — только prescan или verifierStatus: verified. Складывается с strict профиля через «или».'],
+  ['REVIEW_REQUIRE_QUOTE','flag','=strict','gate','e',['gate'],'critical/major без цитаты кода отбрасываются. По умолчанию = REVIEW_STRICT.'],
+  ['REVIEW_CONSENSUS','int','1','gate','e',['gate'],'Мин. моделей с находкой уровня блока в кластере. В moa зажимается до 1.',{min:1,max:6,fp:1}],
+  // delivery
+  ['REVIEW_INLINE_ON','sev','critical,major','delivery','m',[],'Severity, которым положен inline.'],
+  ['REVIEW_ACTIONABILITY_MIN','int','4','delivery','m',['conv'],'Порог суммы сигналов доказуемости для inline.',{min:0,max:20,fp:1}],
+  ['REVIEW_AUTO_TRIAGE','flag','1','delivery','m',[],'Авто-ответ и resolve на своих тредах с известным FP.'],
+  ['REVIEW_MAX_ADVISORY_INLINE','int','5','delivery','e',[],'Advisory в inline максимум.'],
+  ['REVIEW_MAX_INLINE','int','50','delivery','e',[],'Потолок inline-комментариев на прогон.'],
+  ['REVIEW_REASONING_STICKY','flag','1','delivery','e',[],'Секция reasoning в sticky.'],
+  ['REVIEW_ICON_BASE_URL','str','','delivery','e',[],'SVG-пиктограммы вместо эмодзи (пин на тег ai-reviewer-icons).'],
+  ['REVIEW_TRUSTED_AUTHORS','str','github-actions[bot]','delivery','e',['conv'],'Логины, чьи sticky/inline движок считает своими. PAT или App — укажи его логин.'],
+  // economy
+  ['REVIEW_INCREMENTAL','flag','0','economy','m',['cost'],'Не ревьюить заново файлы с неизменившимся входом; находки переносятся с вердиктами (RFC 05).'],
+  ['REVIEW_CHUNK_ROUTING','flag','1','economy','m',['cost'],'Чанк без исполняемого файла — один агрегатор без жюри; его находки не блокируют.'],
+  ['REVIEW_CHUNK_BYTES','int','56000','economy','m',['cost','conv'],'Размер чанка.',{min:8000,max:200000,fp:1}],
+  ['REVIEW_LLM_TIMEOUT_MS','int','420000','economy','m',['cost'],'Таймаут одной попытки LLM.',{min:60000,max:900000,fp:1}],
+  ['REVIEW_TIME_BUDGET_MIN','int','20','economy','m',[],'Дедлайн LLM-фазы → частичный отчёт.',{min:5,max:120}],
+  ['REVIEW_INCREMENTAL_FULL_EVERY','int','10','economy','e',['cost'],'Каждый N-й прогон полный.',{min:1,max:100}],
+  ['REVIEW_INCREMENTAL_STATE','path','','economy','e',[],'Файл состояния; пусто — paths.incrementalState профиля.'],
+  ['REVIEW_MAX_CHUNKS','int','40','economy','e',['cost'],'Потолок числа чанков.',{fp:1}],
+  ['REVIEW_MAX_DIFF_BYTES','int','200000','economy','e',['cost'],'Больше — дифф урезается.',{fp:1}],
+  ['REVIEW_CONCURRENCY','int','10','economy','e',[],'Параллельных chunk-pipeline.'],
+  ['REVIEW_PROVIDER_CONCURRENCY','int','12','economy','e',[],'Глобальный cap LLM-вызовов (AIMD по 429).'],
+  ['REVIEW_PROVIDER_PER_MODEL','int','6','economy','e',[],'Cap на модель.'],
+  ['REVIEW_HTTP_RETRIES','int','3','economy','e',[],'Retry GitHub + LLM.'],
+  // artifacts
+  ['REVIEW_OBSERVABILITY','flag','1','artifacts','m',[],'JSONL-лог прогона — из него считается цена в этом конфигураторе.'],
+  ['REVIEW_EXPORT','flag','1','artifacts','m',[],'JSON + SARIF артефакт для cod-doc / swarm.'],
+  ['REVIEW_PRICE_JSON','json','','artifacts','m',['cost'],'{"<model>":{"in":$/1M,"out":$/1M}} → cost_usd в run_end.'],
+  ['REVIEW_EXPORT_SARIF_ALL','flag','0','artifacts','e',[],'В SARIF все находки, а не только блокеры.'],
+  ['REVIEW_EXPORT_JSON','flag','1','artifacts','e',[],'Писать JSON.'],
+  ['REVIEW_EXPORT_SARIF','flag','1','artifacts','e',[],'Писать SARIF.'],
+  ['REVIEW_EXPORT_DRY_RUN','flag','0','artifacts','e',[],'Писать артефакт и при --dry-run.'],
+  ['REVIEW_OBSERVABILITY_DIR','path','','artifacts','e',[],'Пусто — paths.observabilityDir профиля.'],
+  ['REVIEW_OBSERVABILITY_FILE','str','pr-review-runs.jsonl','artifacts','e',[],'Имя файла лога.'],
+  ['REVIEW_EXPORT_DIR','path','','artifacts','e',[],'Пусто — paths.exportDir профиля.'],
+  ['REVIEW_FEEDBACK','flag','1','artifacts','f',[],'Harvest 👍/👎 (действует только с workflow feedback).'],
+  ['REVIEW_FEEDBACK_LABEL','str','ai-review-fp','artifacts','f',[],'Метка PR «ложное срабатывание».'],
+  ['REVIEW_FP_PROMOTE_MIN','int','2','artifacts','f',[],'Сколько одинаковых FP → новый паттерн.'],
+  ['REVIEW_FEEDBACK_SINCE_DAYS','int','14','artifacts','f',[],'feedback-batch: PR за N дней.'],
+  // profile (env)
+  ['REVIEW_PROFILE','path','','profile','m',[],'Путь к профилю; пусто — .ai-reviewer.json в корне.'],
+  ['REVIEW_PROFILE_TRUSTED','flag','0','profile','m',['gate'],'Профиль и его вход читаются из REVIEW_BASE_REF; включает layout.reviewSkip.'],
+];
+const HIDDEN = ['REVIEW_STRUCTURE (нет эффекта)','REVIEW_STRUCTURE_* (structure-контур, вне гейта) ×17','layout.logic (не читается роутером)',
+  'REVIEW_MCP_ROOT, REVIEW_MCP_EXTRA, AI_REVIEWER_ROOT, AI_REVIEWER_NODE (MCP)','REVIEW_GOLD_* ×5, REVIEW_FIXTURES_DIR (gold / eval)',
+  'AI_REVIEWER_RUST_BIN_DIR, AI_REVIEWER_<MOD>_BIN, AI_REVIEWER_<MOD>_FORCE_JS (отладка бинарей)','REVIEW_FEEDBACK_* ×9 (harvest, кроме показанных)',
+  'GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, GITHUB_API_URL, GH_TOKEN (задаёт workflow)','REVIEW_BASE_REF (выражение workflow, не значение)'];
+const OPTS = RAW.map(([k,t,d,st,l,fx,h,x={}]) => ({k,t,d,st,l,fx,h,...x}));
+const BY = Object.fromEntries(OPTS.map(o => [o.k, o]));
+
+const STAGES = [
+  {id:'repos', t:'Репозитории и версия', g:'Сценарий', p:'Какие репозитории настраиваем и на какой версии движка. Схема опций берётся из релиза запиненного тега.'},
+  {id:'scenario', t:'Сценарий', g:'Сценарий', p:'Где бежит ревью, какой провайдер и от какого пресета отталкиваемся. Пресет накладывается на текущий конфиг дельтой.'},
+  {id:'router', t:'Router', g:'Пайплайн', p:'Какой маршрут получает PR: skip, light или full.'},
+  {id:'context', t:'Контекст и blast-radius', g:'Пайплайн', p:'Что модель видит вокруг диффа: окна, карточки символов, вызывающие из графа.'},
+  {id:'prescan', t:'Prescan', g:'Пайплайн', p:'Детерминированные линтеры до LLM. Их block-правила блокируют без моделей.'},
+  {id:'moa', t:'MoA: роли и модели', g:'Пайплайн', p:'Кто ревьюит: роли, их модели, агрегатор-жюри.'},
+  {id:'verifier', t:'Verifier', g:'Пайплайн', p:'Второй независимый судья для кандидатов в блокеры.'},
+  {id:'gate', t:'Гейт', g:'Пайплайн', p:'Что блокирует merge и что происходит при сбое LLM.'},
+  {id:'delivery', t:'Доставка', g:'Пайплайн', p:'Что попадает в строку PR, что в сводку, кто считается своим автором.'},
+  {id:'economy', t:'Экономия и бюджеты', g:'Пайплайн', p:'Инкрементальный прогон, нарезка, таймауты, параллельность.'},
+  {id:'artifacts', t:'Артефакты и метрики', g:'Пайплайн', p:'Логи, экспорт, цены моделей и сопутствующие workflow.'},
+  {id:'profile', t:'Профиль репозитория', g:'Репозиторий', p:'Маркеры, раскладка, ast-grep, правила проекта. Регэкспы сверяются с деревом файлов.'},
+  {id:'access', t:'Секреты и раннер', g:'Репозиторий', p:'Наличие секретов, запись ключей, переключатель Арч ↔ ubuntu-latest, статус раннеров.'},
+  {id:'review', t:'Проверка и применение', g:'Итог', p:'Дифф файлов по каждому репозиторию, сработавшие правила, оценка цены. Применение — PR в каждый репозиторий.'},
+];
+
+// ── Пример текущего состояния (Orakul — по examples/ci/pr-review.yml, второй репо — выдуманный) ──
+const MODELS_OLLAMA = ['kimi-k2.7-code','glm-5.3','glm-5.3-flash','minimax-m3','deepseek-v4-pro','deepseek-v4.1-flash'];
+const OR_PREFIX = {kimi:'moonshotai/',glm:'z-ai/',minimax:'minimax/',deepseek:'deepseek/'};
+const orName = m => { if (!m || m.includes('/')) return m; const p = Object.keys(OR_PREFIX).find(x => m.startsWith(x)); return p ? OR_PREFIX[p] + m : m };
+const olName = m => (m || '').replace(/^[a-z-]+\//, '');
+const ORAKUL_ENV = {
+  REVIEW_MODE:'moa', MOA_REFERENCE_MODELS:'kimi-k2.7-code,glm-5.3,glm-5.3-flash',
+  MOA_SPECIALIST_MODELS:'security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3', MOA_AGGREGATOR:'minimax-m3',
+  MOA_REFERENCE_TEMPERATURE:'0.3', MOA_AGGREGATOR_TEMPERATURE:'0.4', OLLAMA_MODELS_FALLBACK:'deepseek-v4.1-flash', REVIEW_AUTO_TRIAGE:'1',
+  REVIEW_INLINE_ON:'critical,major', REVIEW_BLOCK_ON:'critical,major', REVIEW_BLOCK_SINGLE:'critical', REVIEW_CONSENSUS:'1',
+  GRAPHIFY_BIN:'.graphify/venv/bin/graphify', GRAPH:'app/.graphify/graphify-out/graph.json', GRAPHIFY_REPORT:'app/.graphify/graphify-out/GRAPH_REPORT.md',
+  REVIEW_BLAST_REQUIRED:'1', REVIEW_CONFIDENCE_MIN:'0.8', REVIEW_VERIFIER:'1', REVIEW_VERIFIER_MODEL:'deepseek-v4-pro', REVIEW_VERIFIER_STRICT:'1',
+  REVIEW_ROUTER:'1', REVIEW_PRESCAN:'1', REVIEW_PRESCAN_ASTGREP:'1', REVIEW_OBSERVABILITY:'1', REVIEW_EXPORT:'1', REVIEW_APP_DIR:'app',
+  REVIEW_PROFILE:'ops/ai-review/profile.json', REVIEW_PROFILE_TRUSTED:'1', REVIEW_CHUNK_BYTES:'56000', REVIEW_CONCURRENCY:'10',
+  REVIEW_MAX_CHUNKS:'40', REVIEW_LLM_TIMEOUT_MS:'240000', REVIEW_TIME_BUDGET_MIN:'20', REVIEW_PROVIDER_CONCURRENCY:'12', REVIEW_PROVIDER_PER_MODEL:'6',
+};
+const ORAKUL_PROFILE = {
+  name:'orakul', markerNamespace:'orakul-ai-review', toolName:'orakul-ai-review', sarifRulePrefix:'orakul',
+  repositoryUri:'https://github.com/Orange-hanter/Orakul', repoRulesFile:'repo-rules.md', strict:false,
+  prompts:{aggregatorExtra:'', verifierExtra:''},
+  layout:{appDir:'app', layerDirs:['server','shared','client','integrations','ops','scripts','tests','e2e'],
+    lintable:'^app/(?:shared|server|client|integrations|ops|scripts|tests|e2e)/.+\\.(?:ts|tsx)$|^app/[^/]+\\.ts$',
+    e2eSpec:'^app/e2e/.*\\.spec\\.ts$', sensitive:'(?:^|/)ops/(?:pr-merge|pr-review|backup|deploy)', reviewSkip:''},
+  astgrep:{scopes:{'no-math-round-ts':'^app/(?:shared|server)/','client-imports-server':'^app/client/','shared-imports-upper':'^app/shared/',
+    'backend-imports-client':'^app/(?:server|integrations|ops|scripts)/','no-prisma-raw-unsafe':'^app/(?:shared|server)/',
+    'no-dangerously-set-inner-html':'^app/client/','raw-x-forwarded-for':'^app/server/'}},
+  paths:{feedbackLog:'ops/pr-review/feedback/fp-feedback.jsonl', fpPatterns:'ops/pr-review/feedback/fp-patterns.jsonl',
+    observabilityDir:'.graphify/graphify-out/observability', exportDir:'.graphify/graphify-out/review-export', astgrepConfig:'ops/pr-review/ast-grep/sgconfig.yml'},
+};
+const EXAMPLE_PROFILE = {name:'example-service', markerNamespace:'ai-review', strict:false, prompts:{}, layout:{appDir:'', lintable:'', e2eSpec:'', sensitive:'', reviewSkip:''}, astgrep:{scopes:{}}, paths:{}};
+const TREE = {
+  'Orange-hanter/Orakul': ['app/package.json','app/vite.config.ts','app/eslint.config.js','app/server/index.ts','app/server/net.ts','app/server/bugdropProxy.ts',
+    'app/server/routes/orders.ts','app/server/routes/auth.ts','app/server/apiDocs/openapi.json','app/server/db/prisma.ts','app/shared/money.ts','app/shared/rounding.ts',
+    'app/shared/types.ts','app/client/App.tsx','app/client/pages/Orders.tsx','app/client/pages/Login.tsx','app/client/components/Table.tsx','app/integrations/bank/client.ts',
+    'app/ops/backfill.ts','app/scripts/seed.ts','app/tests/money.test.ts','app/e2e/login.spec.ts','app/e2e/orders.spec.ts','app/e2e/helpers.ts',
+    'ops/pr-merge/merge.sh','ops/pr-review/profile.json','ops/deploy/compose.prod.yml','ops/backup/run.sh','ops/ai-reviewer-ref','docs/openapi/orders.yaml',
+    'docs/08-technical/ai-review-false-positives.md','docs/README.md','.github/workflows/ci.yml','.github/workflows/pr-review.yml','README.md'],
+  'Orange-hanter/example-service': ['src/index.ts','src/api/users.ts','src/lib/db.ts','test/users.test.ts','package.json','.github/workflows/ci.yml','README.md'],
+};
+const REPOS = [
+  {id:'Orange-hanter/Orakul', pin:'v0.7.0', state:'настроен', runners:['arch / review-2','arch / ci'], env:ORAKUL_ENV, profile:ORAKUL_PROFILE,
+    wf:{metrics:false, feedback:false, telegram:true, cache:false}, secrets:{OLLAMA_API_KEY:true, LLM_API_KEY:false, TELEGRAM_BOT_TOKEN:true, TELEGRAM_CHAT_ID:true}},
+  {id:'Orange-hanter/example-service', pin:'v0.6.4', state:'настроен (пример)', runners:[], env:{REVIEW_MODE:'moa', REVIEW_LLM_TIMEOUT_MS:'240000'}, profile:EXAMPLE_PROFILE,
+    wf:{metrics:false, feedback:false, telegram:false, cache:false}, secrets:{OLLAMA_API_KEY:true, LLM_API_KEY:false, TELEGRAM_BOT_TOKEN:false, TELEGRAM_CHAT_ID:false}},
+  {id:'Orange-hanter/cod-doc', pin:null, state:'нет пина — bootstrap', runners:[], env:{}, profile:{name:'cod-doc', markerNamespace:'ai-review', prompts:{}, layout:{}, astgrep:{scopes:{}}, paths:{}},
+    wf:{metrics:false, feedback:false, telegram:false, cache:false}, secrets:{OLLAMA_API_KEY:false, LLM_API_KEY:false, TELEGRAM_BOT_TOKEN:false, TELEGRAM_CHAT_ID:false}},
+];
+TREE['Orange-hanter/cod-doc'] = ['src/cod_doc/cli.py','src/cod_doc/db.py','tests/test_cli.py','pyproject.toml','README.md'];
+const VERSIONS = [
+  {v:'v0.6.4', added:['REVIEW_VERIFIER_FALLBACK_MODEL','REVIEW_PROFILE_TRUSTED','REVIEW_BASE_REF','REVIEW_LOCKFILE_REGISTRIES'], note:'reviewSkip для сгенерированного, запасной verifier'},
+  {v:'v0.7.0', added:['REVIEW_BLAST_VERIFY','REVIEW_BLAST_VERIFY_MARGIN'], changed:['REVIEW_BLAST_VERIFY: дефолт стал 1'], note:'проверка blast-находок включена по умолчанию (RFC 21)'},
+];
+const HIST = {runs:20, wallMin:6.1, calls:31, tokensM:1.42, chunks:3.2, reuse:0.42}; // медианы run_end — пример
+const RUNNERS = [
+  {name:'arch / review-2', labels:'self-hosted, linux, review', status:'online', busy:false},
+  {name:'arch / ci', labels:'self-hosted, linux, ci', status:'online', busy:true},
+];
+const TOOLCHAIN = [['node','24.10.0','ok'],['gh','2.102.0','ok'],['ast-grep','0.39.6','ok'],['graphify venv','graphifyy 0.9.87','ok'],['python','3.11.13','ok'],['claude CLI','нет — не нужен','muted']];
+
+const PRESETS = {
+  econ:{t:'Экономный', d:'Инкрементальный прогон, роли на одной модели одним вызовом, меньше батчей verifier.',
+    env:{REVIEW_INCREMENTAL:'1', REVIEW_CHUNK_ROUTING:'1', REVIEW_SPECIALISTS_MERGE:'auto', MOA_SPECIALIST_MODELS:'security:kimi-k2.7-code,correctness:kimi-k2.7-code,architecture:kimi-k2.7-code', REVIEW_VERIFIER_BATCHES:'2', REVIEW_TIME_BUDGET_MIN:'15'}, wf:{cache:true}},
+  defaults:{t:'Дефолты движка', d:'Сбросить все env к значениям по умолчанию запиненной версии; пути и профиль не трогаются.', reset:true},
+  strict:{t:'Строгий', d:'Блок только доказанным: strict-гейт, цитата кода обязательна, fail-closed без графа и LLM.',
+    env:{REVIEW_STRICT:'1', REVIEW_REQUIRE_QUOTE:'1', REVIEW_BLAST_REQUIRED:'1', REVIEW_LLM_REQUIRED:'1', REVIEW_VERIFIER_STRICT:'1', REVIEW_CONFIDENCE_MIN:'0.85'}},
+};
+const PATH_KEYS = ['GRAPHIFY_BIN','GRAPH','GRAPHIFY_REPORT','REVIEW_APP_DIR','REVIEW_PROFILE','REVIEW_PROFILE_TRUSTED'];
+
+// ── Состояние ─────────────────────────────────────────────────────────────────────
+const clone = x => JSON.parse(JSON.stringify(x));
+const S = {
+  stage: 'repos', sel: {'Orange-hanter/Orakul': true}, targetPin: 'v0.7.0', provider: 'ollama', preset: null,
+  runner: '1', env: {}, base: {}, wf: {}, baseWf: {}, profiles: {}, baseProfiles: {}, secrets: {}, tab: 'Orange-hanter/Orakul',
+  nsConfirm: false, showHidden: false, applied: null,
+};
+const repoById = id => REPOS.find(r => r.id === id);
+const selected = () => REPOS.filter(r => S.sel[r.id]);
+const primary = () => selected()[0] || REPOS[0];
+function fullEnv(partial) { const e = {}; for (const o of OPTS) e[o.k] = o.k in partial ? partial[o.k] : o.d; return e }
+function loadFrom(repo) {
+  S.env = fullEnv(repo.env); S.base = clone(S.env); S.wf = clone(repo.wf); S.baseWf = clone(repo.wf);
+  S.provider = repo.env.LLM_BASE_URL ? 'openrouter' : 'ollama'; S.preset = null; S.applied = null;
+}
+for (const r of REPOS) { S.profiles[r.id] = clone(r.profile); S.baseProfiles[r.id] = clone(r.profile); S.secrets[r.id] = clone(r.secrets) }
+loadFrom(REPOS[0]);
+
+const flag = v => v === '1';
+const strictOn = e => flag(e.REVIEW_STRICT) || S.profiles[primary().id]?.strict === true;
+const eff = (e, k) => k === 'REVIEW_REQUIRE_QUOTE' && e[k] === '=strict' ? (strictOn(e) ? '1' : '0') : e[k];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const roles = v => Object.fromEntries((v || '').split(',').filter(Boolean).map(p => p.split(':')));
+const list = v => (v || '').split(',').map(s => s.trim()).filter(Boolean);
+
+// ── Правила ─────────────────────────────────────────────────────────────────────────
+function rules() {
+  const e = S.env, out = [], add = (level, stage, msg) => out.push({level, stage, msg});
+  const pool = new Set(Object.values(roles(e.MOA_SPECIALIST_MODELS)).map(olName));
+  if (!flag(e.REVIEW_SPECIALISTS)) list(e.MOA_REFERENCE_MODELS).forEach(m => pool.add(olName(m)));
+  if (e.REVIEW_MODE === 'moa' && +e.REVIEW_CONSENSUS > 1) add('warn','gate',`В moa REVIEW_CONSENSUS зажимается до 1 — значение ${e.REVIEW_CONSENSUS} не действует.`);
+  if (+e.REVIEW_LLM_TIMEOUT_MS < 300000) add('warn','economy',`REVIEW_LLM_TIMEOUT_MS = ${e.REVIEW_LLM_TIMEOUT_MS}: при 240000 обрывалась половина prose-вызовов (медиана kimi — 331 с). Дефолт — 420000.`);
+  if (!flag(e.REVIEW_VERIFIER) && flag(e.REVIEW_VERIFIER_STRICT)) add('warn','verifier','Verifier выключен при VERIFIER_STRICT=1: все LLM-блокеры станут minor, блокировать будет только prescan.');
+  if (strictOn(e) && !flag(e.REVIEW_VERIFIER)) add('error','gate','Strict-гейт без verifier: ни одна LLM-находка не может стать блокером. Включи verifier или выключи strict.');
+  if (pool.has(olName(e.REVIEW_VERIFIER_MODEL))) add('warn','verifier',`Verifier ${e.REVIEW_VERIFIER_MODEL} в пуле advisors — второй судья перестаёт быть независимым.`);
+  if (pool.has(olName(e.MOA_AGGREGATOR))) add('warn','moa',`Агрегатор ${e.MOA_AGGREGATOR} в пуле advisors — жюри оценивает само себя.`);
+  if (e.REVIEW_PROMPT_LAYOUT === 'shared-prefix' && S.provider === 'ollama') add('info','moa','shared-prefix на Ollama Cloud: замер pr-review-probe-cache скидки за общий префикс не нашёл.');
+  if (flag(e.REVIEW_INCREMENTAL) && !S.wf.cache) add('warn','economy','Incremental без actions/cache: состояние не переживёт прогон, каждый прогон будет полным.');
+  if (flag(e.REVIEW_INCREMENTAL) && S.wf.cache && !S.baseWf.cache) add('info','economy','В workflow добавится шаг actions/cache на каталог состояния.');
+  if (flag(e.REVIEW_BLAST_REQUIRED) && !e.GRAPH) add('error','context','BLAST_REQUIRED=1 без пути к graph.json — каждый PR с кодом заблокируется до LLM.');
+  if (!flag(e.REVIEW_LLM_REQUIRED)) add('info','gate','LLM_REQUIRED=0: аутедж моделей пропускает merge (fail-open).');
+  const bo = list(e.REVIEW_BLOCK_ON), bs = list(e.REVIEW_BLOCK_SINGLE);
+  if (bs.some(s => !bo.includes(s))) add('warn','gate','BLOCK_SINGLE содержит severity вне BLOCK_ON — она не блокирует вообще.');
+  if (+e.REVIEW_TIME_BUDGET_MIN >= 25) add('warn','economy','Тайм-бюджет LLM ≥ timeout-minutes job (25): раннер убьёт job раньше частичного отчёта.');
+  if (S.provider === 'openrouter') {
+    for (const r of selected()) if (!S.secrets[r.id].LLM_API_KEY) add('error','access',`${r.id}: OpenRouter выбран, секрета LLM_API_KEY нет.`);
+  } else for (const r of selected()) if (!S.secrets[r.id].OLLAMA_API_KEY) add('error','access',`${r.id}: нет OLLAMA_API_KEY — ревью не запустится (soft-fail).`);
+  for (const r of selected()) if (wfFor(r).telegram && !S.secrets[r.id].TELEGRAM_BOT_TOKEN) add('warn','access',`${r.id}: Telegram включён, TELEGRAM_BOT_TOKEN нет.`);
+  if (!e.REVIEW_PRICE_JSON) add('info','artifacts','Без REVIEW_PRICE_JSON цена в долларах не считается — оценка только в вызовах и токенах.');
+  if (e.LLM_MODEL_SETTINGS) { try { JSON.parse(e.LLM_MODEL_SETTINGS) } catch { add('error','moa','LLM_MODEL_SETTINGS — невалидный JSON.') } }
+  if (e.REVIEW_PRICE_JSON) { try { JSON.parse(e.REVIEW_PRICE_JSON) } catch { add('error','artifacts','REVIEW_PRICE_JSON — невалидный JSON (движок сочтёт «не задано»).') } }
+  for (const r of selected()) {
+    const p = S.profiles[r.id], bp = S.baseProfiles[r.id];
+    if (r.pin && p.markerNamespace !== bp.markerNamespace && !S.nsConfirm) add('error','profile',`${r.id}: смена markerNamespace рвёт carry-over находок, Δ-блок и auto-triage прошлых PR. Подтверди на шаге «Профиль».`);
+    if (p.layout?.reviewSkip && !(flag(e.REVIEW_PROFILE_TRUSTED))) add('warn','profile',`${r.id}: layout.reviewSkip без REVIEW_PROFILE_TRUSTED=1 игнорируется целиком.`);
+    for (const [f, v] of regexFields(p)) { const bad = reErr(v); if (bad) add('error','profile',`${r.id}: ${f} — невалидный регэксп.`) }
+    if (!r.pin && S.targetPin) add('info','repos',`${r.id}: bootstrap — PR добавит ops/ai-reviewer-ref, workflow целиком и профиль.`);
+  }
+  const fpChanged = OPTS.some(o => o.fp && S.env[o.k] !== S.base[o.k]);
+  if (fpChanged && flag(e.REVIEW_INCREMENTAL)) add('info','economy','Изменены опции из отпечатка конфигурации: первый прогон после merge будет полным.');
+  if (S.env.REVIEW_BLAST_VERIFY !== '1' && verIdx(S.targetPin) >= 1) add('info','verifier',`REVIEW_BLAST_VERIFY=${S.env.REVIEW_BLAST_VERIFY}: откат RFC 21.`);
+  for (const r of selected()) if (verIdx(r.pin) < verIdx(S.targetPin) && r.pin) add('info','repos',`${r.id}: bump ${r.pin} → ${S.targetPin} войдёт в тот же PR.`);
+  return out;
+}
+const verIdx = v => VERSIONS.findIndex(x => x.v === v);
+// Workflow-переключатели в пакетном режиме — тоже дельтой: меняется только то, что тронули.
+const wfFor = r => Object.fromEntries(Object.keys(S.wf).map(k => [k, S.wf[k] !== S.baseWf[k] ? S.wf[k] : r.wf[k]]));
+function regexFields(p) { const l = p.layout || {}, out = []; for (const f of ['lintable','e2eSpec','sensitive','reviewSkip']) if (l[f]) out.push([`layout.${f}`, l[f]]);
+  for (const [k, v] of Object.entries(p.astgrep?.scopes || {})) if (v) out.push([`astgrep.scopes.${k}`, v]); return out }
+function reErr(v) { try { new RegExp(v); return null } catch (e) { return e.message } }
+
+// ── Оценка цены ─────────────────────────────────────────────────────────────────────
+function calls(e, wf) {
+  const chunks = Math.min(+e.REVIEW_MAX_CHUNKS || 40, HIST.chunks * 56000 / Math.max(8000, +e.REVIEW_CHUNK_BYTES || 56000));
+  let per;
+  if (e.REVIEW_MODE === 'consensus') per = Math.max(1, list(e.OLLAMA_MODELS).length || 1);
+  else if (flag(e.REVIEW_SPECIALISTS)) {
+    const ms = Object.values(roles(e.MOA_SPECIALIST_MODELS));
+    per = (e.REVIEW_SPECIALISTS_MERGE === 'always' ? 1 : e.REVIEW_SPECIALISTS_MERGE === 'never' ? ms.length : new Set(ms).size) + 1;
+  } else per = list(e.MOA_REFERENCE_MODELS).length + 1;
+  let total = chunks * per;
+  if (flag(e.REVIEW_CHUNK_ROUTING)) total *= 0.9;
+  if (flag(e.REVIEW_INCREMENTAL) && wf.cache) { const n = Math.max(1, +e.REVIEW_INCREMENTAL_FULL_EVERY || 10); total *= 1 / n + (n - 1) / n * (1 - HIST.reuse) }
+  if (flag(e.REVIEW_VERIFIER)) total += Math.min(+e.REVIEW_VERIFIER_BATCHES || 3, 1.3);
+  return total;
+}
+
+// ── Рендер полей ──────────────────────────────────────────────────────────────────
+const FX = {gate:['t-gate','гейт'], cost:['t-cost','цена'], conv:['t-conv','сходимость']};
+function fieldHTML(o) {
+  const v = S.env[o.k], ch = v !== S.base[o.k], wide = ['json','roles'].includes(o.t);
+  const tags = o.fx.map(f => `<span class="tag ${FX[f][0]}">${FX[f][1]}</span>`).join('') + (o.fm === 'closed' ? '<span class="tag closed">fail-closed</span>' : '') + (o.since ? `<span class="tag">с ${o.since}</span>` : '');
+  const dflt = o.d === '' ? 'пусто' : o.d === '=strict' ? '= REVIEW_STRICT' : o.t === 'flag' ? (o.d === '1' ? 'вкл.' : 'выкл.') : o.d;
+  return `<div class="field${ch ? ' changed' : ''}${wide ? ' wide' : ''}" data-k="${o.k}">
+    <div class="k"><code>${o.k}</code>${tags}</div>
+    <div class="ctl">${ctlHTML(o, v)}</div>
+    <p class="help">${esc(o.h)}</p>
+    <div class="meta"><span>по умолчанию: <code>${esc(dflt)}</code></span>${ch ? `<span class="chg">было: ${esc(S.base[o.k] || 'пусто')}</span><button class="linkbtn" data-reset="${o.k}">вернуть</button>` : ''}${o.fp ? '<span>входит в отпечаток incremental</span>' : ''}</div>
+  </div>`;
+}
+function ctlHTML(o, v) {
+  const id = 'f-' + o.k;
+  switch (o.t) {
+    case 'flag': if (o.d === '=strict' && v === '=strict') return `<span class="chip">как strict</span><button class="linkbtn" data-set="${o.k}" data-v="${strictOn(S.env) ? '0' : '1'}">задать явно</button>`;
+      return `<label class="sw"><input type="checkbox" id="${id}" data-k="${o.k}" ${flag(v) ? 'checked' : ''} aria-label="${o.k}"><span></span></label>`;
+    case 'int': case 'float': return `<input type="number" id="${id}" data-k="${o.k}" value="${esc(v)}" ${o.min != null ? `min="${o.min}"` : ''} ${o.max != null ? `max="${o.max}"` : ''} step="${o.t === 'float' ? '0.05' : '1'}" aria-label="${o.k}">`;
+    case 'enum': return o.en.length <= 5 ? `<div class="seg" role="group" aria-label="${o.k}">${o.en.map(x => `<button type="button" data-set="${o.k}" data-v="${x}" aria-pressed="${v === x}">${x}</button>`).join('')}</div>`
+      : `<select id="${id}" data-k="${o.k}">${o.en.map(x => `<option ${v === x ? 'selected' : ''}>${x}</option>`).join('')}</select>`;
+    case 'sev': { const cur = list(v); return `<div class="checks">${SEV.map(s => `<label><input type="checkbox" data-sev="${o.k}" value="${s}" ${cur.includes(s) ? 'checked' : ''}>${s}</label>`).join('')}</div>` }
+    case 'model': return `<input type="text" class="mono" id="${id}" data-k="${o.k}" value="${esc(v)}" list="models" style="width:220px" aria-label="${o.k}">`;
+    case 'json': { let bad = false; if (v) try { JSON.parse(v) } catch { bad = true } return `<textarea class="mono${bad ? ' bad' : ''}" id="${id}" data-k="${o.k}" placeholder='{"deepseek/deepseek-v4.1-flash":{"effort":"none"}}' aria-label="${o.k}">${esc(v)}</textarea>` }
+    case 'roles': { const r = roles(v); return `<div class="tw"><table class="t"><thead><tr><th>Роль</th><th>Модель</th></tr></thead><tbody>${['security','correctness','architecture'].map(role =>
+      `<tr><td>${role}</td><td><input type="text" class="mono" data-role="${role}" value="${esc(r[role] || '')}" list="models" style="width:100%;max-width:280px" aria-label="модель ${role}"></td></tr>`).join('')}</tbody></table></div>` }
+    default: return `<input type="text" class="mono" id="${id}" data-k="${o.k}" value="${esc(v)}" style="width:min(320px,100%)" aria-label="${o.k}">`;
+  }
+}
+function stageFields(st) {
+  const main = OPTS.filter(o => o.st === st && o.l === 'm'), ex = OPTS.filter(o => o.st === st && o.l === 'e');
+  const exCh = ex.filter(o => S.env[o.k] !== S.base[o.k]).length;
+  return `<div class="card">${main.map(fieldHTML).join('')}</div>` + (ex.length ? `<details class="expert" ${exCh ? 'open' : ''}><summary>Эксперт · ${ex.length} опций${exCh ? ` · изменено ${exCh}` : ''}</summary>${ex.map(fieldHTML).join('')}</details>` : '');
+}
+
+// ── Стадии ────────────────────────────────────────────────────────────────────────
+const VIEWS = {
+  repos() {
+    const rows = REPOS.map(r => `<tr><td><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-repo="${r.id}" ${S.sel[r.id] ? 'checked' : ''}><code>${r.id}</code></label></td>
+      <td>${r.pin ? `<code>${r.pin}</code>` : '—'}</td><td>${esc(r.state)}</td><td>${r.runners.length ? r.runners.join(', ') : 'ubuntu-latest'}</td></tr>`).join('');
+    const sel = selected(), from = sel.map(r => r.pin).filter(Boolean), lo = Math.min(...from.map(verIdx));
+    const bumps = VERSIONS.filter((x, i) => i > (from.length ? lo : -1) && i <= verIdx(S.targetPin));
+    return `<div class="card"><h3>Репозитории с пином ops/ai-reviewer-ref</h3><p class="sub">Найдены через GitHub API. Несколько выбранных — пакетный режим: общая env-дельта, профиль по вкладке на репозиторий, N PR.</p>
+      <div class="tw"><table class="t"><thead><tr><th>Репозиторий</th><th>Пин</th><th>Состояние</th><th>Раннеры</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+      <div class="card"><div class="field"><div class="k"><code>ops/ai-reviewer-ref</code><span class="tag t-conv">версия</span></div>
+        <div class="ctl"><div class="seg" role="group" aria-label="версия">${VERSIONS.map(x => `<button type="button" data-pin="${x.v}" aria-pressed="${S.targetPin === x.v}">${x.v}</button>`).join('')}</div></div>
+        <p class="help">Версия движка, на которую настраиваем. Опции, которых нет в этой версии, не предлагаются. Bump — в тот же PR; новый движок начнёт ревьюить только после merge (пин читается из base-ветки).</p></div>
+        ${bumps.length ? `<div class="field"><div class="k">Что меняется при bump</div><div class="ctl"></div><div class="help">${bumps.map(b => `<p style="margin:0 0 6px"><code>${b.v}</code> — ${esc(b.note)}<br>+ ${b.added.map(a => `<code>${a}</code>`).join(', ')}${b.changed ? '<br>~ ' + b.changed.map(esc).join(', ') : ''}</p>`).join('')}</div></div>` : ''}
+      </div>`;
+  },
+  scenario() {
+    const ch = (grp, val, t, d, cur) => `<button type="button" class="choice" data-${grp}="${val}" aria-pressed="${cur === val}"><b>${t}</b><span>${d}</span></button>`;
+    const pd = S.preset ? presetDelta(S.preset) : [];
+    return `<div class="card"><h3>Где бежит ревью</h3><p class="sub">Репо-переменная <code>vars.SELF_HOSTED_CI</code> — единственное, что пишется сразу, мимо PR.</p><div class="choice-grid">
+      ${ch('runner','1','Арч, фолбэк ubuntu','self-hosted, linux, review → github-runner@review-2 на 5800X. Лёг Арч — переключи обратно, без PR.',S.runner)}
+      ${ch('runner','0','ubuntu-latest','GitHub-hosted. graphify, gh и node ставятся в шагах workflow; минуты Actions.',S.runner)}</div></div>
+      <div class="card"><h3>Провайдер LLM</h3><div class="choice-grid">
+      ${ch('provider','ollama','Ollama Cloud','OLLAMA_API_KEY, модели kimi / glm / minimax / deepseek. Дефолт движка.',S.provider)}
+      ${ch('provider','openrouter','OpenRouter','LLM_BASE_URL + LLM_API_KEY; имена моделей с префиксом поставщика, маршрутизация через LLM_MODEL_SETTINGS.provider.',S.provider)}</div></div>
+      <div class="card"><h3>Пресет</h3><p class="sub">Накладывается на текущий конфиг. Каждое изменение видно на своих шагах и в итоговом диффе.</p><div class="choice-grid">
+      ${Object.entries(PRESETS).map(([k, p]) => ch('preset', k, p.t, p.d, S.preset)).join('')}</div>
+      ${S.preset ? `<div class="field"><div class="k">Дельта пресета «${PRESETS[S.preset].t}»</div><div class="ctl"><button class="linkbtn" data-reset-all>вернуть текущий конфиг</button></div><div class="help mono" style="font-size:12px">${pd.length ? pd.map(esc).join('<br>') : 'совпадает с текущим'}</div></div>` : ''}</div>`;
+  },
+  router: () => stageFields('router'),
+  context: () => stageFields('context'),
+  prescan: () => stageFields('prescan'),
+  moa: () => stageFields('moa'),
+  verifier: () => stageFields('verifier'),
+  gate: () => stageFields('gate'),
+  delivery() { return stageFields('delivery') + wfCard([['telegram','Уведомления в Telegram','В env шага добавятся TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID из секретов.']]) },
+  economy() { return stageFields('economy') + wfCard([['cache','Шаг actions/cache для incremental','Кэш каталога состояния между прогонами; без него incremental всегда полный.']]) },
+  artifacts() {
+    const fb = OPTS.filter(o => o.st === 'artifacts' && o.l === 'f');
+    return stageFields('artifacts') + wfCard([['metrics','pr-review-metrics.yml','Сводка по observability-логам — из неё конфигуратор берёт цену и время прогонов.']])
+      + `<details class="expert"><summary>Feedback 👍/👎 · выключено · ${fb.length} опций</summary>${wfCardInner([['feedback','pr-review-feedback.yml + promote','Harvest реакций и метки ai-review-fp → bot PR; еженедельный promote в паттерны.']])}${fb.map(fieldHTML).join('')}</details>`;
+  },
+  profile() {
+    const sel = selected(); if (!sel.some(r => r.id === S.tab)) S.tab = sel[0]?.id;
+    const p = S.profiles[S.tab], bp = S.baseProfiles[S.tab], tree = TREE[S.tab] || [];
+    const pf = (path, label, help, kind = 'text') => {
+      const v = getPath(p, path) ?? '', bv = getPath(bp, path) ?? '', ch = JSON.stringify(v) !== JSON.stringify(bv);
+      let ctl, match = '';
+      if (kind === 'bool') ctl = `<label class="sw"><input type="checkbox" data-pf="${path}" ${v === true ? 'checked' : ''} aria-label="${path}"><span></span></label>`;
+      else if (kind === 'area') ctl = `<textarea class="mono" data-pf="${path}" aria-label="${path}">${esc(v)}</textarea>`;
+      else if (kind === 'list') ctl = `<input type="text" class="mono" data-pf="${path}" data-list value="${esc((v || []).join(', '))}" style="width:min(420px,100%)" aria-label="${path}">`;
+      else {
+        const isRe = kind === 're', err = isRe && v ? reErr(v) : null;
+        ctl = `<input type="text" class="mono${err ? ' bad' : ''}" data-pf="${path}" value="${esc(v)}" style="width:100%" aria-label="${path}">`;
+        if (isRe) match = `<div class="match">${err ? `Ошибка: ${esc(err)}` : v ? matchInfo(v, tree) : 'пусто — дефолт движка'}</div>`;
+      }
+      return `<div class="field${ch ? ' changed' : ''}${['re','area','text'].includes(kind) ? ' wide' : ''}"><div class="k"><code>${path}</code>${label}</div><div class="ctl">${ctl}</div>${match}<p class="help">${help}</p>${ch ? `<div class="meta"><span class="chg">было: ${esc(Array.isArray(bv) ? bv.join(', ') : bv === '' ? 'пусто' : String(bv))}</span></div>` : ''}</div>`;
+    };
+    const nsCh = p.markerNamespace !== bp.markerNamespace && repoById(S.tab).pin;
+    const scopes = Object.keys(p.astgrep?.scopes || {});
+    return (sel.length > 1 ? `<div class="tabs" role="tablist">${sel.map(r => `<button role="tab" data-tab="${r.id}" aria-selected="${r.id === S.tab}">${r.id.split('/')[1]}</button>`).join('')}</div>` : '')
+      + `<div class="card"><h3>Доверие и путь</h3>${['REVIEW_PROFILE','REVIEW_PROFILE_TRUSTED'].map(k => fieldHTML(BY[k])).join('')}</div>`
+      + `<div class="card"><h3>Идентичность</h3>
+        ${pf('markerNamespace','<span class="tag t-conv">сходимость</span>','Маркеры sticky/inline и ключ футера. На живом репозитории смена рвёт carry-over, Δ-блок и auto-triage.')}
+        ${nsCh ? `<div class="field"><div class="k" style="color:var(--err)">Подтверди смену namespace</div><div class="ctl"><label class="sw"><input type="checkbox" data-nsconfirm ${S.nsConfirm ? 'checked' : ''} aria-label="подтверждение"><span></span></label></div><p class="help">Прошлые комментарии бота перестанут быть «своими»: находки не перенесутся, старые sticky останутся висеть.</p></div>` : ''}
+        ${pf('toolName','','Имя в SARIF, файлы экспорта, User-Agent. Дефолт — markerNamespace.')}
+        ${pf('sarifRulePrefix','','ruleId в SARIF — по нему Code Scanning группирует алерты.')}
+        ${pf('strict','<span class="tag t-gate">гейт</span>','Строгий гейт; складывается с REVIEW_STRICT через «или».','bool')}</div>`
+      + `<div class="card"><h3>Раскладка</h3><p class="sub">Регэкспы проверяются на дереве default-ветки (${tree.length} файлов в примере).</p>
+        ${pf('layout.appDir','','Каталог с node_modules, откуда запускаются eslint/ast-grep.')}
+        ${pf('layout.layerDirs','','Каталоги, которым возвращается префикс appDir, если путь из диффа пришёл без него.','list')}
+        ${pf('layout.lintable','<span class="tag">regex</span>','Какие файлы отдаются в prescan.','re')}
+        ${pf('layout.e2eSpec','<span class="tag">regex</span>','Что считать e2e-спекой.','re')}
+        ${pf('layout.sensitive','<span class="tag">regex</span>','Чувствительные пути: всегда полный MoA, никогда не reviewSkip.','re')}
+        ${pf('layout.reviewSkip','<span class="tag">regex</span>','Инертные сгенерированные файлы, которые не уходят моделям. Только при REVIEW_PROFILE_TRUSTED=1.','re')}</div>`
+      + `<div class="card"><h3>ast-grep scopes</h3>${scopes.length ? scopes.map(s => pf(`astgrep.scopes.${s}`, '<span class="tag">regex</span>', 'Где применяется правило.', 're')).join('') : '<p class="sub" style="padding-bottom:12px">Scope не заданы — правила пакета видят весь репозиторий.</p>'}</div>`
+      + `<div class="card"><h3>Правила проекта и промпты</h3>
+        ${pf('repoRulesFile','','Файл с правилами проекта для системного промпта; иначе AGENTS.md в корне.')}
+        ${pf('prompts.aggregatorExtra','','Дописывается в системный промпт агрегатора.','area')}
+        ${pf('prompts.verifierExtra','','Дописывается в системный промпт verifier.','area')}</div>`;
+  },
+  access() {
+    const sel = selected();
+    const sec = ['OLLAMA_API_KEY','LLM_API_KEY','TELEGRAM_BOT_TOKEN','TELEGRAM_CHAT_ID'];
+    const need = {OLLAMA_API_KEY: S.provider === 'ollama', LLM_API_KEY: S.provider === 'openrouter', TELEGRAM_BOT_TOKEN: S.wf.telegram, TELEGRAM_CHAT_ID: S.wf.telegram};
+    return `<div class="card"><h3>Секреты</h3><p class="sub">Значение уходит на сервер один раз и записывается через <code>gh secret set</code> (stdin). Прочитать секрет обратно нельзя.</p><div class="tw"><table class="t">
+      <thead><tr><th>Секрет</th>${sel.map(r => `<th>${r.id.split('/')[1]}</th>`).join('')}<th>Записать во все выбранные</th></tr></thead><tbody>
+      ${sec.map(s => `<tr><td><code>${s}</code>${need[s] ? ' <span class="tag t-gate">нужен</span>' : ''}</td>${sel.map(r => `<td><span class="dot ${S.secrets[r.id][s] ? 'ok' : need[s] ? 'err' : ''}"></span>${S.secrets[r.id][s] ? 'задан' : 'нет'}</td>`).join('')}
+        <td><div style="display:flex;gap:6px"><input type="password" id="sec-${s}" placeholder="значение" autocomplete="off" style="width:150px"><button class="btn" data-secret="${s}">Записать</button></div></td></tr>`).join('')}
+      </tbody></table></div></div>
+      <div class="card"><h3>Раннеры</h3><div class="tw"><table class="t"><thead><tr><th>Раннер</th><th>Labels</th><th>Статус</th></tr></thead><tbody>
+      ${RUNNERS.map(r => `<tr><td><code>${r.name}</code></td><td>${r.labels}</td><td><span class="dot ${r.status === 'online' ? (r.busy ? 'warn' : 'ok') : 'err'}"></span>${r.status}${r.busy ? ', занят' : ', свободен'}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="field"><div class="k"><code>vars.SELF_HOSTED_CI</code><span class="tag">сразу, без PR</span></div><div class="ctl"><label class="sw"><input type="checkbox" data-runner ${S.runner === '1' ? 'checked' : ''} aria-label="SELF_HOSTED_CI"><span></span></label></div>
+        <p class="help">Вкл. — job идёт на self-hosted, linux, review (Арч). Выкл. — ubuntu-latest.</p></div></div>
+      <div class="card"><h3>Тулчейн хоста Арча</h3><p class="sub">Проба выполняется сервером конфигуратора на той же машине, что раннер.</p><div class="tw"><table class="t"><tbody>
+      ${TOOLCHAIN.map(([n, v, s]) => `<tr><td>${n}</td><td><span class="dot ${s === 'ok' ? 'ok' : ''}"></span><code>${v}</code></td></tr>`).join('')}</tbody></table></div></div>`;
+  },
+  review() {
+    const R = rules(), errs = R.filter(r => r.level === 'error');
+    const sel = selected();
+    if (!sel.length) return `<div class="banner err">Не выбран ни один репозиторий.</div>`;
+    const d = sel.map(r => repoDiff(r));
+    const total = d.reduce((a, x) => a + x.changes, 0);
+    return (S.applied ? `<div class="banner ok">Прототип: здесь сервер открыл бы ${S.applied.length} PR — ${S.applied.map(esc).join(', ')}. Ничего не записано.</div>` : '')
+      + (errs.length ? `<div class="banner err">Применение заблокировано: ${errs.length} ошибок в правилах (справа).</div>` : '')
+      + d.map(x => `<div class="card"><h3>${x.repo}</h3><p class="sub">Ветка <code>ai-reviewer-config/${S.targetPin}-${x.slug}</code> · ${x.changes} изменённых строк</p>
+        ${x.files.map(f => `<p class="sub" style="margin-top:10px"><code>${f.path}</code>${f.note ? ' — ' + esc(f.note) : ''}</p><div class="diff">${f.lines.map(l => `<div class="${l[0]}">${esc(l[1])}</div>`).join('')}</div>`).join('')}</div>`).join('')
+      + `<div class="nav"><button class="btn primary" data-apply ${errs.length || !total ? 'disabled' : ''}>Открыть ${sel.length} PR</button><span class="note">Секреты и SELF_HOSTED_CI пишутся сразу на шаге «Секреты и раннер» и в PR не входят.</span></div>`;
+  },
+};
+function wfCardInner(items) { return items.map(([k, t, h]) => `<div class="field${S.wf[k] !== S.baseWf[k] ? ' changed' : ''}"><div class="k">${t}<span class="tag">workflow</span></div><div class="ctl"><label class="sw"><input type="checkbox" data-wf="${k}" ${S.wf[k] ? 'checked' : ''} aria-label="${t}"><span></span></label></div><p class="help">${h}</p></div>`).join('') }
+function wfCard(items) { return `<div class="card">${wfCardInner(items)}</div>` }
+function presetDelta(k) { const out = []; for (const o of OPTS) if (S.env[o.k] !== S.base[o.k]) out.push(`${o.k}: ${S.base[o.k] || 'пусто'} → ${S.env[o.k] || 'пусто'}`);
+  for (const w of Object.keys(S.wf)) if (S.wf[w] !== S.baseWf[w]) out.push(`workflow.${w}: ${S.baseWf[w] ? 'вкл.' : 'выкл.'} → ${S.wf[w] ? 'вкл.' : 'выкл.'}`); return out }
+function matchInfo(re, tree) { const rx = new RegExp(re, 'i'), m = tree.filter(p => rx.test(p));
+  return `совпадает ${m.length} из ${tree.length}${m.length ? ': ' + m.slice(0, 4).map(x => `<code>${esc(x)}</code>`).join(', ') + (m.length > 4 ? ' …' : '') : ' — регэксп ничего не ловит'}` }
+const getPath = (o, p) => p.split('.').reduce((a, k) => a?.[k], o);
+function setPath(o, p, v) { const ks = p.split('.'), last = ks.pop(); let c = o; for (const k of ks) c = c[k] ??= {}; c[last] = v }
+
+// ── Дифф файлов ───────────────────────────────────────────────────────────────────
+const NOT_ENV = new Set(['MOA_SPECIALIST_MODELS']);
+function envOut(e, explicit) {
+  const out = [];
+  for (const o of OPTS) { if (o.l === 'f' && !S.wf.feedback) continue; const v = e[o.k]; if (explicit ? o.k in explicit : v !== o.d) out.push([o.k, explicit ? explicit[o.k] : v]) }
+  return out;
+}
+function repoDiff(r) {
+  const slug = S.preset || 'manual', files = [], W = wfFor(r);
+  // Пакетный режим: общая дельта (S.env против S.base основного репо) ложится на env каждого репо.
+  const env = fullEnv(r.env);
+  for (const o of OPTS) if (S.env[o.k] !== S.base[o.k]) env[o.k] = S.env[o.k];
+  if (S.provider === 'openrouter') { env.LLM_BASE_URL = 'https://openrouter.ai/api/v1' }
+  const oldLines = r.pin ? envOut({}, r.env) : [], newLines = envOut(env).concat(env.LLM_BASE_URL ? [['LLM_BASE_URL', env.LLM_BASE_URL]] : []);
+  const oldMap = new Map(oldLines), newMap = new Map(newLines), keys = [...new Set([...oldMap.keys(), ...newMap.keys()])];
+  const lines = [['c', '        env:'], ['a', '          # >>> ai-reviewer-configurator: env (генерируется, правки руками перезапишутся)']];
+  let changes = 1;
+  for (const k of keys) {
+    const a = oldMap.get(k), b = newMap.get(k), fa = `          ${k}: '${a}'`, fb = `          ${k}: '${b}'`;
+    if (a === b) lines.push(['c', fa]);
+    else { if (a !== undefined) { lines.push(['d', fa + (b === undefined && BY[k] && a === BY[k].d ? '   # = дефолт' : '')]); changes++ } if (b !== undefined) { lines.push(['a', fb]); changes++ } }
+  }
+  lines.push(['a', '          # <<< ai-reviewer-configurator: env']);
+  const sk = S.provider === 'openrouter' ? 'LLM_API_KEY' : 'OLLAMA_API_KEY';
+  lines.push(['c', `          ${sk}: \${{ secrets.${sk} }}`]);
+  if (W.telegram !== r.wf.telegram) { const t = W.telegram ? 'a' : 'd'; lines.push([t, '          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}'], [t, '          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}']); changes += 2 }
+  files.push({path: '.github/workflows/pr-review.yml', note: r.pin ? 'размеченная env-область; первое применение убирает явные дефолты' : 'генерируется целиком из шаблона ' + S.targetPin, lines});
+  if (W.cache && !r.wf.cache) { files.push({path: '.github/workflows/pr-review.yml', note: 'новый шаг перед «Run AI review»', lines: [['a', '      - uses: actions/cache@v6'], ['a', '        with:'], ['a', '          path: .ai-review/incremental/'], ['a', '          key: ai-review-inc-${{ github.event.pull_request.number }}-${{ github.run_id }}'], ['a', '          restore-keys: ai-review-inc-${{ github.event.pull_request.number }}-']]}); changes += 5 }
+  if (r.pin !== S.targetPin) { files.push({path: 'ops/ai-reviewer-ref', lines: [...(r.pin ? [['d', r.pin]] : []), ['a', S.targetPin]]}); changes++ }
+  const pj = lineDiff(JSON.stringify(S.baseProfiles[r.id], null, 2).split('\n'), JSON.stringify(S.profiles[r.id], null, 2).split('\n'));
+  const pc = pj.filter(l => l[0] !== 'c').length;
+  if (pc) { files.push({path: S.env.REVIEW_PROFILE || '.ai-reviewer.json', lines: compact(pj)}); changes += pc }
+  if (W.metrics !== r.wf.metrics) { files.push({path: '.github/workflows/pr-review-metrics.yml', note: W.metrics ? 'из шаблона ' + S.targetPin : 'удаляется', lines: [[W.metrics ? 'a' : 'd', 'name: PR Review metrics …']]}); changes++ }
+  if (W.feedback !== r.wf.feedback) { files.push({path: '.github/workflows/pr-review-feedback.yml', lines: [[W.feedback ? 'a' : 'd', 'name: PR Review feedback …']]}); changes++ }
+  return {repo: r.id, slug, files, changes};
+}
+function lineDiff(a, b) {
+  const n = a.length, m = b.length, L = Array.from({length: n + 1}, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const out = []; let i = 0, j = 0;
+  while (i < n && j < m) { if (a[i] === b[j]) { out.push(['c', a[i]]); i++; j++ } else if (L[i + 1][j] >= L[i][j + 1]) out.push(['d', a[i++]]); else out.push(['a', b[j++]]) }
+  while (i < n) out.push(['d', a[i++]]); while (j < m) out.push(['a', b[j++]]); return out;
+}
+function compact(ls) { const keep = ls.map((l, i) => l[0] !== 'c' || ls.slice(Math.max(0, i - 2), i + 3).some(x => x[0] !== 'c')); const out = []; let gap = false;
+  ls.forEach((l, i) => { if (keep[i]) { out.push(l); gap = false } else if (!gap) { out.push(['c', '  …']); gap = true } }); return out }
+
+// ── Боковая панель ────────────────────────────────────────────────────────────────
+function side() {
+  const e = S.env, r = roles(e.MOA_SPECIALIST_MODELS), R = rules();
+  const moaDesc = e.REVIEW_MODE === 'consensus' ? `consensus: ${list(e.OLLAMA_MODELS).join(', ') || e.OLLAMA_MODEL}`
+    : flag(e.REVIEW_SPECIALISTS) ? `${Object.entries(r).map(([k, v]) => `${k[0].toUpperCase()}:${v}`).join(' · ')} → ${e.MOA_AGGREGATOR}` : `${e.MOA_REFERENCE_MODELS} → ${e.MOA_AGGREGATOR}`;
+  const P = [
+    ['router', 'Router', flag(e.REVIEW_ROUTER), flag(e.REVIEW_ROUTER) ? 'skip · light · full' : 'всегда full'],
+    ['context', 'Контекст', true, `окна ±${e.REVIEW_CONTEXT_MARGIN}${flag(e.REVIEW_SYMBOL_CARDS) ? ' · карточки' : ''} · blast depth ${e.REVIEW_GRAPHIFY_DEPTH}`, flag(e.REVIEW_BLAST_REQUIRED) ? 'closed' : 'open'],
+    ['prescan', 'Prescan', flag(e.REVIEW_PRESCAN), [flag(e.REVIEW_PRESCAN) && 'eslint', flag(e.REVIEW_PRESCAN_ASTGREP) && 'ast-grep', flag(e.REVIEW_PRESCAN_BLOCK) && 'block-правила'].filter(Boolean).join(' · '), 'open'],
+    ['moa', 'MoA', true, moaDesc],
+    ['verifier', 'Verifier', flag(e.REVIEW_VERIFIER), `${e.REVIEW_VERIFIER_MODEL}${e.REVIEW_VERIFIER_FALLBACK_MODEL ? ' → ' + e.REVIEW_VERIFIER_FALLBACK_MODEL : ''} · ${e.REVIEW_VERIFIER_BATCHES}×${e.REVIEW_VERIFIER_MAX}${flag(e.REVIEW_VERIFIER_STRICT) ? ' · strict' : ''}`, flag(e.REVIEW_VERIFIER_STRICT) ? 'closed' : 'open'],
+    ['gate', 'Гейт', true, `блок: ${e.REVIEW_BLOCK_ON} · conf ≥ ${e.REVIEW_CONFIDENCE_MIN}${strictOn(e) ? ' · strict' : ''}`, flag(e.REVIEW_LLM_REQUIRED) ? 'closed' : 'open'],
+    ['delivery', 'Доставка', true, `inline: ${e.REVIEW_INLINE_ON} · порог ${e.REVIEW_ACTIONABILITY_MIN}${flag(e.REVIEW_AUTO_TRIAGE) ? ' · triage' : ''}`],
+    ['artifacts', 'Артефакты', flag(e.REVIEW_EXPORT) || flag(e.REVIEW_OBSERVABILITY), [flag(e.REVIEW_EXPORT) && 'JSON/SARIF', flag(e.REVIEW_OBSERVABILITY) && 'JSONL', S.wf.metrics && 'metrics'].filter(Boolean).join(' · ') || 'выкл.'],
+  ];
+  const c0 = calls(S.base, S.baseWf), c1 = calls(e, S.wf), k = c1 / c0;
+  const cls = x => x > 1.02 ? 'up' : x < 0.98 ? 'down' : '';
+  const fmt = (x, d = 1) => x.toFixed(d).replace('.', ',');
+  const order = {error: 0, warn: 1, info: 2};
+  return `<section><h3>Пайплайн</h3><ol class="pipe">${P.map(([st, n, on, d, fm]) => `<li class="${on ? '' : 'off'}" data-go="${st}"><span class="node"></span><div><span class="pn">${n}</span>${fm ? `<span class="fm ${fm}">fail-${fm}</span>` : ''}<div class="pd">${esc(d)}</div></div></li>`).join('')}</ol></section>
+    <section><h3>Правила · ${R.length}</h3><div class="rules">${R.length ? R.sort((a, b) => order[a.level] - order[b.level]).map(x => `<button class="rule ${x.level}" data-go="${x.stage}"><span class="lv">${x.level}</span><span>${esc(x.msg)}</span></button>`).join('') : '<p class="note">Конфликтов нет.</p>'}</div></section>
+    <section><h3>Цена прогона</h3><div class="cost"><span class="h">по истории</span><span class="h" style="text-align:right">сейчас</span><span class="h" style="text-align:right">станет</span>
+      <span>LLM-вызовов</span><span class="v">${fmt(HIST.calls, 0)}</span><span class="v ${cls(k)}">${fmt(HIST.calls * k, 0)}</span>
+      <span>токенов, млн</span><span class="v">${fmt(HIST.tokensM, 2)}</span><span class="v ${cls(k)}">${fmt(HIST.tokensM * k, 2)}</span>
+      <span>время, мин</span><span class="v">${fmt(HIST.wallMin)}</span><span class="v ${cls(k)}">${fmt(HIST.wallMin * Math.sqrt(k))}</span></div>
+      <p class="note">Оценка: медианы ${HIST.runs} последних run_end (пример) × отношение числа вызовов. История другой модели не переносится.</p></section>`;
+}
+
+// ── Каркас ────────────────────────────────────────────────────────────────────────
+function stageBadge(st) {
+  const R = rules().filter(r => r.stage === st);
+  if (R.some(r => r.level === 'error')) return '<span class="b e">!</span>';
+  const n = OPTS.filter(o => o.st === st && S.env[o.k] !== S.base[o.k]).length;
+  if (n) return `<span class="b">${n}</span>`;
+  if (R.some(r => r.level === 'warn')) return '<span class="b w">!</span>';
+  return '';
+}
+function render() {
+  let g = '';
+  document.getElementById('rail').innerHTML = STAGES.map((s, i) => { const head = s.g !== g ? `<li class="grp">${g = s.g}</li>` : '';
+    return head + `<li><button data-go="${s.id}" ${S.stage === s.id ? 'aria-current="step"' : ''}><span class="n">${String(i).padStart(2, '0')}</span><span class="t">${s.t}</span>${stageBadge(s.id)}</button></li>` }).join('');
+  const i = STAGES.findIndex(s => s.id === S.stage), st = STAGES[i];
+  const hiddenNote = st.id === 'artifacts'
+    ? `<p class="note" style="max-width:760px;margin-top:14px">Скрыто во flow: dev-only и без эффекта. <button class="linkbtn" data-hidden>${S.showHidden ? 'свернуть' : 'показать список'}</button></p>${S.showHidden ? `<ul class="note" style="max-width:760px">${HIDDEN.map(h => `<li><code>${esc(h)}</code></li>`).join('')}</ul>` : ''}` : '';
+  document.getElementById('main').innerHTML = `<div class="stage-head"><span class="eyebrow">${String(i).padStart(2, '0')} / ${STAGES.length - 1}</span><h2>${st.t}</h2><p>${st.p}</p></div>`
+    + VIEWS[st.id]() + hiddenNote
+    + `<div class="nav">${i > 0 ? `<button class="btn" data-go="${STAGES[i - 1].id}">← ${STAGES[i - 1].t}</button>` : ''}${i < STAGES.length - 1 ? `<button class="btn primary" data-go="${STAGES[i + 1].id}">${STAGES[i + 1].t} →</button>` : ''}</div>`
+    + `<datalist id="models">${(S.provider === 'openrouter' ? MODELS_OLLAMA.map(orName) : MODELS_OLLAMA).map(m => `<option value="${m}">`).join('')}</datalist>`;
+  document.getElementById('side').innerHTML = side();
+  const sel = selected();
+  document.getElementById('hdr-repos').textContent = sel.length === 1 ? sel[0].id : `${sel.length} репозитория`;
+  document.getElementById('hdr-pin').textContent = `движок ${S.targetPin}`;
+}
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 3200) }
+function setProvider(p) {
+  if (p === S.provider) return; S.provider = p;
+  const conv = p === 'openrouter' ? orName : olName;
+  for (const o of OPTS) if (o.t === 'model' && S.env[o.k]) S.env[o.k] = conv(S.env[o.k]);
+  S.env.MOA_SPECIALIST_MODELS = Object.entries(roles(S.env.MOA_SPECIALIST_MODELS)).map(([k, v]) => `${k}:${conv(v)}`).join(',');
+  S.env.MOA_REFERENCE_MODELS = list(S.env.MOA_REFERENCE_MODELS).map(conv).join(',');
+}
+function applyPreset(k) {
+  S.env = clone(S.base); S.wf = clone(S.baseWf); S.preset = k;
+  const p = PRESETS[k];
+  if (p.reset) { for (const o of OPTS) if (!PATH_KEYS.includes(o.k)) S.env[o.k] = o.d }
+  Object.assign(S.env, p.env || {}); Object.assign(S.wf, p.wf || {});
+  if (S.provider === 'openrouter') { const pr = S.provider; S.provider = 'ollama'; setProvider(pr) }
+}
+
+// ── События ───────────────────────────────────────────────────────────────────────
+document.addEventListener('click', ev => {
+  const b = ev.target.closest('[data-go],[data-set],[data-reset],[data-reset-all],[data-pin],[data-runner-choice],[data-provider],[data-preset],[data-runner],[data-secret],[data-apply],[data-tab],[data-hidden]');
+  if (!b) return;
+  const d = b.dataset;
+  if (d.go) { S.stage = d.go; render(); document.getElementById('main').scrollIntoView({block: 'start'}); return }
+  if (d.set) { S.env[d.set] = d.v }
+  else if ('reset' in d && d.reset) S.env[d.reset] = S.base[d.reset];
+  else if ('resetAll' in d) { S.env = clone(S.base); S.wf = clone(S.baseWf); S.preset = null }
+  else if (d.pin) S.targetPin = d.pin;
+  else if (d.provider) setProvider(d.provider);
+  else if (d.preset) applyPreset(d.preset);
+  else if ('runner' in d && b.matches('button')) { S.runner = d.runner; toast(`vars.SELF_HOSTED_CI = ${d.runner} (прототип: не записано)`) }
+  else if (d.secret) { const inp = document.getElementById('sec-' + d.secret); if (!inp.value) { toast('Введи значение секрета'); return }
+    for (const r of selected()) S.secrets[r.id][d.secret] = true; inp.value = ''; toast(`${d.secret} → ${selected().length} репо (прототип: не записано)`) }
+  else if ('apply' in d) S.applied = selected().map(r => `${r.id}#…`);
+  else if (d.tab) S.tab = d.tab;
+  else if ('hidden' in d) S.showHidden = !S.showHidden;
+  else return;
+  render();
+});
+document.addEventListener('change', ev => {
+  const t = ev.target, d = t.dataset;
+  if (d.repo) { S.sel[d.repo] = t.checked; if (!selected().length) { S.sel[d.repo] = true; t.checked = true; toast('Нужен хотя бы один репозиторий'); return }
+    const p = primary(); if (selected().length === 1) loadFrom(p) }
+  else if (d.k && t.type === 'checkbox') S.env[d.k] = t.checked ? '1' : '0';
+  else if (d.k) S.env[d.k] = t.value.trim();
+  else if (d.sev) S.env[d.sev] = [...document.querySelectorAll(`[data-sev="${d.sev}"]:checked`)].map(x => x.value).join(',');
+  else if (d.role) { const r = roles(S.env.MOA_SPECIALIST_MODELS); r[d.role] = t.value.trim(); S.env.MOA_SPECIALIST_MODELS = Object.entries(r).map(([k, v]) => `${k}:${v}`).join(',') }
+  else if (d.wf) S.wf[d.wf] = t.checked;
+  else if ('runner' in d) { S.runner = t.checked ? '1' : '0'; toast(`vars.SELF_HOSTED_CI = ${S.runner} (прототип: не записано)`) }
+  else if ('nsconfirm' in d) S.nsConfirm = t.checked;
+  else if (d.pf) { const p = S.profiles[S.tab]; setPath(p, d.pf, t.type === 'checkbox' ? t.checked : 'list' in d ? t.value.split(',').map(s => s.trim()).filter(Boolean) : t.value) }
+  else return;
+  S.applied = null; render();
+});
+render();
+</script>
