@@ -59,6 +59,7 @@
 | `examples/ci/pr-review.yml` | `REVIEW_LLM_TIMEOUT_MS: '240000'` при дефолте движка 420000; `docs/configuration.md` прямо говорит, что 240000 обрывали половину prose-вызовов |
 | `REVIEW_STRUCTURE` | Пишется в конфиг, никто не читает — эффекта нет |
 | `layout.logic` профиля | Не читается роутером (`LOGIC`/`CODE` зашиты в `lib/router.mjs`, `rust/src/router.rs`) |
+| Промпт жюри (`AGGREGATOR_HEAD`, `<confidence>` в `rust/src/prompt.rs:368`, `:403`) | Порог «0.8» и уровни «critical and major» записаны текстом. При другом `REVIEW_CONFIDENCE_MIN` или `REVIEW_BLOCK_ON` модель калибруется под 0.8 |
 | `REVIEW_CONSENSUS` в `moa` | Всегда зажимается до `1`; значение из env молча игнорируется |
 | Шаги upload в шаблоне | Пути `.graphify/graphify-out/observability` и `review-export/` — из профиля Orakul, у нейтрального профиля другие (`.ai-review/…`) |
 
@@ -127,6 +128,7 @@ GitHub — существующий `rust/src/github.rs` (`reqwest` blocking).
 | GET | `/api/repos/{o}/{r}/tree` | Список путей default-ветки — для проверки регэкспов профиля |
 | GET | `/api/repos/{o}/{r}/history?n=20` | `run_end` последних N прогонов из artifacts `pr-review-observability-*` |
 | GET | `/api/runners` | Раннеры репозиториев (online/busy) + проба тулчейна хоста: `node`, `gh`, `ast-grep`, graphify venv |
+| GET | `/api/prompts?ref=vX.Y.Z` | Системные промпты всех вызовов (роли, слитая панель, жюри, verifier — с условными вариантами blast/priors) от бинаря `prompt` того же тега; на месте вставок профиля — метки `⟦REPO_RULES⟧`, `⟦*_EXTRA⟧`, страница подставляет значения |
 | POST | `/api/plan` | `{repos[], delta}` → дифф файлов, сработавшие правила, оценка цены; ничего не пишет |
 | POST | `/api/apply` | По одному PR на репозиторий из ветки `ai-reviewer-config/<slug>`; открытый PR конфигуратора обновляется, а не плодится |
 | PUT | `/api/repos/{o}/{r}/secrets/{name}` | Write-only: `gh secret set` с `GH_TOKEN`=PAT, значение через stdin, не через argv |
@@ -169,6 +171,7 @@ env-блока:
 | 8 | Доставка | Inline, actionability, auto-triage, reasoning в sticky, иконки, Telegram |
 | 9 | Экономия и бюджеты | Incremental (+ шаг `actions/cache`), chunk-routing, размеры чанков, таймауты, concurrency, тайм-бюджет |
 | 10 | Артефакты | Export/SARIF, observability, `REVIEW_PRICE_JSON`, `pr-review-metrics.yml`; feedback — свёрнут, выключен |
+| 11а | Промпты моделей | Настоящие тексты каждого вызова при текущей конфигурации, по разделам; вставки правил проекта и `prompts.*Extra` подсвечены; пример user-сообщения |
 | 11 | Профиль | Маркеры, layout-регэкспы с проверкой на дереве, ast-grep scopes/allow, repoRules, `prompts.*Extra`. В пакетном режиме — по вкладке на репозиторий |
 | 12 | Секреты и раннер | Наличие секретов, форма записи; статус раннеров и тулчейна |
 | 13 | Проверка и применение | Дифф по файлам, правила, оценка цены → Apply → ссылки на PR |
