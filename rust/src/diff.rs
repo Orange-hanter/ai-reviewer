@@ -169,6 +169,11 @@ pub struct DiffFileRecord {
     pub changed: Vec<String>,
     /// Номер строки RIGHT-стороны → её текст.
     pub text: BTreeMap<u64, String>,
+    /// Строки RIGHT-стороны, где PR что-то меняет: добавленная строка — она сама,
+    /// удаление — строка перед ним. Только для `collect_blast_symbols` (BLV-011): в JSON
+    /// parseDiff не выходит, контракт с lib/findings.mjs прежний.
+    #[serde(skip)]
+    pub changed_anchors: BTreeSet<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -210,6 +215,26 @@ fn parse_hunk_start(line: &str) -> Option<u64> {
 /// Парсит unified diff: карта файлов, аннотированный дифф (номера строк RIGHT-стороны)
 /// и склейка изменённых строк.
 pub fn parse_diff(diff: &str) -> ParseDiffResult {
+    let (files, annotated, changed_text) = parse_diff_records(diff);
+    let files_value = files
+        .into_iter()
+        .map(|(k, v)| (k, serde_json::to_value(v).expect("serialize DiffFileRecord")))
+        .collect();
+    ParseDiffResult { files: files_value, annotated, changed_text }
+}
+
+/// Строки изменений по файлам (`DiffFileRecord::changed_anchors`).
+pub fn changed_anchor_lines(diff: &str) -> indexmap::IndexMap<String, BTreeSet<u64>> {
+    parse_diff_records(diff)
+        .0
+        .into_iter()
+        .map(|(k, v)| (k, v.changed_anchors))
+        .collect()
+}
+
+fn parse_diff_records(
+    diff: &str,
+) -> (indexmap::IndexMap<String, DiffFileRecord>, String, String) {
     let mut files: indexmap::IndexMap<String, DiffFileRecord> = indexmap::IndexMap::new();
     let mut annotated_parts: Vec<String> = Vec::new();
     let mut changed_lines: Vec<String> = Vec::new();
@@ -273,12 +298,14 @@ pub fn parse_diff(diff: &str) -> ParseDiffResult {
         let rec = files.get_mut(&path).expect("cur_path из files");
         if raw.starts_with('+') && (in_hunk || !raw.starts_with("+++")) {
             rec.valid_lines.insert(new_line);
+            rec.changed_anchors.insert(new_line);
             rec.changed.push(raw[1..].to_string());
             rec.text.insert(new_line, raw[1..].to_string());
             changed_lines.push(raw[1..].to_string());
             annotated_parts.push(format!("{:>5}: {}", new_line, raw));
             new_line += 1;
         } else if raw.starts_with('-') && (in_hunk || !raw.starts_with("---")) {
+            rec.changed_anchors.insert(new_line.saturating_sub(1).max(1));
             rec.changed.push(raw[1..].to_string());
             changed_lines.push(raw[1..].to_string());
             annotated_parts.push(format!("     : {}", raw));
@@ -291,15 +318,7 @@ pub fn parse_diff(diff: &str) -> ParseDiffResult {
         }
     }
 
-    let files_value = files
-        .into_iter()
-        .map(|(k, v)| (k, serde_json::to_value(v).expect("serialize DiffFileRecord")))
-        .collect();
-    ParseDiffResult {
-        files: files_value,
-        annotated: annotated_parts.join("\n"),
-        changed_text: changed_lines.join("\n"),
-    }
+    (files, annotated_parts.join("\n"), changed_lines.join("\n"))
 }
 
 // ---------------------------------------------------------------------------
@@ -353,29 +372,75 @@ fn add_symbol(out: &mut Vec<String>, seen: &mut HashSet<String>, raw: &str) {
 pub fn extract_changed_symbols(text: &str, max_symbols: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    static RE_AS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re_as = RE_AS.get_or_init(|| regex::Regex::new(r"(?i)\s+as\s+").unwrap());
     for re in symbol_patterns() {
         for m in re.captures_iter(text) {
             let Some(g) = m.get(1) else { continue };
-            let g = g.as_str();
-            if g.contains(',') || g.contains(" as ") {
-                for part in g.split(',') {
-                    let token = part.trim();
-                    if token.is_empty() || token == "type" || token == "typeof" {
-                        continue;
-                    }
-                    // `bar as baz` → для blast-radius нужен исходный binding `bar`
-                    let name = re_as.split(strip_type_prefix(token)).next().unwrap_or("").trim();
-                    add_symbol(&mut out, &mut seen, name);
-                }
-            } else {
-                add_symbol(&mut out, &mut seen, g);
+            for name in capture_names(g.as_str()) {
+                add_symbol(&mut out, &mut seen, name);
             }
         }
     }
     out.truncate(max_symbols);
     out
+}
+
+/// Имена из группы паттерна: одно имя или список `export { a, b as c }`.
+fn capture_names(g: &str) -> Vec<&str> {
+    static RE_AS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re_as = RE_AS.get_or_init(|| regex::Regex::new(r"(?i)\s+as\s+").unwrap());
+    if !(g.contains(',') || g.contains(" as ")) {
+        return vec![g];
+    }
+    let mut names = Vec::new();
+    for part in g.split(',') {
+        let token = part.trim();
+        if token.is_empty() || token == "type" || token == "typeof" {
+            continue;
+        }
+        // `bar as baz` → для blast-radius нужен исходный binding `bar`
+        names.push(re_as.split(strip_type_prefix(token)).next().unwrap_or("").trim());
+    }
+    names
+}
+
+/// Объявления-экспорты текста с номером строки (с 1) по началу имени, по возрастанию строки.
+fn export_decls(text: &str) -> Vec<(u64, &str)> {
+    let mut decls = Vec::new();
+    for re in symbol_patterns() {
+        for m in re.captures_iter(text) {
+            let Some(g) = m.get(1) else { continue };
+            let line = text[..g.start()].bytes().filter(|&b| b == b'\n').count() as u64 + 1;
+            for name in capture_names(g.as_str()) {
+                decls.push((line, name));
+            }
+        }
+    }
+    decls.sort_by_key(|&(line, _)| line);
+    decls
+}
+
+/// Сколько строк записи contentMap предшествует телу файла: `### path` + открывающие
+/// кавычки (формат readChangedFiles) — 2, сырой текст — 0.
+fn entry_body_offset(text: &str) -> u64 {
+    let mut lines = text.splitn(3, '\n');
+    match (lines.next(), lines.next()) {
+        (Some(head), Some("```")) if head.starts_with("### ") => 2,
+        _ => 0,
+    }
+}
+
+/// Экспорты, охватывающие строки изменений: для каждой строки — объявление(я) на ближайшей
+/// строке не ниже неё (BLV-011). Строка до первого объявления символа не даёт.
+fn enclosing_exports<'a>(text: &'a str, anchors: &BTreeSet<u64>) -> Vec<&'a str> {
+    let offset = entry_body_offset(text);
+    let decls = export_decls(text);
+    let mut names = Vec::new();
+    for &anchor in anchors {
+        let at = anchor + offset;
+        let Some(&(line, _)) = decls.iter().rev().find(|&&(l, _)| l <= at) else { continue };
+        names.extend(decls.iter().filter(|&&(l, _)| l == line).map(|&(_, n)| n));
+    }
+    names
 }
 
 const CODE_EXTENSIONS: &[&str] = &[
@@ -389,10 +454,17 @@ fn is_code_path(path: &str) -> bool {
 
 /// Символы для Graphify blast-radius: сначала из изменённых строк, затем добор
 /// экспортами из полных текстов затронутых `.ts`/`.js`/`.py` файлов.
+///
+/// `anchors` — строки изменений по файлам (`changed_anchor_lines`). С ними добор берёт из
+/// файла только экспорты, охватывающие изменённые строки, а файл без строк изменений не
+/// даёт ничего: иначе правка одного типа в `types.ts` отправляла в blast все его экспорты,
+/// и находка называла «затронутым» символ, которого PR не касался (BLV-011). Без `anchors`
+/// — прежний добор всеми экспортами файла.
 pub fn collect_blast_symbols(
     changed_text: &str,
     content_map: Option<&indexmap::IndexMap<String, String>>,
     max_symbols: usize,
+    anchors: Option<&indexmap::IndexMap<String, BTreeSet<u64>>>,
 ) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -414,8 +486,15 @@ pub fn collect_blast_symbols(
         if !is_code_path(path) {
             continue;
         }
-        for name in extract_changed_symbols(text, max_symbols) {
-            push(&name, &mut out, &mut seen);
+        let names = match anchors {
+            Some(a) => a
+                .get(path)
+                .map(|lines| enclosing_exports(text, lines).into_iter().map(str::to_string).collect())
+                .unwrap_or_default(),
+            None => extract_changed_symbols(text, max_symbols),
+        };
+        for name in names {
+            push(name.trim(), &mut out, &mut seen);
             if out.len() >= max_symbols {
                 return out;
             }
@@ -788,8 +867,57 @@ mod tests {
             "app/server/store.ts".to_string(),
             "export function makeDataStore() { return {}; }\nexport const unused = 1;\n".to_string(),
         );
-        let syms = collect_blast_symbols(changed, Some(&content_map), 25);
+        let syms = collect_blast_symbols(changed, Some(&content_map), 25, None);
         assert!(syms.contains(&"makeDataStore".to_string()));
+    }
+
+    /// Orakul PR #660: правка внутри `OnUpdate` не отправляет в blast соседние экспорты.
+    const TYPES_TS: &str = "import type { X } from './x';\n\
+export type ShowToast = (msg: string) => void;\n\
+export interface OnCreate {\n  (data: unknown): Promise<unknown>;\n}\n\
+export type OnUpdate = (\n  id: string,\n  base?: Record<string, unknown>,\n) => Promise<any>;\n\
+export type OnDelete = (id: string) => Promise<void>;\n";
+
+    fn types_map(entry: String) -> indexmap::IndexMap<String, String> {
+        let mut m = indexmap::IndexMap::new();
+        m.insert("app/client/src/types.ts".to_string(), entry);
+        m
+    }
+
+    #[test]
+    fn collect_blast_symbols_with_diff_takes_only_enclosing_export() {
+        // строки 6–9 — `OnUpdate`, добавлена строка 8
+        let diff = "diff --git a/app/client/src/types.ts b/app/client/src/types.ts\n\
+--- a/app/client/src/types.ts\n+++ b/app/client/src/types.ts\n\
+@@ -6,3 +6,4 @@ export type OnUpdate = (\n export type OnUpdate = (\n   id: string,\n\
++  base?: Record<string, unknown>,\n ) => Promise<any>;";
+        let anchors = changed_anchor_lines(diff);
+        let changed = "  base?: Record<string, unknown>,";
+        // и сырой текст, и запись readChangedFiles (`### path` + кавычки): номера строк те же
+        for entry in [
+            TYPES_TS.to_string(),
+            format!("### app/client/src/types.ts\n```\n{TYPES_TS}\n```"),
+        ] {
+            let syms = collect_blast_symbols(changed, Some(&types_map(entry)), 25, Some(&anchors));
+            assert_eq!(syms, vec!["OnUpdate"]);
+        }
+        // без diff — прежний добор всеми экспортами (ревью-MCP)
+        let all = collect_blast_symbols(changed, Some(&types_map(TYPES_TS.to_string())), 25, None);
+        assert_eq!(all, vec!["ShowToast", "OnCreate", "OnUpdate", "OnDelete"]);
+    }
+
+    #[test]
+    fn collect_blast_symbols_with_diff_deletion_and_imports() {
+        // удаление внутри OnCreate (перед строкой 5) → OnCreate; правка импорта — ничего
+        let diff = "diff --git a/t.ts b/t.ts\n--- a/t.ts\n+++ b/t.ts\n\
+@@ -1,1 +1,1 @@\n-import type { Y } from './x';\n+import type { X } from './x';\n\
+@@ -4,3 +4,2 @@\n   (data: unknown): Promise<unknown>;\n-  extra: number;\n }";
+        let anchors = changed_anchor_lines(diff);
+        let mut m = indexmap::IndexMap::new();
+        m.insert("t.ts".to_string(), TYPES_TS.to_string());
+        assert_eq!(collect_blast_symbols("", Some(&m), 25, Some(&anchors)), vec!["OnCreate"]);
+        // файл не из диффа при заданных anchors не даёт добора
+        assert!(collect_blast_symbols("", Some(&m), 25, Some(&indexmap::IndexMap::new())).is_empty());
     }
 
     #[test]
@@ -807,7 +935,7 @@ mod tests {
             "cod_doc/services/project_service.py".to_string(),
             "import x\n\n\ndef row_id_for_slug(session, slug):\n    return 1\n\n\ndef _helper():\n    pass\n".to_string(),
         );
-        let syms = collect_blast_symbols(changed, Some(&content_map), 25);
+        let syms = collect_blast_symbols(changed, Some(&content_map), 25, None);
         assert_eq!(syms, vec!["row_id_for_slug"]);
     }
 

@@ -11,7 +11,7 @@
 //!   parseDiffGitPath       {line}                       → string | null
 //!   parseDiff              {diff}                       → {files, annotated, changedText}
 //!   extractChangedSymbols  {text, maxSymbols?}          → string[]
-//!   collectBlastSymbols    {changedText, contentMap?, maxSymbols?} → string[]
+//!   collectBlastSymbols    {changedText, contentMap?, maxSymbols?, diff?} → string[]
 //!   splitSegmentByHunks    {seg, maxBytes}              → string[]
 //!   buildChunks            {annotated, contentMap?, limits} → Chunk[]
 
@@ -22,7 +22,7 @@ use indexmap::IndexMap;
 use serde_json::{json, Value};
 
 use ai_reviewer::diff::{
-    build_chunks, collect_blast_symbols, extract_changed_symbols, parse_diff, parse_diff_git_path,
+    build_chunks, changed_anchor_lines, collect_blast_symbols, extract_changed_symbols, parse_diff, parse_diff_git_path,
     parse_diff_new_path, split_segment_by_hunks, unescape_git_path, ChunkLimits,
 };
 
@@ -87,10 +87,16 @@ fn run() -> Result<()> {
         }
         "collectBlastSymbols" => {
             let content_map = arg_content_map("contentMap")?;
+            // `diff` — необязателен: с ним добор только охватывающими экспортами (BLV-011).
+            let anchors = match obj.get("diff") {
+                None | Some(Value::Null) => None,
+                Some(_) => Some(changed_anchor_lines(arg_str("diff")?)),
+            };
             json!(collect_blast_symbols(
                 arg_str("changedText")?,
                 Some(&content_map),
                 arg_usize("maxSymbols", 25)?,
+                anchors.as_ref(),
             ))
         }
         "splitSegmentByHunks" => {

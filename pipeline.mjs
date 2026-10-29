@@ -714,7 +714,7 @@ export function createReviewPipeline(cfg, deps = {}) {
           byTool: { ...(rawPrescan.byTool || {}), lockfile: lockfileFindings.length },
         }
         : rawPrescan;
-      const symbols = collectBlastSymbols(changedText, contentMap, limits.maxSymbols);
+      const symbols = collectBlastSymbols(changedText, contentMap, limits.maxSymbols, { diff });
       log(`файлов: ${files.size} · символов под blast-radius: ${symbols.length}`, symbols);
       // Окна контекста для advisors и жюри (RFC 07): в промпт едут окрестности изменённых
       // строк, а не файлы целиком. Место в потоке — само решение, а не деталь:
