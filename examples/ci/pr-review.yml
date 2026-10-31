@@ -64,13 +64,13 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .graphify/venv
-          key: gf-venv-${{ runner.os }}-py311-graphifyy-0.9.87-v1
+          key: gf-venv-${{ runner.os }}-py311-graphifyy-0.9.99-v1
 
       - name: Install graphify (pinned, from PyPI)
         run: |
           install_graphify() {
             python -m venv .graphify/venv
-            .graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.87
+            .graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.99
           }
           if [ -x .graphify/venv/bin/graphify ] && .graphify/venv/bin/graphify --version >/dev/null 2>&1; then
             echo "graphify venv OK: $(.graphify/venv/bin/graphify --version 2>&1 | head -1)"

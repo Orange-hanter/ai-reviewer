@@ -10,6 +10,13 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+### Изменено — `graphifyy` 0.9.87 → 0.9.99
+
+- Шаблон CI (`examples/ci/pr-review.yml`) и `docs/model-tuning.md`: пин и ключ кэша venv.
+  Вывод `graphify affected` на одном `graph.json` под 0.9.87 и 0.9.99 побайтно совпал
+  (5 символов, Orakul `7ada7043`), строка `Built from commit` в `GRAPH_REPORT.md` на месте.
+  Замеры RFC 21 сделаны на 0.9.87 и не пересчитывались.
+
 ### Исправлено — blast-находки о символах, которых PR не трогал (BLV-011, [RFC 21](proposals/21-blast-verification.md))
 
 Orakul PR #660 добавил необязательный параметр в `OnUpdate` в `types.ts`, а отчёт показал шесть
