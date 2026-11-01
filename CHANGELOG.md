@@ -10,6 +10,14 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+### Добавлено — ревью PR самого движка в CI
+
+`.github/workflows/pr-review.yml`: PR в `main` ревьюятся движком base-ревизии (чекаут по
+`base.sha`, сборка cargo по его `Cargo.lock`, профиль `.ai-reviewer.json` из base), Ollama
+Cloud с отдельным ключом, ростер — как в шаблоне потребителя. Нужен секрет `OLLAMA_API_KEY`;
+без него ревью пропускается.
+Разбор — `docs/integration.md`, «Ревью PR самого движка».
+
 ### Исправлено — blast-находки о символах, которых PR не трогал (BLV-011, [RFC 21](proposals/21-blast-verification.md))
 
 Orakul PR #660 добавил необязательный параметр в `OnUpdate` в `types.ts`, а отчёт показал шесть
