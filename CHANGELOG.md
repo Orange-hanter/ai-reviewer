@@ -10,6 +10,12 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+### Изменено — `graphifyy` 0.9.87 → 0.9.99
+
+- Шаблон CI (`examples/ci/pr-review.yml`) и `docs/model-tuning.md`: пин и ключ кэша venv.
+  Вывод `graphify affected` на одном `graph.json` под 0.9.87 и 0.9.99 побайтно совпал
+  (5 символов, Orakul `7ada7043`), строка `Built from commit` в `GRAPH_REPORT.md` на месте.
+  Замеры RFC 21 сделаны на 0.9.87 и не пересчитывались.
 ### Добавлено — ревью PR самого движка в CI
 
 `.github/workflows/pr-review.yml`: PR в `main` ревьюятся движком base-ревизии (чекаут по
