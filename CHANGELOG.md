@@ -10,6 +10,16 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+- **Наблюдаемость blast-radius: имена неразрешённых символов** — метрики плана
+  (`blast_radius` в observability JSONL) получили `unresolved_symbols`: до 30 записей
+  `{symbol, kind, reply, candidates, in_pr}`. `kind` — по индексу графа: `ambiguous` — имя у
+  нескольких узлов, а в файлах PR их `in_pr` (0 или ≥ 2, иначе сработало бы разрешение омонима
+  BLV-007; при `in_pr` = 1 запись содержит `retried_id` — повтор по id тоже отвергнут);
+  `not_found` — узла с таким именем нет; `unique_in_index` — узел один, но graphify его не
+  принял. `reply` — ответ graphify (`no_unique_match` / `no_node`). Имя длиннее 120 символов
+  обрезается с `truncated: true` и исходной `length`. Раньше был только счётчик `symbol_unresolved`
+  (в Orakul — 55 из 372 символов за 20 прогонов), и разобрать остаток было нечем.
+
 - **Verifier по умолчанию** — `mimo-v2.6-pro` вместо `deepseek-v4-pro` (`REVIEW_VERIFIER_MODEL`,
   JS и Rust; шаблон `examples/ci/pr-review.yml`; пробник). JSON ok на `low` и `none`, ~0,7–1,0 с
   (`docs/model-tuning.md`). Вернуть прежнего судью: `REVIEW_VERIFIER_MODEL: deepseek-v4-pro`.
