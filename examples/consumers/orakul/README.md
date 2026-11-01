@@ -13,3 +13,19 @@
 4. Исполняемый вендорный entry (`ops/pr-review.mjs` в гейте) больше не используется.
 5. После пина: оркестратор / swarm читает артефакт `*-swarm.json`
    (см. [docs/swarm.md](../../../docs/swarm.md)).
+6. Провайдер Orakul — OpenRouter (с 2026-10-15; замеры — [RFC 20](../../../proposals/20-rust-primary.md)
+   § 4–7). Ростер в шаге `Run AI review` (secret `OPENROUTER_API_KEY`):
+
+   ```yaml
+   LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+   LLM_BASE_URL: https://openrouter.ai/api/v1
+   MOA_SPECIALIST_MODELS: security:z-ai/glm-5.3-flash,correctness:deepseek/deepseek-v4.1-flash,architecture:deepseek/deepseek-v4.1-flash
+   MOA_AGGREGATOR: anthropic/claude-haiku-5.5
+   REVIEW_VERIFIER_MODEL: 'minimax/minimax-m3.1-flash:free'
+   REVIEW_VERIFIER_FALLBACK_MODEL: '~deepseek/deepseek-pro-latest'
+   LLM_MODEL_SETTINGS: '{"deepseek/deepseek-v4.1-flash":{"effort":"none"},"z-ai/glm-5.3-flash":{"effort":"high","maxTokens":12000},"minimax/minimax-m3.1-flash:free":{"effort":"high"}}'
+   ```
+
+   deepseek без рассуждения (на `low` — пустой ответ), glm с обязательным рассуждением
+   (`none` → 400), verifier на бесплатной модели с запасной: лимит `:free` не блокирует PR.
+   Ветки правок в Orakul — `fix/…` или `feat/…`: CI Orakul (`ci.yml`) других префиксов не ловит.

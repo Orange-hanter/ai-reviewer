@@ -3,7 +3,7 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
+last_updated: 2026-11-01
 ---
 
 # Интеграция в репозиторий-потребитель
@@ -16,7 +16,7 @@ last_updated: 2026-09-29
 ## 1. Пин версии
 
 ```
-ops/ai-reviewer-ref     # одна строка: тег (v0.2.0) или полный commit SHA
+ops/ai-reviewer-ref     # одна строка: тег (v0.7.0); SHA допустим, но тогда без Rust-бинарей — на JS-копиях
 ```
 
 Обновление версии движка = правка одной строки в PR: видно в диффе, откатывается ревертом.
@@ -58,6 +58,15 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
           ref: ${{ steps.pin.outputs.ref }}
           path: .ai-reviewer-engine
 
+      # Готовые Rust-бинари движка из релиза того же тега: sha256 + build provenance,
+      # без gh на раннере — пиненный gh. Тело шага — в examples/ci/pr-review.yml.
+      - name: Download engine binaries
+        env:
+          REF: ${{ steps.pin.outputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # … скопируйте тело шага из examples/ci/pr-review.yml
+
       - name: Run AI review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -86,11 +95,29 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
 Оба диспатчимых workflow потребителя (`ci.yml`, `pr-review.yml`) должны иметь
 `workflow_dispatch:` — feedback-бот дёргает их после мержа данных.
 
+### Ревью PR самого движка
+
+Репозиторий движка ревьюит свои PR тем же гейтом — [`.github/workflows/pr-review.yml`](../.github/workflows/pr-review.yml).
+Пина здесь нет: движок и код PR — один репозиторий, поэтому движок чекаутится по `base.sha`
+PR в `engine/` и собирается `cargo build --locked` из его `Cargo.lock`; профиль
+`.ai-reviewer.json` и его вход движок читает из той же base-ревизии
+(`REVIEW_PROFILE_TRUSTED=1` + `REVIEW_BASE_REF`). Код PR чекаутится рядом, в `pr/`, а venv graphify —
+в `$RUNNER_TEMP`: ни один исполняемый путь не лежит внутри чекаута PR, иначе закоммиченный
+через `git add -f` файл по этому пути исполнился бы с секретами. Код PR с ключом LLM не
+исполняется, и PR не ослабляет правила собственного ревью: правка движка включается со
+следующего PR после мержа.
+prescan выключен (нет eslint, ast-grep ruleset под TypeScript), blast-radius — по графу
+graphify. Провайдер — Ollama Cloud с отдельным ключом (секрет `OLLAMA_API_KEY`, квота не
+делится с потребителем), ростер — как в шаблоне; без секрета job пропускает ревью с
+предупреждением. PR из форков
+и черновики не ревьюятся.
+
 ## 5. Что нужно от репозитория
 
 | Компонент | Для чего | Если нет |
 |-----------|----------|----------|
-| `OLLAMA_API_KEY` (или `LLM_API_KEY`) | LLM-слой | ревью не запускается: soft-fail, exit `0` при любом `REVIEW_LLM_REQUIRED` |
+| `OLLAMA_API_KEY` (или `LLM_API_KEY` + `LLM_BASE_URL`, например OpenRouter) | LLM-слой | ревью не запускается: soft-fail, exit `0` при любом `REVIEW_LLM_REQUIRED` |
+| `gh` CLI на раннере | проверка provenance Rust-бинарей | шаблон ставит пиненный gh 2.102.0 (linux); на macOS-раннере без gh — JS-копии |
 | `node_modules` c eslint в `layout.appDir` | eslint prescan | prescan пропускается |
 | `@ast-grep/cli` | ast-grep prescan | пропускается |
 | Граф graphify | blast-radius | пустой blast-radius |

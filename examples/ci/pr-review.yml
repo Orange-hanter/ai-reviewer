@@ -2,6 +2,9 @@ name: PR Review (AI)
 
 # ШАБЛОН для репозитория-потребителя (скопируйте в .github/workflows/ и поправьте под себя).
 # Авто код-ревью PR: Ollama Cloud (MoA specialists → aggregator → verifier) + Graphify blast-radius.
+# Ростер моделей ниже — под Ollama Cloud (дефолты движка). Другой провайдер (OpenRouter и любой
+# OpenAI-совместимый): LLM_API_KEY + LLM_BASE_URL, свои параметры моделей — LLM_MODEL_SETTINGS,
+# запасной verifier — REVIEW_VERIFIER_FALLBACK_MODEL; рабочий пример — examples/consumers/orakul.
 # Ревью постится как event=COMMENT, но БЛОКИРУЕТ merge через exit 1 на консенсус-блокерах
 # critical/major (red required-check). Чтобы блок был обязательным — сделать этот job required-check.
 # Инфра-сбои по умолчанию не блокируют, но полный LLM-аутедж блокирует merge при REVIEW_LLM_REQUIRED=1 (default).
