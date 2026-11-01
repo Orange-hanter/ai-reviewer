@@ -4,12 +4,12 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-10-22
+last_updated: 2026-11-02
 ---
 
 # 🧭 Project Navigator: ai-reviewer
 
-> 📊 Meta: `{"version": "0.7.0", "last_updated": "2026-10-22", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
+> 📊 Meta: `{"version": "0.8.0", "last_updated": "2026-11-02", "context_depth": "L0", "repo": "/Users/dakh/Git/_my/ai-reviewer"}`
 
 > L0 для агента. Истина по гейту — architecture. Журнал разработки — `docs/dev/journal.md`. RFC — `proposals/`.
 
@@ -52,7 +52,7 @@ graph TD
 
 ### Журнал разработки
 - **Описание:** живой лог решений и прогонов; сессионные execution-log рядом.
-- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:e8feeba8d826`
+- **Ссылка:** `📁 docs/dev/journal.md | 🗃️ doc:docs_dev_journal_md | 🔑 sha:36fcc4980e40`
 - **Статус:** `🟢 VERIFIED`
 
 ### Сессия 2026-09-10 (RFC 08/09)
@@ -62,12 +62,12 @@ graph TD
 
 ### Архитектура гейта
 - **Описание:** поток router → prescan → MoA → verifier → FP → гейт.
-- **Ссылка:** `📁 docs/architecture.md | 🗃️ doc:docs_architecture_md | 🔑 sha:04237a60479b`
+- **Ссылка:** `📁 docs/architecture.md | 🗃️ doc:docs_architecture_md | 🔑 sha:922de54cd356`
 - **Статус:** `🟢 VERIFIED`
 
 ### Конфигурация
 - **Описание:** env, CLI, sidecar MCP, `REVIEW_MCP_EXTRA`, `uncommitted`.
-- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:68d2c3d0854c`
+- **Ссылка:** `📁 docs/configuration.md | 🗃️ doc:docs_configuration_md | 🔑 sha:997a3c2e2df1`
 - **Статус:** `🟢 VERIFIED`
 
 ### RFC 08 — MCP полного прогона
@@ -142,32 +142,32 @@ graph TD
 
 ### Индекс RFC
 - **Описание:** таблица решений 01–13.
-- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:c4b8f7ab543e`
+- **Ссылка:** `📁 proposals/README.md | 🗃️ doc:proposals_README_md | 🔑 sha:5dd8c6437898`
 - **Статус:** `🟢 VERIFIED`
 
 ### Changelog
 - **Описание:** SemVer-релизы и Unreleased.
-- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:d6a25a2e87c8`
+- **Ссылка:** `📁 CHANGELOG.md | 🗃️ doc:CHANGELOG_md | 🔑 sha:120e41c30fe3`
 - **Статус:** `🟢 VERIFIED`
 
 ### README
 - **Описание:** точка входа потребителя: установка, CLI, подключение к CI.
-- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:fcf8e487e567`
+- **Ссылка:** `📁 README.md | 🗃️ doc:README_md | 🔑 sha:6748443fb03e`
 - **Статус:** `🟢 VERIFIED`
 
 ### Индекс документации
 - **Описание:** все документы `docs/` и соседние README; сюда — всё, чего нет в этом реестре.
-- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:cbf05b5c312c`
+- **Ссылка:** `📁 docs/README.md | 🗃️ doc:docs_README_md | 🔑 sha:d092a31cf63c`
 - **Статус:** `🟢 VERIFIED`
 
 ### Бэклог
 - **Описание:** открытые направления и долг слияний вне планов cod-doc.
-- **Ссылка:** `📁 docs/backlog.md | 🗃️ doc:docs_backlog_md | 🔑 sha:cd61791fe667`
+- **Ссылка:** `📁 docs/backlog.md | 🗃️ doc:docs_backlog_md | 🔑 sha:de2540054c46`
 - **Статус:** `🟢 VERIFIED`
 
 ### Стандарт агента
 - **Описание:** границы модулей, DI, fail-open, процесс RFC и релиза.
-- **Ссылка:** `📁 CLAUDE.md | 🗃️ doc:CLAUDE_md | 🔑 sha:f6c410eaae6c`
+- **Ссылка:** `📁 CLAUDE.md | 🗃️ doc:CLAUDE_md | 🔑 sha:e50a8af0c0a6`
 - **Статус:** `🟢 VERIFIED`
 
 ## 4. ⚡ Quick Actions & Handoffs
