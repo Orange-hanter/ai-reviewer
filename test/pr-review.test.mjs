@@ -169,7 +169,7 @@ test('Graphify: пустой blast-radius различает stale graph, нер
   assert.equal(metrics.skip_reasons.graph_stale, 1);
   assert.equal(metrics.skip_reason, 'mixed');
   // PLAT-084: имя неразрешённого символа и причина попадают в метрики плана
-  assert.deepEqual(metrics.unresolved_symbols, [{ symbol: 'unresolved', kind: 'ambiguous', candidates: 0, in_pr: null }]);
+  assert.deepEqual(metrics.unresolved_symbols, [{ symbol: 'unresolved', kind: 'not_found', reply: 'no_unique_match', candidates: 0, in_pr: null }]);
   assert.ok(calls.some(([bin, ...args]) => bin === 'git' && args.includes('-C')), 'git -C для freshness');
   assert.ok(calls.some(([bin, ...args]) => bin === 'gf' && args.includes('--depth') && args.includes('2')), 'передаём --depth');
 });
@@ -2239,6 +2239,7 @@ test('Graphify: unresolved_symbols различает омоним вне PR и 
       { id: 'a_round2', label: 'round2()', source_file: 'app/a.ts' },
       { id: 'b_round2', label: 'round2()', source_file: 'app/b.ts' },
       { id: 'c_round2', label: 'round2()', source_file: 'app/c.ts' },
+      { id: 'lone', label: 'loneSym()', source_file: 'app/z.ts' },
     ],
     links: [],
   });
@@ -2253,10 +2254,12 @@ test('Graphify: unresolved_symbols различает омоним вне PR и 
     access: async () => {},
   });
   // два омонима в файлах PR — разрешение по файлу неоднозначно, символ остаётся неразрешённым
-  const { metrics } = await client.buildBlastRadius(['round2', 'ghostField'], { changedPaths: ['app/a.ts', 'app/b.ts'] });
+  const { metrics } = await client.buildBlastRadius(['round2', 'ghostField', 'loneSym'], { changedPaths: ['app/a.ts', 'app/b.ts'] });
   assert.deepEqual(metrics.unresolved_symbols, [
-    { symbol: 'round2', kind: 'ambiguous', candidates: 3, in_pr: 2 },
-    { symbol: 'ghostField', kind: 'not_found', candidates: 0, in_pr: 0 },
+    { symbol: 'round2', kind: 'ambiguous', reply: 'no_unique_match', candidates: 3, in_pr: 2 },
+    { symbol: 'ghostField', kind: 'not_found', reply: 'no_node', candidates: 0, in_pr: 0 },
+    // узел в индексе один, а graphify ответил «нет узла» — kind по индексу, reply по CLI
+    { symbol: 'loneSym', kind: 'unique_in_index', reply: 'no_node', candidates: 1, in_pr: 0 },
   ]);
-  assert.equal(metrics.skip_reasons.symbol_unresolved, 2);
+  assert.equal(metrics.skip_reasons.symbol_unresolved, 3);
 });
