@@ -3,12 +3,18 @@ type: journal
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
+last_updated: 2026-11-02
 ---
 
 # Changelog
 
 ## Unreleased
+
+## 0.8.0 — verifier mimo-v2.6-pro по умолчанию, blast-находки только о затронутых символах — 2026-11-02
+
+Пин потребителя — `v0.8.0`. Формат футера sticky, namespace маркеров, контракты `swarm` /
+`export` / `structure` с `v0.7.0` не менялись. Минорная версия — из-за смены verifier'а по
+умолчанию: он решает, какие находки доходят до гейта. Откат — `REVIEW_VERIFIER_MODEL: deepseek-v4-pro`.
 
 - **Наблюдаемость blast-radius: имена неразрешённых символов** — метрики плана
   (`blast_radius` в observability JSONL) получили `unresolved_symbols`: до 30 записей
