@@ -86,6 +86,17 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
 Оба диспатчимых workflow потребителя (`ci.yml`, `pr-review.yml`) должны иметь
 `workflow_dispatch:` — feedback-бот дёргает их после мержа данных.
 
+### Ревью PR самого движка
+
+Репозиторий движка ревьюит свои PR тем же гейтом — [`.github/workflows/pr-review.yml`](../.github/workflows/pr-review.yml).
+Пина здесь нет: движок и код PR — один репозиторий, поэтому движок чекаутится по `base.sha`
+PR в `.ai-reviewer-engine` и собирается `cargo build --locked` из его `Cargo.lock`; профиль —
+`.ai-reviewer.json` той же base-ревизии. Код PR с `OLLAMA_API_KEY` не исполняется, и PR не
+ослабляет правила собственного ревью: правка движка включается со следующего PR после мержа.
+prescan выключен (нет eslint, ast-grep ruleset под TypeScript), blast-radius — по графу
+graphify. Без секрета `OLLAMA_API_KEY` job пропускает ревью с предупреждением; PR из форков
+и черновики не ревьюятся.
+
 ## 5. Что нужно от репозитория
 
 | Компонент | Для чего | Если нет |

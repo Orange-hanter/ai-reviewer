@@ -1,0 +1,206 @@
+name: PR Review (AI, self)
+
+# Ревью PR самого движка его же гейтом (dogfood). Отличие от шаблона потребителя
+# examples/ci/pr-review.yml — откуда берётся движок:
+#
+#   - у потребителя движок чекаутится из ОТДЕЛЬНОГО репозитория по пину из base-ветки;
+#   - здесь движок и код PR — один репозиторий, поэтому движок чекаутится по base.sha PR
+#     в .ai-reviewer-engine и собирается cargo из ЕГО Cargo.lock. Код PR (в т.ч. правки
+#     bin/, lib/, rust/, .ai-reviewer.json) с OLLAMA_API_KEY в env не исполняется никогда:
+#     PR, меняющий движок, ревьюится движком base-ветки, новое поведение включится после мержа.
+#
+# Профиль — .ai-reviewer.json тоже из base: PR не может ослабить правила собственного ревью.
+# prescan выключен: у пакета нет node_modules/eslint-конфига, а поставляемый ast-grep ruleset
+# написан под TypeScript и на .mjs не срабатывает (docs/model-tuning.md, «Локальный прогон»).
+# Сигнал blastCaller даёт code graph (graphify), собранный по коду PR — парсинг, не исполнение.
+#
+# Ревью постится как event=COMMENT и выходит 1 на подтверждённых блокерах (red check).
+# Обязательным для merge его делает только required-check в branch protection.
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize, reopened]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Номер PR для ручного ревью'
+        required: true
+
+concurrency:
+  group: pr-review-self-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: AI code review (self)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30   # 25 у шаблона + сборка движка cargo на холодном кэше
+    # Черновики, PR от ботов и PR из форков пропускаем: у форка нет секретов, а токен read-only.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.draft == false &&
+       github.event.pull_request.user.type != 'Bot' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+
+    steps:
+      - name: Resolve PR and engine ref
+        id: pr
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_EVENT: ${{ github.event.pull_request.number }}
+          PR_INPUT: ${{ inputs.pr_number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HAS_KEY: ${{ secrets.OLLAMA_API_KEY != '' }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$HAS_KEY" != true ]; then
+            echo "::warning::секрет OLLAMA_API_KEY не задан — ревью пропущено (gh secret set OLLAMA_API_KEY)"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT" = workflow_dispatch ]; then
+            PR="$PR_INPUT"
+            [[ "$PR" =~ ^[0-9]+$ ]] || { echo "invalid pr_number: $PR"; exit 1; }
+            BASE_SHA="$(gh api "repos/$REPO/pulls/$PR" -q .base.sha)"
+            CHECKOUT="refs/pull/$PR/head"
+          else
+            PR="$PR_EVENT"
+            CHECKOUT=""   # merge-коммит PR — дефолт actions/checkout для pull_request
+          fi
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "invalid base sha: $BASE_SHA"; exit 1; }
+          echo "→ PR #$PR, движок ai-reviewer@$BASE_SHA (base)"
+          {
+            echo "run=true"
+            echo "pr=$PR"
+            echo "base=$BASE_SHA"
+            echo "checkout=$CHECKOUT"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        if: steps.pr.outputs.run == 'true'
+        with:
+          ref: ${{ steps.pr.outputs.checkout }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        if: steps.pr.outputs.run == 'true'
+        with:
+          node-version: '24'
+
+      - uses: actions/setup-python@v7
+        if: steps.pr.outputs.run == 'true'
+        with:
+          python-version: '3.11'
+
+      - name: Cache graphify venv
+        if: steps.pr.outputs.run == 'true'
+        uses: actions/cache@v6
+        with:
+          path: .graphify/venv
+          key: gf-venv-${{ runner.os }}-py311-graphifyy-0.9.87-v1
+
+      # Граф строится ДО чекаута движка: иначе в него попала бы копия .ai-reviewer-engine.
+      # Упавший граф ревью не роняет: blast-radius пуст, REVIEW_BLAST_REQUIRED=0 (дефолт).
+      - name: Build code graph (graphify, pinned)
+        if: steps.pr.outputs.run == 'true'
+        continue-on-error: true
+        env:
+          GRAPHIFY_OUT: .graphify/graphify-out
+          GRAPHIFY_MAX_WORKERS: '4'
+          GRAPHIFY_NO_TIPS: '1'
+        run: |
+          if ! .graphify/venv/bin/graphify --version >/dev/null 2>&1; then
+            rm -rf .graphify/venv
+            python -m venv .graphify/venv
+            .graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.87
+          fi
+          .graphify/venv/bin/graphify update . --force
+
+      - name: Checkout engine at base
+        if: steps.pr.outputs.run == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.pr.outputs.base }}
+          path: .ai-reviewer-engine
+          persist-credentials: false
+
+      - name: Cache engine cargo build
+        if: steps.pr.outputs.run == 'true'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .ai-reviewer-engine/rust/target
+          key: engine-cargo-${{ runner.os }}-${{ hashFiles('.ai-reviewer-engine/rust/Cargo.lock') }}-${{ steps.pr.outputs.base }}
+          restore-keys: |
+            engine-cargo-${{ runner.os }}-${{ hashFiles('.ai-reviewer-engine/rust/Cargo.lock') }}-
+
+      # Бинари в .ai-reviewer-engine/rust/target/debug — первый путь поиска lib/rust-bin.mjs.
+      # Сборка не удалась — движок идёт на deprecated JS-копиях (инфра-сбой merge не блокирует).
+      - name: Build engine (cargo, base Cargo.lock)
+        if: steps.pr.outputs.run == 'true'
+        continue-on-error: true
+        working-directory: .ai-reviewer-engine/rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo build --locked
+
+      - name: Run AI review
+        if: steps.pr.outputs.run == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          REVIEW_PROFILE: .ai-reviewer-engine/.ai-reviewer.json
+          REVIEW_MODE: moa
+          MOA_REFERENCE_MODELS: kimi-k2.7-code,glm-5.3,glm-5.3-flash
+          MOA_SPECIALIST_MODELS: security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3
+          MOA_AGGREGATOR: minimax-m3
+          MOA_REFERENCE_TEMPERATURE: '0.3'
+          MOA_AGGREGATOR_TEMPERATURE: '0.4'
+          OLLAMA_MODELS_FALLBACK: deepseek-v4.1-flash
+          REVIEW_AUTO_TRIAGE: '1'
+          REVIEW_INLINE_ON: critical,major
+          REVIEW_BLOCK_ON: critical,major
+          REVIEW_BLOCK_SINGLE: critical
+          REVIEW_CONSENSUS: '1'
+          REVIEW_CONFIDENCE_MIN: '0.8'
+          REVIEW_VERIFIER: '1'
+          REVIEW_VERIFIER_MODEL: deepseek-v4-pro
+          REVIEW_VERIFIER_STRICT: '1'
+          REVIEW_ROUTER: '1'
+          REVIEW_PRESCAN: '0'
+          GRAPHIFY_BIN: .graphify/venv/bin/graphify
+          GRAPH: .graphify/graphify-out/graph.json
+          GRAPHIFY_REPORT: .graphify/graphify-out/GRAPH_REPORT.md
+          REVIEW_OBSERVABILITY: '1'
+          REVIEW_EXPORT: '1'
+          REVIEW_CHUNK_BYTES: '56000'
+          REVIEW_CONCURRENCY: '10'
+          REVIEW_MAX_CHUNKS: '40'
+          REVIEW_LLM_TIMEOUT_MS: '240000'
+          REVIEW_TIME_BUDGET_MIN: '20'
+          REVIEW_PROVIDER_CONCURRENCY: '12'
+          REVIEW_PROVIDER_PER_MODEL: '6'
+        run: node .ai-reviewer-engine/bin/pr-review.mjs
+
+      - name: Upload review artifacts
+        if: always() && steps.pr.outputs.run == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-review-self-${{ steps.pr.outputs.pr }}
+          path: |
+            .ai-review/observability/
+            .ai-review/export/
+          if-no-files-found: ignore
+          retention-days: 30
