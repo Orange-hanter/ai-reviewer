@@ -2263,3 +2263,33 @@ test('Graphify: unresolved_symbols различает омоним вне PR и 
   ]);
   assert.equal(metrics.skip_reasons.symbol_unresolved, 3);
 });
+
+test('Graphify: unresolved_symbols — повтор по id омонима и длинное имя (PLAT-084, ревью #75)', async () => {
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const long = 'x'.repeat(130);
+  const graphJson = JSON.stringify({
+    nodes: [
+      { id: 'a_fmt', label: 'fmt()', source_file: 'app/a.ts' },
+      { id: 'b_fmt', label: 'fmt()', source_file: 'app/b.ts' },
+    ],
+    links: [],
+  });
+  const execFileP = async (bin, args) => {
+    if (bin === 'git') return { stdout: '12345678\n' };
+    if (args[1] === 'fmt') return { stdout: 'No unique node match for fmt\n' };
+    return { stdout: `No node matching ${args[1]}\n` };   // и повтор по id 'a_fmt', и длинное имя
+  };
+  const client = createGraphifyClient(cfg, {
+    execFileP,
+    readFile: async (path) => (String(path).endsWith('graph.json') ? graphJson : '- Built from commit: `12345678`\n'),
+    access: async () => {},
+  });
+  const { metrics } = await client.buildBlastRadius(['fmt', long], { changedPaths: ['app/a.ts'] });
+  assert.deepEqual(metrics.unresolved_symbols, [
+    { symbol: 'fmt', kind: 'ambiguous', reply: 'no_node', candidates: 2, in_pr: 1, retried_id: 'a_fmt' },
+    { symbol: 'x'.repeat(120), truncated: true, length: 130, kind: 'not_found', reply: 'no_node', candidates: 0, in_pr: 0 },
+  ]);
+});
