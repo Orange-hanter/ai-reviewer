@@ -5,9 +5,14 @@ name: PR Review (AI, self)
 #
 #   - у потребителя движок чекаутится из ОТДЕЛЬНОГО репозитория по пину из base-ветки;
 #   - здесь движок и код PR — один репозиторий, поэтому движок чекаутится по base.sha PR
-#     в .ai-reviewer-engine и собирается cargo из ЕГО Cargo.lock. Код PR (в т.ч. правки
-#     bin/, lib/, rust/, .ai-reviewer.json) с OLLAMA_API_KEY в env не исполняется никогда:
-#     PR, меняющий движок, ревьюится движком base-ветки, новое поведение включится после мержа.
+#     в engine/ и собирается cargo из ЕГО Cargo.lock. Код PR (в т.ч. правки bin/, lib/,
+#     rust/, .ai-reviewer.json) с OLLAMA_API_KEY в env не исполняется никогда: PR, меняющий
+#     движок, ревьюится движком base-ветки, новое поведение включится после мержа.
+#
+# Код PR лежит в pr/, рядом с engine/, а не в корне workspace: ни один исполняемый путь
+# (движок, бинари cargo, venv graphify) не находится внутри чекаута PR. Иначе PR, закоммитивший
+# через `git add -f` файл по такому пути (например .graphify/venv/bin/graphify), исполнил бы
+# его с секретами прогона. venv graphify — в $RUNNER_TEMP по той же причине.
 #
 # Профиль — .ai-reviewer.json тоже из base: PR не может ослабить правила собственного ревью.
 # prescan выключен: у пакета нет node_modules/eslint-конфига, а поставляемый ast-grep ruleset
@@ -67,6 +72,9 @@ jobs:
           if [ "$EVENT" = workflow_dispatch ]; then
             PR="$PR_INPUT"
             [[ "$PR" =~ ^[0-9]+$ ]] || { echo "invalid pr_number: $PR"; exit 1; }
+            # Ручной запуск идёт мимо job-фильтра: PR из форка с секретами не ревьюим.
+            HEAD_REPO="$(gh api "repos/$REPO/pulls/$PR" -q .head.repo.full_name)"
+            [ "$HEAD_REPO" = "$REPO" ] || { echo "PR #$PR из форка ($HEAD_REPO) — ревью с секретами запрещено"; exit 1; }
             BASE_SHA="$(gh api "repos/$REPO/pulls/$PR" -q .base.sha)"
             CHECKOUT="refs/pull/$PR/head"
           else
@@ -82,11 +90,21 @@ jobs:
             echo "checkout=$CHECKOUT"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v7
+      - name: Checkout PR
         if: steps.pr.outputs.run == 'true'
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.pr.outputs.checkout }}
+          path: pr
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout engine at base
+        if: steps.pr.outputs.run == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.pr.outputs.base }}
+          path: engine
           persist-credentials: false
 
       - uses: actions/setup-node@v7
@@ -103,33 +121,26 @@ jobs:
         if: steps.pr.outputs.run == 'true'
         uses: actions/cache@v6
         with:
-          path: .graphify/venv
+          path: ${{ runner.temp }}/graphify-venv
           key: gf-venv-${{ runner.os }}-py311-graphifyy-0.9.87-v1
 
-      # Граф строится ДО чекаута движка: иначе в него попала бы копия .ai-reviewer-engine.
       # Упавший граф ревью не роняет: blast-radius пуст, REVIEW_BLAST_REQUIRED=0 (дефолт).
       - name: Build code graph (graphify, pinned)
         if: steps.pr.outputs.run == 'true'
         continue-on-error: true
+        working-directory: pr
         env:
+          GF: ${{ runner.temp }}/graphify-venv
           GRAPHIFY_OUT: .graphify/graphify-out
           GRAPHIFY_MAX_WORKERS: '4'
           GRAPHIFY_NO_TIPS: '1'
         run: |
-          if ! .graphify/venv/bin/graphify --version >/dev/null 2>&1; then
-            rm -rf .graphify/venv
-            python -m venv .graphify/venv
-            .graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.87
+          if ! "$GF/bin/graphify" --version >/dev/null 2>&1; then
+            rm -rf "$GF"
+            python -m venv "$GF"
+            "$GF/bin/pip" install --quiet --disable-pip-version-check graphifyy==0.9.87
           fi
-          .graphify/venv/bin/graphify update . --force
-
-      - name: Checkout engine at base
-        if: steps.pr.outputs.run == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ steps.pr.outputs.base }}
-          path: .ai-reviewer-engine
-          persist-credentials: false
+          "$GF/bin/graphify" update . --force
 
       - name: Cache engine cargo build
         if: steps.pr.outputs.run == 'true'
@@ -138,17 +149,17 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            .ai-reviewer-engine/rust/target
-          key: engine-cargo-${{ runner.os }}-${{ hashFiles('.ai-reviewer-engine/rust/Cargo.lock') }}-${{ steps.pr.outputs.base }}
+            engine/rust/target
+          key: engine-cargo-${{ runner.os }}-${{ hashFiles('engine/rust/Cargo.lock') }}-${{ steps.pr.outputs.base }}
           restore-keys: |
-            engine-cargo-${{ runner.os }}-${{ hashFiles('.ai-reviewer-engine/rust/Cargo.lock') }}-
+            engine-cargo-${{ runner.os }}-${{ hashFiles('engine/rust/Cargo.lock') }}-
 
-      # Бинари в .ai-reviewer-engine/rust/target/debug — первый путь поиска lib/rust-bin.mjs.
+      # Бинари в engine/rust/target/debug — первый путь поиска lib/rust-bin.mjs.
       # Сборка не удалась — движок идёт на deprecated JS-копиях (инфра-сбой merge не блокирует).
       - name: Build engine (cargo, base Cargo.lock)
         if: steps.pr.outputs.run == 'true'
         continue-on-error: true
-        working-directory: .ai-reviewer-engine/rust
+        working-directory: engine/rust
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
@@ -156,11 +167,12 @@ jobs:
 
       - name: Run AI review
         if: steps.pr.outputs.run == 'true'
+        working-directory: pr
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ steps.pr.outputs.pr }}
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
-          REVIEW_PROFILE: .ai-reviewer-engine/.ai-reviewer.json
+          REVIEW_PROFILE: ${{ github.workspace }}/engine/.ai-reviewer.json
           REVIEW_MODE: moa
           MOA_REFERENCE_MODELS: kimi-k2.7-code,glm-5.3,glm-5.3-flash
           MOA_SPECIALIST_MODELS: security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3
@@ -179,7 +191,7 @@ jobs:
           REVIEW_VERIFIER_STRICT: '1'
           REVIEW_ROUTER: '1'
           REVIEW_PRESCAN: '0'
-          GRAPHIFY_BIN: .graphify/venv/bin/graphify
+          GRAPHIFY_BIN: ${{ runner.temp }}/graphify-venv/bin/graphify
           GRAPH: .graphify/graphify-out/graph.json
           GRAPHIFY_REPORT: .graphify/graphify-out/GRAPH_REPORT.md
           REVIEW_OBSERVABILITY: '1'
@@ -191,7 +203,7 @@ jobs:
           REVIEW_TIME_BUDGET_MIN: '20'
           REVIEW_PROVIDER_CONCURRENCY: '12'
           REVIEW_PROVIDER_PER_MODEL: '6'
-        run: node .ai-reviewer-engine/bin/pr-review.mjs
+        run: node "$GITHUB_WORKSPACE/engine/bin/pr-review.mjs"
 
       - name: Upload review artifacts
         if: always() && steps.pr.outputs.run == 'true'
@@ -200,7 +212,7 @@ jobs:
         with:
           name: pr-review-self-${{ steps.pr.outputs.pr }}
           path: |
-            .ai-review/observability/
-            .ai-review/export/
+            pr/.ai-review/observability/
+            pr/.ai-review/export/
           if-no-files-found: ignore
           retention-days: 30
