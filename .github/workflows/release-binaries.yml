@@ -34,7 +34,7 @@ jobs:
           # со старым glibc, а self-hosted раннеры обновляют редко.
           - { target: linux-x64, os: ubuntu-22.04 }
           - { target: linux-arm64, os: ubuntu-22.04-arm }
-          - { target: darwin-arm64, os: macos-14 }
+          - { target: darwin-arm64, os: macos-15 }
     env:
       TAG: ${{ github.event.release.tag_name || github.ref_name }}
       REF_TYPE: ${{ github.event_name == 'release' && 'tag' || github.ref_type }}
