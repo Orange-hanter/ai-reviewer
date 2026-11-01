@@ -3,7 +3,7 @@ type: architecture
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
+last_updated: 2026-11-01
 last_reviewed: 2026-09-29
 ---
 
@@ -67,9 +67,9 @@ flowchart TB
 | `lib/engine.mjs` | MoA и consensus, fallback моделей, дедлайн прогона |
 | `lib/chunk-routing.mjs` | Чанк без исполняемого файла → один агрегатор без жюри ([RFC 04](../proposals/04-token-economy.md)) |
 | `lib/specialist-merge.mjs` | Роли на одной модели — одним вызовом и разбор ответа обратно по ролям (RFC 04) |
-| `lib/llm.mjs` | OpenAI-compatible чат: SSE, JSON-mode, ретраи, адаптивный семафор по 429 (`lib/ollama.mjs` — deprecated re-export) |
+| `lib/llm.mjs` | Клиент LLM: семафоры и AIMD по 429, учёт цены, отказ по исчерпанной квоте, `LLM_MODEL_SETTINGS`; HTTP, SSE и каскад ретраев — в бинаре `rust/src/llm.rs`, `rust/src/llm/cascade.rs` (`lib/ollama.mjs` — deprecated re-export) |
 | `lib/cost.mjs` | Учёт токенов и оценка стоимости прогона (`REVIEW_PRICE_JSON`) |
-| `lib/prompt.mjs` | Системные промпты: aggregator, advisors, verifier |
+| `lib/prompt.mjs` | Обёртка над `rust/src/prompt.rs`: системные промпты aggregator, advisors, verifier — на английском, вывод на русском; JS-копия текстов deprecated (RFC 20) |
 | `lib/prompt-layout.mjs` | Раскладка сообщений под префиксный кэш: общая рамка и контекст чанка до инструкции роли (RFC 04) |
 | `lib/specialists.mjs` | Роли advisors + refutation жюри |
 | `lib/verifier.mjs` | Pass B: доказать / отклонить / понизить кандидатов в блокеры |
@@ -90,15 +90,22 @@ flowchart TB
 | `cursor-plugin/` | Cursor Plugin: команды, skill, rule; оба MCP. Не гейт |
 | `lib/observability.mjs`, `lib/metrics.mjs` | JSONL-лог прогонов и сводка по нему |
 | `lib/eval.mjs` | Golden fixtures без LLM |
-| `rust/` | Rust-порт части `lib/*.mjs`: обёртка зовёт бинарь из `rust/target/debug/`, при отсутствии бинаря — JS (см. ниже) |
+| `rust/` | Rust-порт части `lib/*.mjs`, основная реализация с 0.6 (RFC 20): обёртка находит бинарь через `lib/rust-bin.mjs`, при отсутствии — deprecated JS-копия (см. ниже) |
 
 **Rust-слой.** Модули `diff`, `router`, `findings`, `engine`, `llm`, `prompt`, `specialists`,
 `verifier`, `report`, `github`, `export`, `actionability`, `metrics`, `config`/`profile`,
-`json` и `structure-*` — тонкие JS-обёртки над бинарями в `rust/target/debug/` (JSON на stdin).
-Бинаря нет — работает эталонный JS; `AI_REVIEWER_<MOD>_BIN` переопределяет путь,
+`json` и `structure-*` — тонкие JS-обёртки над бинарями (JSON на stdin). Путь к бинарю —
+`lib/rust-bin.mjs`: `AI_REVIEWER_RUST_BIN_DIR` → `rust/target/debug` → `rust/target/release` →
+`rust/bin` (архив релиза у потребителя). С 0.6 Rust — основная реализация, JS-копии deprecated
+([RFC 20](../proposals/20-rust-primary.md)): бинаря нет — работает JS-копия без новых правок
+(каскад ретраев, промпты 0.6+, `LLM_MODEL_SETTINGS` она не знает); `AI_REVIEWER_<MOD>_BIN` переопределяет путь,
 `AI_REVIEWER_<MOD>_FORCE_JS=1` включает чистый JS. Расхождение сторон ловят скрипты
 `rust/parity/*.parity.mjs` (`npm run check:parity`). Оркестрация (`pipeline.mjs`,
 `chunk-routing`, `specialist-merge`, `incremental`) остаётся в JS.
+
+**Walkthrough отчёта** — описания изменений от жюри, а не вердикт: `summary` жюри описывает
+свою часть PR, `pickAggregateSummary` (`lib/engine.mjs`) склеивает до трёх разных описаний
+кодовых чанков. Вердикт выносит только гейт (баннер блока): он видит все части и verifier.
 
 ## Ключевые решения
 
