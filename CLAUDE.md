@@ -126,8 +126,8 @@ majors (`source === BLAST_FINDING_SOURCE`) — soft: без verifier не бло
 `rust/` — порт части `lib/*.mjs` (diff, router, findings, engine, llm, prompt, specialists,
 verifier, report, github, export, actionability, metrics, config/profile, json, structure-*).
 JS-модуль остаётся обёрткой с тем же API: зовёт бинарь (JSON на stdin), найденный
-`lib/rust-bin.mjs` (`rust/target/debug` → `release` → `rust/bin` из архива релиза), а без
-бинаря работает эталонный JS. Новый путь к бинарю — только через `defaultRustBin`
+`lib/rust-bin.mjs` (`AI_REVIEWER_RUST_BIN_DIR` → `rust/target/debug` → `release` → `rust/bin` из
+архива релиза), а без бинаря работает deprecated JS-копия. Новый путь к бинарю — только через `defaultRustBin`
 (`test/rust-bin.test.mjs` это держит). `AI_REVIEWER_<MOD>_BIN` — путь к бинарю,
 `AI_REVIEWER_<MOD>_FORCE_JS=1` — чистый JS. Оркестрация (`pipeline.mjs`, chunk-routing,
 specialist-merge, incremental) — только JS.
@@ -136,9 +136,12 @@ specialist-merge, incremental) — только JS.
 Новое поведение портированного модуля пишется только в Rust; JS-копию не правь (кроме
 механической правки общего с оркестрацией контракта) и не удаляй до аудита «ничего не
 потеряно». Разошедшиеся намеренно тексты помечаются в parity как rust-owned, а не
-подгоняются. Уже разошлись: каскад ретраев LLM (`rust/src/llm/cascade.rs`) и системные
-промпты (`rust/src/prompt.rs`, английские; вывод — на русском). `rust/parity/*.parity.mjs`
-(`npm run check:parity`) сверяют собранный бинарь с JS и без `cargo build` сходятся тривиально.
+подгоняются. Уже разошлись: каскад ретраев LLM (`rust/src/llm/cascade.rs`), системные
+промпты (`rust/src/prompt.rs`, английские; вывод — на русском); только в Rust —
+`LLM_MODEL_SETTINGS`, `REVIEW_VERIFIER_FALLBACK_MODEL`, область квоты (`quota_scope`).
+`rust/parity/*.parity.mjs` (`npm run check:parity`) сверяют собранный бинарь с JS и без
+`cargo build` сходятся тривиально. Пороги латентности в тестах умножаются на
+`AI_REVIEWER_TEST_TIMING_SLACK` (`test/helpers/timing.mjs`; релизный смоук ставит `3`).
 
 ## Structure-контур
 

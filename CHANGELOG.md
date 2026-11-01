@@ -13,6 +13,19 @@ last_updated: 2026-09-10
 - **Verifier по умолчанию** — `mimo-v2.6-pro` вместо `deepseek-v4-pro` (`REVIEW_VERIFIER_MODEL`,
   JS и Rust; шаблон `examples/ci/pr-review.yml`; пробник). JSON ok на `low` и `none`, ~0,7–1,0 с
   (`docs/model-tuning.md`). Вернуть прежнего судью: `REVIEW_VERIFIER_MODEL: deepseek-v4-pro`.
+### Изменено — `graphifyy` 0.9.87 → 0.9.99
+
+- Шаблон CI (`examples/ci/pr-review.yml`) и `docs/model-tuning.md`: пин и ключ кэша venv.
+  Вывод `graphify affected` на одном `graph.json` под 0.9.87 и 0.9.99 побайтно совпал
+  (5 символов, Orakul `7ada7043`), строка `Built from commit` в `GRAPH_REPORT.md` на месте.
+  Замеры RFC 21 сделаны на 0.9.87 и не пересчитывались.
+### Добавлено — ревью PR самого движка в CI
+
+`.github/workflows/pr-review.yml`: PR в `main` ревьюятся движком base-ревизии (чекаут по
+`base.sha`, сборка cargo по его `Cargo.lock`, профиль `.ai-reviewer.json` из base), Ollama
+Cloud с отдельным ключом, ростер — как в шаблоне потребителя. Нужен секрет `OLLAMA_API_KEY`;
+без него ревью пропускается.
+Разбор — `docs/integration.md`, «Ревью PR самого движка».
 
 ### Исправлено — blast-находки о символах, которых PR не трогал (BLV-011, [RFC 21](proposals/21-blast-verification.md))
 

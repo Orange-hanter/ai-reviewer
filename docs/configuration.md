@@ -3,7 +3,7 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
+last_updated: 2026-11-01
 ---
 
 # Конфигурация
@@ -68,7 +68,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_TRUSTED_AUTHORS` | `github-actions[bot]` | Логины через запятую, от которых движок пишет sticky и inline. Свой комментарий = маркер **и** автор из списка (при наличии `user.type` — только `Bot`); комментарий с маркером от другого автора не читается как прошлый прогон, не перезаписывается и не удаляется. Если отчёты пишет PAT или GitHub App — укажите его логин. Пустое значение — доверять любому автору (прежнее поведение, откат). Алиас — `REVIEW_FEEDBACK_TRUSTED_AUTHORS` |
 | `GH_TOKEN` | — | Только gold-загрузчик ([`lib/gold-fetch.mjs`](../lib/gold-fetch.mjs)): после `GITHUB_TOKEN`, перед `gh auth token`; без токена — анонимно |
 
-## Ollama / LLM
+## LLM
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
@@ -91,13 +91,20 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 | `REVIEW_TEMPERATURE` | `0.4` | Consensus mode |
 | `REVIEW_SEED` | `7` | Детерминизм (где поддерживается) |
 | `REVIEW_REASONING_EFFORT` | `low` | Reasoning effort advisor-вызовов (`none` — быстрее) |
-| `REVIEW_AGGREGATOR_REASONING_EFFORT` | `low` | Reasoning effort ПЕРВОЙ попытки JSON-вызовов (агрегатор жюри, verifier). Рассуждение провайдер считает completion-токенами: замер — 1903 completion-токена на находку у `minimax-m3` против 474 у `sonnet`, вся разница — reasoning. Каскад ретраев `chatJson` (пустой content / оборванный JSON) по-прежнему уходит в `none` и этой ручкой не управляется |
+| `REVIEW_AGGREGATOR_REASONING_EFFORT` | `low` | Reasoning effort ПЕРВОЙ попытки JSON-вызовов (агрегатор жюри, verifier). Рассуждение провайдер считает completion-токенами: замер — 1903 completion-токена на находку у `minimax-m3` против 474 у `sonnet`, вся разница — reasoning. Каскад ретраев `chatJson` (пустой content / оборванный JSON) по-прежнему уходит в `none` и этой ручкой не управляется С 0.6 каскад живёт в Rust (`rust/src/llm/cascade.rs`): после `400 Reasoning is mandatory` на `none` — повтор на `low` с `max_tokens + 8000`; если первая попытка уже на `none` (`LLM_MODEL_SETTINGS`), одинаковый повтор не делается |
 | `LLM_MODEL_SETTINGS` | — | Индивидуальные настройки моделей, JSON `{"<модель>": {…}}` (RFC 20, § 6). Поля: `effort` — effort первой попытки prose-вызовов, а без `jsonEffort` и JSON-вызовов (`none\|minimal\|low\|medium\|high`); `jsonEffort` — effort JSON-вызовов (жюри, verifier); `maxTokens` — бюджет prose-вызова; `provider` — маршрутизация провайдеров OpenRouter (`order`, `ignore`, `quantizations`, `allow_fallbacks`…), уходит в запрос как есть. Модель без настроек ведёт себя по глобальным `REVIEW_*_REASONING_EFFORT`. Неизвестное поле или недопустимое значение не роняет прогон, а пишется в лог. Работает только с Rust-бинарём `llm`. Пример: `{"deepseek/deepseek-v4.1-flash":{"effort":"none"},"z-ai/glm-5.3-flash":{"effort":"low"}}` |
 | `REVIEW_PROMPT_LAYOUT` | `legacy` | `shared-prefix` — общая рамка и контекст чанка первыми, инструкция роли последней: все роли чанка делят побайтово одинаковый префикс, который провайдер может отдать из кэша. **Замер `pr-review-probe-cache` показал, что Ollama Cloud скидки за общий префикс не даёт** — включать имеет смысл только на провайдере с префиксным кэшем, проверив тем же пробником |
-| `REVIEW_HTTP_RETRIES` | `3` | Retry GitHub + Ollama |
+| `REVIEW_HTTP_RETRIES` | `3` | Retry GitHub + LLM |
 | `REVIEW_LLM_TIMEOUT_MS` | `420000` | Таймаут одной попытки LLM. 240000 обрывали половину prose-вызовов (медиана kimi — 331 с): вход оплачен, ответа нет |
 | `REVIEW_PROVIDER_CONCURRENCY` | `12` | Глобальный cap параллельных LLM-вызовов (AIMD по 429) |
 | `REVIEW_PROVIDER_PER_MODEL` | `6` | Cap параллельных вызовов на модель |
+
+**Исчерпанная квота провайдера.** 402 (кончились кредиты или лимит ключа OpenRouter) и 429
+с «usage limit / quota / credits» в теле — не rate limit: без ретраев и без снижения
+параллелизма, в sticky — «квота провайдера исчерпана» и совет пополнить квоту или сменить
+`LLM_API_KEY`/`LLM_BASE_URL`. Область (`quota_scope`, Rust): лимит бесплатной модели
+(`:free`, `free-models-per-day`) глушит только эту модель, квота ключа — все вызовы прогона.
+Запасной verifier (`REVIEW_VERIFIER_FALLBACK_MODEL`) при лимите `:free`-модели работает.
 
 ## Gate (блокировка merge)
 
@@ -431,8 +438,11 @@ rename-only, бинарь), не выбрасываются никогда.
 JS-копии внутри обёрток deprecated (RFC 20). Откуда берутся бинари:
 
 - у потребителя — архив `ai-reviewer-bins-<target>.tar.gz` из релиза того же тега. Шаблон
-  `examples/ci/pr-review.yml` скачивает его, сверяет sha256 и распаковывает в
-  `rust/bin/`. Платформы: `linux-x64`, `linux-arm64`, `darwin-arm64`;
+  `examples/ci/pr-review.yml` скачивает его, сверяет sha256 и build provenance
+  (`gh attestation verify --signer-workflow …/release-binaries.yml --source-ref refs/tags/<тег>`)
+  и только тогда распаковывает в `rust/bin/`. Нет `gh` на раннере — шаблон ставит пиненный
+  gh 2.102.0 со сверкой sha256; проверка не прошла — бинари не ставятся, остаются JS-копии.
+  Платформы: `linux-x64`, `linux-arm64`, `darwin-arm64`;
 - у разработчика — `cargo build` в `rust/`.
 
 Без бинарей (чистый клон, пин не на тег релиза) всё работает на JS-копиях, без новых правок.

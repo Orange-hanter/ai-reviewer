@@ -3,12 +3,14 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-10
+last_updated: 2026-11-01
 ---
 
 # Выбор моделей и параметров
 
-Провайдер по умолчанию — Ollama Cloud. Он не публикует внятной документации по каждой модели,
+Провайдер по умолчанию — Ollama Cloud; любой OpenAI-совместимый подключается через `LLM_BASE_URL`
+(замеры OpenRouter — [probe-отчёт](probe-openrouter-2026-10-14.md) и [RFC 20](../proposals/20-rust-primary.md) § 4–7;
+ростер Orakul на OpenRouter — там же, § 6–7). Ollama Cloud не публикует внятной документации по каждой модели,
 поэтому роли расставлены по собственным замерам: пробник `npx pr-review-probe-models`
 (latency, reasoning effort, JSON-mode) и A/B-прогоны на замороженных диффах.
 
@@ -22,6 +24,12 @@ last_updated: 2026-09-10
 | jury aggregator | `minimax-m3` | **JSON** | синтез + refutation, вне пула advisors |
 | verifier (Pass B) | `mimo-v2.6-pro` | **JSON** | глубокий судья, независимый от аггрегатора |
 | fallback | `deepseek-v4.1-flash` | JSON+prose | замена упавшей модели, чтобы прогон не терял роль целиком |
+| verifier fallback | — (`REVIEW_VERIFIER_FALLBACK_MODEL`) | **JSON** | тот же батч при сбое основной модели verifier'а (лимит бесплатного тарифа, сеть) |
+
+Свои параметры каждой модели — `LLM_MODEL_SETTINGS` (`effort`, `jsonEffort`, `maxTokens`,
+`provider`; `docs/configuration.md`): одни модели без рассуждения отдают пустой ответ на
+`low` (deepseek-v4.1-flash — им `none`), другие без рассуждения отвечают 400 (glm-5.3-flash —
+им `low`/`high`); глобальные `REVIEW_*_REASONING_EFFORT` такие модели не совмещают.
 
 Колонка «Ответ» — не декорация, а ограничение при подборе (см. «JSON-роли» ниже).
 
@@ -30,9 +38,12 @@ last_updated: 2026-09-10
 
 ## JSON-роли: чем ограничен подбор
 
-`chatJson` (aggregator, verifier) держит каскад ретраев, и первая ступень при пустом/оборванном
-ответе — **повтор с `reasoning_effort: none`**. Отсюда жёсткое требование: модель на JSON-роли
-обязана отдавать валидный JSON *и* на `low`, *и* на `none`. Advisors такому не подчиняются —
+`chatJson` (aggregator, verifier) держит каскад ретраев (с 0.6 — в Rust, `rust/src/llm/cascade.rs`),
+и первая ступень при пустом/оборванном ответе — **повтор с `reasoning_effort: none`**. Отсюда
+требование: модель на JSON-роли обязана отдавать валидный JSON *и* на своём effort, *и* на `none`.
+Исключения: модели с обязательным рассуждением (на `none` — 400) каскад повторяет на `low` с
+`max_tokens + 8000`; модели, настроенные сразу на `none` (`LLM_MODEL_SETTINGS`), повтора с теми же
+параметрами не получают. Advisors такому не подчиняются —
 у них `jsonMode: false`, им проза штатна.
 
 Исключение — модели с обязательным reasoning (на OpenRouter `gemini-3.8-flash`,
@@ -103,8 +114,8 @@ last_updated: 2026-09-10
 `none` даёт −50…−75% latency у kimi/glm/deepseek (thinking отключается, JSON остаётся
 валидным), но качество находок на этом режиме не подтверждено — поэтому дефолт консервативный.
 
-Пайплайн уже держит каскад ретраев: пустой `content` на `effort=low` → повтор с `none`
-(reasoning-модели иногда тратят весь бюджет токенов на скрытое рассуждение).
+Каскад ретраев (Rust): пустой `content` на `effort=low` → повтор с `none` (reasoning-модели
+иногда тратят весь бюджет токенов на скрытое рассуждение; больший бюджет не помогает — RFC 20 § 5).
 
 ### Замер A5: `REVIEW_AGGREGATOR_REASONING_EFFORT=none` на жюри — дефолт не меняется
 
@@ -153,8 +164,8 @@ completion-токенами, значит `none` срежет выход жюр�
 
 ```bash
 python3 -m venv .graphify/venv
-.graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.87
-.graphify/venv/bin/graphify --version          # ожидаем graphify 0.9.87
+.graphify/venv/bin/pip install --quiet --disable-pip-version-check graphifyy==0.9.99
+.graphify/venv/bin/graphify --version          # ожидаем graphify 0.9.99
 
 GRAPHIFY_OUT=.graphify/graphify-out GRAPHIFY_NO_TIPS=1 \
   .graphify/venv/bin/graphify update . --force
