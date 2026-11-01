@@ -10,6 +10,9 @@ last_updated: 2026-09-10
 
 ## Unreleased
 
+- **Verifier по умолчанию** — `mimo-v2.6-pro` вместо `deepseek-v4-pro` (`REVIEW_VERIFIER_MODEL`,
+  JS и Rust; шаблон `examples/ci/pr-review.yml`; пробник). JSON ok на `low` и `none`, ~0,7–1,0 с
+  (`docs/model-tuning.md`). Вернуть прежнего судью: `REVIEW_VERIFIER_MODEL: deepseek-v4-pro`.
 ### Изменено — `graphifyy` 0.9.87 → 0.9.99
 
 - Шаблон CI (`examples/ci/pr-review.yml`) и `docs/model-tuning.md`: пин и ключ кэша venv.

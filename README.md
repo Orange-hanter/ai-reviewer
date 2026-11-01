@@ -72,7 +72,7 @@ verifier → inline-замечания и один живой sticky-отчёт 
 > <img src=".github/icons/delta.svg" alt="🔄" height="16"> **С прошлого прогона (`4b1e07c`):** +1 новых, −1 закрыто, 1 без изменений.
 > Раскрывается в «что изменилось» и таблицу истории прогонов.
 >
-> <img src=".github/icons/verifier.svg" alt="🔎" height="16"> Verifier (Pass B, deepseek-v4-pro): подтверждено 2, отклонено FP 1, понижено 1.
+> <img src=".github/icons/verifier.svg" alt="🔎" height="16"> Verifier (Pass B, mimo-v2.6-pro): подтверждено 2, отклонено FP 1, понижено 1.
 >
 > <img src=".github/icons/jury.svg" alt="⚖️" height="16"> Refutation (жюри): dropped 2, downgraded 1, kept 3.
 >

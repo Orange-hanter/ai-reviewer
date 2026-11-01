@@ -285,7 +285,7 @@ jobs:
           REVIEW_BLAST_REQUIRED: '1'       # нет графа / graphify недоступен → exit 1 до LLM (0 = fail-open)
           REVIEW_CONFIDENCE_MIN: '0.8'
           REVIEW_VERIFIER: '1'             # R3: второй проход verifier для critical/major (0 = выкл.)
-          REVIEW_VERIFIER_MODEL: deepseek-v4-pro
+          REVIEW_VERIFIER_MODEL: mimo-v2.6-pro
           REVIEW_VERIFIER_STRICT: '1'      # блок требует verdict verifier; нет verdict → minor (0 = fail-open)
           REVIEW_ROUTER: '1'               # R4: skip/light/full по типу diff (0 = всегда full)
           REVIEW_PRESCAN: '1'              # R6: eslint + ast-grep на changed files (нужен app/node_modules)

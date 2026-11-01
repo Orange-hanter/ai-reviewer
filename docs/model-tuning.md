@@ -22,7 +22,7 @@ last_updated: 2026-11-01
 | specialist architecture | `glm-5.3` | prose | большое окно, устойчив на кросс-файловых связях |
 | specialist security | `glm-5.3-flash` | prose | дёшево и быстро на типовых паттернах уязвимостей |
 | jury aggregator | `minimax-m3` | **JSON** | синтез + refutation, вне пула advisors |
-| verifier (Pass B) | `deepseek-v4-pro` | **JSON** | глубокий судья, независимый от аггрегатора |
+| verifier (Pass B) | `mimo-v2.6-pro` | **JSON** | глубокий судья, независимый от аггрегатора |
 | fallback | `deepseek-v4.1-flash` | JSON+prose | замена упавшей модели, чтобы прогон не терял роль целиком |
 | verifier fallback | — (`REVIEW_VERIFIER_FALLBACK_MODEL`) | **JSON** | тот же батч при сбое основной модели verifier'а (лимит бесплатного тарифа, сеть) |
 
@@ -71,6 +71,16 @@ last_updated: 2026-11-01
 |--------|-------|--------|--------------------|
 | `deepseek-v4.1-flash` | JSON ok (~0.9 с) | JSON ok (~0.6 с) | да |
 | `mistral-large-4` | JSON ok, **медленно** (11–18 с, ~1000 токенов рассуждения) | JSON в ```` ```json ```` (~1.2–1.6 с) — `extractJsonObject` снимает обёртку | да |
+
+Замена 2026-11-01: verifier по умолчанию — `mimo-v2.6-pro` вместо `deepseek-v4-pro`. Замер
+`pr-review-probe-models` (2026-11-01, Ollama Cloud):
+
+| Модель | `low` | `none` | Годна на JSON-роль |
+|--------|-------|--------|--------------------|
+| `mimo-v2.6-pro` | JSON ok (~0.7–1.0 с) | JSON ok (~0.65 с) | да |
+| `deepseek-v4-pro` | JSON ok (~0.9–1.2 с) | JSON ok (~0.75 с) | да |
+
+На OpenRouter та же модель — `xiaomi/mimo-v2.6-pro`.
 
 Оба GLM 5.3 на `none` игнорируют `response_format: json_object` и уходят в развёрнутую прозу.
 Поэтому они стоят на specialist-ролях (prose) и **не** назначаются агрегатором/верификатором:
