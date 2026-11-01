@@ -90,14 +90,16 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
 
 Репозиторий движка ревьюит свои PR тем же гейтом — [`.github/workflows/pr-review.yml`](../.github/workflows/pr-review.yml).
 Пина здесь нет: движок и код PR — один репозиторий, поэтому движок чекаутится по `base.sha`
-PR в `engine/` и собирается `cargo build --locked` из его `Cargo.lock`; профиль —
-`.ai-reviewer.json` той же base-ревизии. Код PR чекаутится рядом, в `pr/`, а venv graphify —
+PR в `engine/` и собирается `cargo build --locked` из его `Cargo.lock`; профиль
+`.ai-reviewer.json` и его вход движок читает из той же base-ревизии
+(`REVIEW_PROFILE_TRUSTED=1` + `REVIEW_BASE_REF`). Код PR чекаутится рядом, в `pr/`, а venv graphify —
 в `$RUNNER_TEMP`: ни один исполняемый путь не лежит внутри чекаута PR, иначе закоммиченный
-через `git add -f` файл по этому пути исполнился бы с секретами. Код PR с `OLLAMA_API_KEY` не
+через `git add -f` файл по этому пути исполнился бы с секретами. Код PR с ключом LLM не
 исполняется, и PR не ослабляет правила собственного ревью: правка движка включается со
 следующего PR после мержа.
 prescan выключен (нет eslint, ast-grep ruleset под TypeScript), blast-radius — по графу
-graphify. Без секрета `OLLAMA_API_KEY` job пропускает ревью с предупреждением; PR из форков
+graphify. Провайдер и ростер моделей — как у orakul: OpenRouter, секрет `OPENROUTER_API_KEY`;
+без него job пропускает ревью с предупреждением. PR из форков
 и черновики не ревьюятся.
 
 ## 5. Что нужно от репозитория
