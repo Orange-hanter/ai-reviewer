@@ -168,6 +168,8 @@ test('Graphify: пустой blast-radius различает stale graph, нер
   assert.equal(metrics.skip_reasons.no_dependents, 1);
   assert.equal(metrics.skip_reasons.graph_stale, 1);
   assert.equal(metrics.skip_reason, 'mixed');
+  // PLAT-084: имя неразрешённого символа и причина попадают в метрики плана
+  assert.deepEqual(metrics.unresolved_symbols, [{ symbol: 'unresolved', kind: 'ambiguous', candidates: 0, in_pr: null }]);
   assert.ok(calls.some(([bin, ...args]) => bin === 'git' && args.includes('-C')), 'git -C для freshness');
   assert.ok(calls.some(([bin, ...args]) => bin === 'gf' && args.includes('--depth') && args.includes('2')), 'передаём --depth');
 });
@@ -2225,4 +2227,36 @@ test('buildVerifierFileContents: файл вызывающего кода вне
   assert.ok(r.text.includes('… (lines 181–300 not shown)'), 'два кандидата одного файла — одно окно');
   const none = buildVerifierFileContents(contentMap, [{ file: 'caller.ts', line: 150 }], { margin: 80 });
   assert.ok(!none.text.includes('caller.ts'), 'без outside файл вне PR в контекст не попадает');
+});
+
+test('Graphify: unresolved_symbols различает омоним вне PR и отсутствующий в графе символ (PLAT-084)', async () => {
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const graphJson = JSON.stringify({
+    nodes: [
+      { id: 'a_round2', label: 'round2()', source_file: 'app/a.ts' },
+      { id: 'b_round2', label: 'round2()', source_file: 'app/b.ts' },
+      { id: 'c_round2', label: 'round2()', source_file: 'app/c.ts' },
+    ],
+    links: [],
+  });
+  const execFileP = async (bin, args) => {
+    if (bin === 'git') return { stdout: '12345678\n' };
+    if (args[1] === 'round2' || args[1] === 'a_round2') return { stdout: 'No unique node match for round2\n' };
+    return { stdout: 'No node matching ghostField\n' };
+  };
+  const client = createGraphifyClient(cfg, {
+    execFileP,
+    readFile: async (path) => (String(path).endsWith('graph.json') ? graphJson : '- Built from commit: `12345678`\n'),
+    access: async () => {},
+  });
+  // два омонима в файлах PR — разрешение по файлу неоднозначно, символ остаётся неразрешённым
+  const { metrics } = await client.buildBlastRadius(['round2', 'ghostField'], { changedPaths: ['app/a.ts', 'app/b.ts'] });
+  assert.deepEqual(metrics.unresolved_symbols, [
+    { symbol: 'round2', kind: 'ambiguous', candidates: 3, in_pr: 2 },
+    { symbol: 'ghostField', kind: 'not_found', candidates: 0, in_pr: 0 },
+  ]);
+  assert.equal(metrics.skip_reasons.symbol_unresolved, 2);
 });
