@@ -260,7 +260,7 @@ test('loadReviewConfig: MoA defaults', () => {
   assert.equal(cfg.reviewMode, 'moa');
   assert.deepEqual([...cfg.moa.references], ['kimi-k2.7-code', 'glm-5.3', 'glm-5.3-flash']);
   assert.equal(cfg.moa.aggregator, 'minimax-m3');
-  assert.equal(cfg.verifier.model, 'deepseek-v4-pro');
+  assert.equal(cfg.verifier.model, 'mimo-v2.6-pro');
   assert.equal(cfg.gate.consensusMin, 1);
   assert.equal(cfg.triage.enabled, true);
   assert.deepEqual([...cfg.inlineOn], ['critical', 'major']);
@@ -782,7 +782,7 @@ test('loadReviewConfig: specialist model mapping + independent aggregator/verifi
     architecture: 'glm-5.3',
   });
   assert.equal(cfg.moa.aggregator, 'minimax-m3');
-  assert.equal(cfg.verifier.model, 'deepseek-v4-pro');
+  assert.equal(cfg.verifier.model, 'mimo-v2.6-pro');
   const advisorModels = new Set(cfg.specialists.assignments.map((x) => x.model));
   assert.equal(advisorModels.has(cfg.moa.aggregator), false);
   assert.equal(advisorModels.has(cfg.verifier.model), false);

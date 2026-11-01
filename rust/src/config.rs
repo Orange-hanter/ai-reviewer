@@ -20,7 +20,7 @@ pub const DEFAULT_MOA_REFERENCES: &str = "kimi-k2.7-code,glm-5.3,glm-5.3-flash";
 pub const DEFAULT_MOA_SPECIALIST_MODELS: &str =
     "security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3";
 pub const DEFAULT_MOA_AGGREGATOR: &str = "minimax-m3";
-pub const DEFAULT_REVIEW_VERIFIER_MODEL: &str = "deepseek-v4-pro";
+pub const DEFAULT_REVIEW_VERIFIER_MODEL: &str = "mimo-v2.6-pro";
 pub const DEFAULT_OLLAMA_MODELS_FALLBACK: &str = "deepseek-v4.1-flash";
 pub const DEFAULT_STRUCTURE_TRUST_TIER: &str = "trusted_local";
 pub const SPECIALIST_ROLES: [&str; 3] = ["security", "correctness", "architecture"];
