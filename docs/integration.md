@@ -3,7 +3,7 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
+last_updated: 2026-11-01
 ---
 
 # Интеграция в репозиторий-потребитель
@@ -16,7 +16,7 @@ last_updated: 2026-09-29
 ## 1. Пин версии
 
 ```
-ops/ai-reviewer-ref     # одна строка: тег (v0.2.0) или полный commit SHA
+ops/ai-reviewer-ref     # одна строка: тег (v0.7.0); SHA допустим, но тогда без Rust-бинарей — на JS-копиях
 ```
 
 Обновление версии движка = правка одной строки в PR: видно в диффе, откатывается ревертом.
@@ -57,6 +57,15 @@ ops/ai-review/fixtures/                      # fixtures, выросшие из �
           repository: Orange-hanter/ai-reviewer
           ref: ${{ steps.pin.outputs.ref }}
           path: .ai-reviewer-engine
+
+      # Готовые Rust-бинари движка из релиза того же тега: sha256 + build provenance,
+      # без gh на раннере — пиненный gh. Тело шага — в examples/ci/pr-review.yml.
+      - name: Download engine binaries
+        env:
+          REF: ${{ steps.pin.outputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # … скопируйте тело шага из examples/ci/pr-review.yml
 
       - name: Run AI review
         env:
@@ -107,7 +116,8 @@ graphify. Провайдер — Ollama Cloud с отдельным ключом
 
 | Компонент | Для чего | Если нет |
 |-----------|----------|----------|
-| `OLLAMA_API_KEY` (или `LLM_API_KEY`) | LLM-слой | ревью не запускается: soft-fail, exit `0` при любом `REVIEW_LLM_REQUIRED` |
+| `OLLAMA_API_KEY` (или `LLM_API_KEY` + `LLM_BASE_URL`, например OpenRouter) | LLM-слой | ревью не запускается: soft-fail, exit `0` при любом `REVIEW_LLM_REQUIRED` |
+| `gh` CLI на раннере | проверка provenance Rust-бинарей | шаблон ставит пиненный gh 2.102.0 (linux); на macOS-раннере без gh — JS-копии |
 | `node_modules` c eslint в `layout.appDir` | eslint prescan | prescan пропускается |
 | `@ast-grep/cli` | ast-grep prescan | пропускается |
 | Граф graphify | blast-radius | пустой blast-radius |

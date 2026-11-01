@@ -3,7 +3,7 @@ type: guide
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-09-29
+last_updated: 2026-11-01
 ---
 
 # Документация ai-reviewer
@@ -25,6 +25,7 @@ last_updated: 2026-09-29
 | [scent-measurement.md](scent-measurement.md) | Замер слоя косвенных признаков без LLM: несут ли поверхностные признаки адрес дефекта ([RFC 15](../proposals/15-cue-driven-briefs.md)) |
 | [structure.md](structure.md) | Structure-контур: facts/assessment/obligations, провайдеры, MCP; вне гейта |
 | [benchmark-public.md](benchmark-public.md) | Замер на публичных диффах (`gold-public/`): precision/recall и разбор промахов |
+| [probe-openrouter-2026-10-14.md](probe-openrouter-2026-10-14.md) | Первичный замер моделей на OpenRouter; выводы уточнены в [RFC 20](../proposals/20-rust-primary.md) § 4–7 |
 | [backlog.md](backlog.md) | Открытые направления и долг слияний вне планов cod-doc |
 | [../proposals/README.md](../proposals/README.md) | Реестр RFC: решения, дорогие для отката, до кода |
 | [../cursor-plugin/README.md](../cursor-plugin/README.md) | Cursor Plugin: установка, два MCP, skill и команды |

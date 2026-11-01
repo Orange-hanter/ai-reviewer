@@ -15,8 +15,8 @@ last_updated: 2026-10-22
 
 ## 1. 🎯 Executive Summary
 
-- **Проект:** `ai-reviewer` — движок AI код-ревью для PR с правом блокировать merge. Чистый ESM, Node ≥ 22, ноль runtime-зависимостей. LLM по умолчанию — Ollama Cloud.
-- **Текущий статус:** `🟢 ACTIVE` — merge-гейт живой; агентный контур RFC 08/09/10/12 в пакете (Unreleased); ядро частично портировано на Rust с откатом на JS.
+- **Проект:** `ai-reviewer` — движок AI код-ревью для PR с правом блокировать merge. Чистый ESM, Node ≥ 22, ноль runtime-зависимостей. LLM по умолчанию — Ollama Cloud; любой OpenAI-совместимый через `LLM_BASE_URL` (Orakul — OpenRouter).
+- **Текущий статус:** `🟢 ACTIVE` — merge-гейт живой; агентный контур RFC 08–12 вышел в 0.4.0; с 0.6 Rust — основная реализация, JS-копии deprecated ([RFC 20](proposals/20-rust-primary.md)); готовые бинари приезжают потребителю из релиза.
 - **Ключевые ограничения:**
   - Гейт **не знает** structure.
   - MCP-превью **не гейт**: `previewWouldBlock` ≠ `exit 1`.
@@ -108,6 +108,16 @@ graph TD
 ### RFC 15 — Наряды по косвенным признакам
 - **Описание:** детерминированный слой решает «куда смотреть», исполнитель получает адресную задачу; этап 0 (shadow-слой, офлайн-замер) реализован, гейт не тронут, этапы 1–3 на решении.
 - **Ссылка:** `📁 proposals/15-cue-driven-briefs.md | 🗃️ doc:proposals_15-cue-driven-briefs_md | 🔑 sha:b29bd1675fe7`
+- **Статус:** `🟢 VERIFIED`
+
+### RFC 20 — Rust — основная реализация
+- **Описание:** новые правки только в Rust, JS-копии deprecated до аудита; каскад ретраев и английские промпты в Rust, готовые бинари в релизе с проверкой provenance, `LLM_MODEL_SETTINGS`, запасной verifier, замеры моделей OpenRouter (§ 4–7).
+- **Ссылка:** `📁 proposals/20-rust-primary.md | 🗃️ doc:proposals_20-rust-primary_md | 🔑 sha:d6cb0e22c632`
+- **Статус:** `🟢 VERIFIED`
+
+### Замер моделей OpenRouter
+- **Описание:** первичный пробник кандидатов при переходе с Ollama Cloud; выводы уточнены в RFC 20 § 4–7.
+- **Ссылка:** `📁 docs/probe-openrouter-2026-10-14.md | 🗃️ doc:docs_probe-openrouter-2026-10-14_md | 🔑 sha:0842484d1a34`
 - **Статус:** `🟢 VERIFIED`
 
 ### Аудит RFC 14
