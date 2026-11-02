@@ -10,7 +10,7 @@
     "shouldBlock": true,
     "blockerCount": 1,
     "titles": [
-      "Код вне PR зависит от `parseLimits` — проверьте совместимость"
+      "Code outside the PR depends on `parseLimits` — check compatibility"
     ]
   }
 }

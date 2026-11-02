@@ -187,7 +187,7 @@ test('автопоиск: .ai-reviewer.json в корне рабочего ка�
   assert.ok(profile.layout.sensitive.test('rust/src/report.rs'), 'rust/src/ — чувствительная зона');
   assert.ok(profile.layout.sensitive.test('pipeline.mjs'));
   assert.ok(!profile.layout.sensitive.test('docs/architecture.md'));
-  assert.match(profile.repoRules, /ноль runtime-зависимостей/, 'правила проекта доехали в промпт');
+  assert.match(profile.repoRules, /zero runtime dependencies/, 'правила проекта доехали в промпт');
   resetProfile();
 });
 

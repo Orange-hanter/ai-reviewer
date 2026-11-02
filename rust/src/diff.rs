@@ -649,7 +649,7 @@ pub fn build_chunks(
         let path = path_of(seg);
         let diff = if u16_len(seg) > limits.max_diff_bytes {
             let d = format!(
-                "{}\n… (файл обрезан в диффе)",
+                "{}\n… (file truncated in the diff)",
                 u16_truncate(seg, limits.max_diff_bytes)
             );
             if !path.is_empty() {
@@ -662,7 +662,7 @@ pub fn build_chunks(
         let mut content = content_map.get(&path).cloned().unwrap_or_default();
         if u16_len(&content) > limits.max_context_bytes {
             content = format!(
-                "{}\n… (файл обрезан)",
+                "{}\n… (file truncated)",
                 u16_truncate(&content, limits.max_context_bytes)
             );
             if !path.is_empty() {
