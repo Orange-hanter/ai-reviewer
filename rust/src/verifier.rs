@@ -22,7 +22,7 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::findings::{js_to_string, js_truthy, BLAST_FINDING_SOURCE};
+use crate::findings::{is_downgraded, js_to_string, js_truthy, BLAST_FINDING_SOURCE};
 
 /// lib/verifier.mjs SEV_ORDER (прочее/отсутствующее → 9).
 fn sev_order(sev: Option<&Value>) -> i32 {
@@ -52,8 +52,15 @@ pub fn select_verifier_candidates(
         let sev = f.get("severity").unwrap_or(&Value::Null);
         tiers.iter().any(|t| t == sev)
     };
+    // RFC 23: находку, пониженную refutation'ом, гейт не блокирует при любом вердикте —
+    // кандидатом уровня блока она не становится, вызов модели был бы оплачен впустую.
+    // Rust-owned: JS-копия отбирает по одной severity.
     let mut blockers: Vec<usize> = (0..findings.len())
-        .filter(|i| in_tiers(&findings[*i]) && !js_truthy(findings[*i].get("prescan").unwrap_or(&Value::Null)))
+        .filter(|i| {
+            in_tiers(&findings[*i])
+                && !is_downgraded(&findings[*i])
+                && !js_truthy(findings[*i].get("prescan").unwrap_or(&Value::Null))
+        })
         .collect();
     // RFC 21: внутри одного уровня severity blast-находки после LLM-находок — при капе
     // предположение графа не вытесняет то, что уже согласовало жюри. Сортировка
@@ -246,6 +253,18 @@ mod tests {
         // кап
         let idx = select_verifier_candidates(&f, &[json!("critical"), json!("major")], 1, &[], 0);
         assert_eq!(idx, vec![2]);
+    }
+
+    #[test]
+    fn select_skips_refutation_downgraded() {
+        // RFC 23: гейт пониженную не блокирует — кандидатом уровня блока она не становится
+        let f = vec![
+            json!({"severity": "minor", "title": "понижена жюри", "refutationStatus": "downgraded"}),
+            json!({"severity": "minor", "title": "strict без claims", "refutationStatus": "downgraded_no_claims"}),
+            json!({"severity": "minor", "title": "своя", "refutationStatus": "verified"}),
+        ];
+        let tiers = [json!("critical"), json!("major"), json!("minor")];
+        assert_eq!(select_verifier_candidates(&f, &tiers, 12, &[], 0), vec![2]);
     }
 
     #[test]

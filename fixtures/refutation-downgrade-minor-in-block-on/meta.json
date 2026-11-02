@@ -1,0 +1,14 @@
+{
+  "id": "refutation-downgrade-minor-in-block-on",
+  "description": "RFC 23: minor в REVIEW_BLOCK_ON, жюри понизило critical до minor — блока нет, и находка не уходит к verifier'у (его «verified» по ней гейт бы не применил)",
+  "gate": {
+    "blockOn": ["critical", "major", "minor"],
+    "blockSingle": ["critical", "minor"]
+  },
+  "requiresRust": true,
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0,
+    "findingCount": 1
+  }
+}

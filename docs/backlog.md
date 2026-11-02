@@ -85,6 +85,8 @@ FP-learning-loop» пуста — конкурентов в ней нет; ри�
 9. **Strict-режим профиля**: prescan + verifier-confirmed, без advisory (точность Graphite
    без их провала recall 7.5% — наша фильтрация по сигналам, а не молчанием).
 10. Дифференциация температур по типу чанка (security — глубже, docs — легче).
+11. ~~Понижение не снимает блок, если minor/nit в `REVIEW_BLOCK_ON`~~ — сделано,
+    [RFC 23](../proposals/23-downgrade-never-blocks.md).
 
 ## C. Анти-FP контур
 

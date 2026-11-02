@@ -1428,3 +1428,62 @@ test('engine: индексы чанков, упавших у модели, до�
   assert.deepEqual(results[0].failedChunks, [1]);
   assert.deepEqual(results[0].skippedChunkIndexes, []);
 });
+
+// Порог и уровни блока в промпте берутся из того же cfg.gate, что и гейт: иначе рубрика
+// confidence жюри противоречит порогу, по которому её находки блокируют. Текст промптов —
+// rust-owned (RFC 20): без бинаря deprecated JS-копия называет дефолты, проверять нечего.
+const skipNoPromptBin = existsSync(defaultRustBin('prompt'))
+  ? false : 'нет Rust-бинаря prompt (cargo build) — тексты промптов rust-owned';
+
+async function juryPromptFor(env) {
+  const seen = [];
+  await runPipeline({
+    diff: CODE_DIFF,
+    reviews: [],
+    env,
+    mutateDeps: (deps) => {
+      delete deps.engine;
+      deps.ollama = {
+        chatJson: async (messages) => { seen.push(messages); return { summary: 'ок', findings: [] }; },
+        chatText: async () => '',
+      };
+    },
+  });
+  assert.ok(seen.length > 0, 'движок дошёл до вызова модели');
+  return seen[0].find((m) => m.role === 'system').content;
+}
+
+test('промпт жюри: REVIEW_CONFIDENCE_MIN/REVIEW_BLOCK_ON доходят до текста', { skip: skipNoPromptBin }, async () => {
+  const system = await juryPromptFor({ REVIEW_CONFIDENCE_MIN: '0.7', REVIEW_BLOCK_ON: 'critical' });
+  assert.ok(system.includes('Only critical findings at 0.7 or above block the merge'), 'правило блока — из cfg.gate');
+  assert.ok(system.includes('- 0.7–0.85: a well-known defect pattern'), 'шкала перестроена на порог');
+  assert.ok(system.includes('keep confidence below 0.7.'), 'потолок синтаксических претензий — тот же порог');
+  assert.ok(!system.includes('critical/major'), 'major не блокирует — промпт этого не утверждает');
+});
+
+test('промпт жюри: дефолтный гейт — прежний текст', { skip: skipNoPromptBin }, async () => {
+  const system = await juryPromptFor({});
+  assert.ok(system.includes('Only critical/major findings at 0.8 or above block the merge'));
+  assert.ok(system.includes('- 0.8–0.9: a well-known defect pattern'));
+});
+
+test('createPromptBuilder(cfg): gate доходит до verifier\'а и схемы refutation', { skip: skipNoPromptBin }, async () => {
+  const { createPromptBuilder } = await import('../index.mjs');
+  const prompt = createPromptBuilder({ gate: { blockOn: ['critical', 'minor'], confidenceMin: 0.7 } });
+  const verifier = prompt.buildVerifierMessages({
+    candidates: [{ severity: 'critical', file: 'a.ts', line: 1, title: 't', body: '' }],
+    annotated: '', fileContents: '', blastBlocks: [], pr: { number: 1, title: 't' },
+  })[0].content;
+  assert.ok(verifier.includes('whether a critical or minor finding blocks the merge'));
+  assert.ok(verifier.includes('downgrade — real, but not merge-blocking'), 'понижение снимает блок при любом blockOn (RFC 23)');
+  const base = [{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }];
+  const refs = [{ role: 'security', model: 'm', text: 'IDOR' }];
+  const user = prompt.buildSpecialistAggregatorMessages(base, refs)[1].content;
+  assert.ok(user.includes(' A critical or minor finding without advisorClaims is downgraded'));
+  assert.ok(user.includes('**downgraded** — real but not merge-blocking'));
+  const jury = prompt.buildMessages({ annotated: 'd', pr: { number: 1, title: 't' } })[0].content;
+  assert.ok(jury.includes('Only critical/minor findings at 0.7 or above'));
+
+  const plain = createPromptBuilder().buildMessages({ annotated: 'd', pr: { number: 1, title: 't' } })[0].content;
+  assert.ok(plain.includes('Only critical/major findings at 0.8 or above'), 'без cfg — дефолт конфига');
+});

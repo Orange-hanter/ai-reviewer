@@ -1,0 +1,14 @@
+{
+  "id": "verifier-downgrade-minor-in-block-on",
+  "description": "RFC 23: minor в REVIEW_BLOCK_ON, verifier понизил critical до minor — вердикт «не merge-blocker» снимает блок, хотя minor блокирует сам по себе",
+  "gate": {
+    "blockOn": ["critical", "major", "minor"],
+    "blockSingle": ["critical", "minor"]
+  },
+  "requiresRust": true,
+  "expected": {
+    "shouldBlock": false,
+    "blockerCount": 0,
+    "findingCount": 1
+  }
+}

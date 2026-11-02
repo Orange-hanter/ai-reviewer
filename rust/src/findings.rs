@@ -387,6 +387,18 @@ impl Gate {
     }
 }
 
+/// RFC 23: находку понизил один из судей — verifier (`downgrade`) или refutation жюри
+/// (все claims `downgraded`, либо strict без `advisorClaims`). Вердикт «реален, но не
+/// merge-blocker» гейт исполняет при любом blockOn: пониженная находка выходит из уровня
+/// блока, как её новая severity при дефолтном конфиге.
+pub fn is_downgraded(f: &Value) -> bool {
+    f.get("verifierStatus").and_then(Value::as_str) == Some("downgraded")
+        || matches!(
+            f.get("refutationStatus").and_then(Value::as_str),
+            Some("downgraded" | "downgraded_no_claims")
+        )
+}
+
 /// Blast soft-gate policy: чистый blast-кластер блокирует только после verifier.
 /// null соответствует JS null (fail-open / не blast-кластер).
 /// Shadow-режим RFC 21 (`gate.blast_shadow`) применяется в cluster_findings: там решение —
@@ -464,7 +476,9 @@ pub fn cluster_findings(findings: &[Value], gate: &Gate) -> ClusterOutcome {
                 models.push(f.get("model").unwrap_or(&Value::Null).clone());
             }
             let sev = f.get("severity");
+            // пониженная не голосует за консенсус кластера (RFC 23)
             if gate.in_block_on(sev)
+                && !is_downgraded(f)
                 && !gate.in_block_single(sev)
                 && !consensus_models.iter().any(|m| m == &model_key)
             {
@@ -482,7 +496,7 @@ pub fn cluster_findings(findings: &[Value], gate: &Gate) -> ClusterOutcome {
             let f = &findings[i];
             let sev = f.get("severity");
             let confidence = normalize_confidence(f.get("confidence").unwrap_or(&Value::Null));
-            let in_block_on = gate.in_block_on(sev);
+            let in_block_on = gate.in_block_on(sev) && !is_downgraded(f);
             let tier_block = in_block_on && (gate.in_block_single(sev) || consensus_tier);
             let confidence_block = !in_block_on || confidence >= gate.confidence_min;
             let verified = f.get("verifierStatus").and_then(Value::as_str) == Some("verified");
@@ -807,6 +821,74 @@ mod tests {
             "consensusMin": 1.0,
             "confidenceMin": 0.8,
         }))
+    }
+
+    /// RFC 23: minor и nit в blockOn — пониженная находка тем не менее не блокирует.
+    fn gate_minor_blocks() -> Gate {
+        Gate::from_value(&json!({
+            "blockOn": ["critical", "major", "minor", "nit"],
+            "blockSingle": ["critical", "minor", "nit"],
+            "consensusMin": 2.0,
+            "confidenceMin": 0.8,
+        }))
+    }
+
+    #[test]
+    fn is_downgraded_reads_both_judges() {
+        assert!(is_downgraded(&json!({"verifierStatus": "downgraded"})));
+        assert!(is_downgraded(&json!({"refutationStatus": "downgraded"})));
+        assert!(is_downgraded(&json!({"refutationStatus": "downgraded_no_claims"})));
+        for f in [
+            json!({}),
+            json!({"verifierStatus": "verified"}),
+            json!({"verifierStatus": "unverified"}),
+            json!({"refutationStatus": "verified"}),
+            json!({"refutationStatus": "not_applicable"}),
+        ] {
+            assert!(!is_downgraded(&f), "{f}");
+        }
+    }
+
+    #[test]
+    fn cluster_downgraded_never_blocks_whatever_block_on() {
+        let mk = |sev: &str, extra: Value| {
+            let mut f = json!({"file": "a.ts", "line": 1, "severity": sev, "confidence": 0.95, "model": "m1"});
+            f.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            f
+        };
+        for extra in [
+            json!({"verifierStatus": "downgraded"}),
+            json!({"refutationStatus": "downgraded"}),
+            json!({"refutationStatus": "downgraded_no_claims"}),
+            // refutation понизило, verifier потом подтвердил — вердикт «не блокер» остаётся
+            json!({"refutationStatus": "downgraded", "verifierStatus": "verified"}),
+        ] {
+            for sev in ["minor", "nit"] {
+                let out = cluster_findings(&[mk(sev, extra.clone())], &gate_minor_blocks());
+                assert!(!out.mutations[0].consensus_block, "{sev} {extra}");
+            }
+        }
+        // контроль: непониженный minor при minor в blockOn блокирует
+        let out = cluster_findings(&[mk("minor", json!({}))], &gate_minor_blocks());
+        assert!(out.mutations[0].consensus_block);
+    }
+
+    #[test]
+    fn cluster_downgraded_does_not_vote_for_consensus() {
+        // major не в blockSingle, consensusMin 2: пониженный minor от m2 не даёт голоса m1-major
+        let findings = vec![
+            json!({"file": "a.ts", "line": 1, "severity": "major", "confidence": 0.9, "model": "m1"}),
+            json!({"file": "a.ts", "line": 2, "severity": "minor", "confidence": 0.9, "model": "m2", "verifierStatus": "downgraded"}),
+        ];
+        let gate = Gate::from_value(&json!({
+            "blockOn": ["critical", "major", "minor"], "blockSingle": ["critical"],
+            "consensusMin": 2.0, "confidenceMin": 0.8,
+        }));
+        let out = cluster_findings(&findings, &gate);
+        assert!(!out.mutations[0].consensus_block, "одна непониженная модель — консенсуса нет");
+        let mut agreed = findings.clone();
+        agreed[1].as_object_mut().unwrap().remove("verifierStatus");
+        assert!(cluster_findings(&agreed, &gate).mutations[0].consensus_block, "контроль: две модели — консенсус");
     }
 
     #[test]
