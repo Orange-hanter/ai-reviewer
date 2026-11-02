@@ -110,10 +110,10 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `REVIEW_BLOCK_ON` | `critical,major` | Severity → exit 1 |
+| `REVIEW_BLOCK_ON` | `critical,major` | Severity → exit 1. Тот же список называют модели системные промпты жюри и verifier'а и схема refutation (Rust-бинарь `prompt`); без бинаря deprecated JS-промпт называет дефолт |
 | `REVIEW_BLOCK_SINGLE` | `critical` | Severity, которой хватает одной модели |
 | `REVIEW_CONSENSUS` | `1` (moa) / `2` (consensus) | Мин. моделей с находкой уровня блока в кластере (корзина `file|floor((line-1)/3)`), чтобы major стал блокером; остальное находка набирает сама (RFC 17). В `moa` всегда `1` (значение зажимается); в `consensus` — не больше числа моделей |
-| `REVIEW_CONFIDENCE_MIN` | `0.8` | Блок только при собственной confidence находки ≥ порога (уверенность соседа по кластеру не засчитывается, RFC 17) |
+| `REVIEW_CONFIDENCE_MIN` | `0.8` | Блок только при собственной confidence находки ≥ порога (уверенность соседа по кластеру не засчитывается, RFC 17). Порог T уходит и в промпт жюри: правило блока, потолок для синтаксических претензий и шкала confidence, перестроенная на T (`[T+(1−T)/2, 1]` — путь отказа прослежен, `[T, …)` — известный паттерн, `[0.5, T)` — риск, не блокер). Без Rust-бинаря `prompt` промпт называет 0.8 |
 | `REVIEW_LLM_REQUIRED` | `1` | Полный аутедж LLM блокирует merge (fail-closed); `0` — старое fail-open. Тот же рычаг для сбоя verifier'а при находках уровня блока (RFC 18) и для частей PR, не отревьюенных ни одной моделью из-за сбоя (RFC 19): `1` — degraded-блок, `0` — merge проходит с заметкой. Пропуск частей по тайм-бюджету — только заметка |
 | `REVIEW_INLINE_ON` | `critical,major` | Severity, которым положен inline (см. actionability) |
 | `REVIEW_STRICT` | `0` (или `strict: true` профиля) | Строгий гейт: находка уровня блока блокирует, только если она сама от prescan или с `verifierStatus: verified`; то же условие для inline блокер-severity; advisory в строку не поднимаются и к verifier'у по доказуемости не допускаются. Включается env **или** профилем: `0` в env профильный `strict` не выключает |

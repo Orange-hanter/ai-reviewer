@@ -1,6 +1,6 @@
 //! Бинарный JSON-контракт чистых частей lib/prompt.mjs (Фаза 3, шаг 3).
 //!
-//! Вход (stdin):  {"op": "<имя билдера>", "profile": {...}, ...args}
+//! Вход (stdin):  {"op": "<имя билдера>", "profile": {...}, "gate"?: {...}, ...args}
 //! Выход (stdout): {"messages": [...]} | {"section": "..."} | {"text": "..."}
 //! Ошибки:        non-zero exit code + {"error": "..."} в stderr.
 //!
@@ -11,6 +11,10 @@
 //! e2eSpec с JS-only синтаксисом (lookahead) → ошибка с маркером
 //! E2ESPEC_UNSUPPORTED: обёртка деградирует на чистый JS (как layout.sensitive
 //! в actionability), остальные ошибки пробрасываются.
+//!
+//! gate — параметры гейта из конфига прогона, которые промпт называет модели:
+//!   {blockOn: string[], confidenceMin: number}
+//! Отсутствует → дефолт конфига (critical,major / 0.8), и промпт побайтово прежний.
 
 use std::io::Read;
 
@@ -21,7 +25,7 @@ use ai_reviewer::prompt::{
     build_aggregator_messages, build_changed_files_section, build_merged_specialist_system, build_messages,
     build_moa_reference_section, build_reference_messages, build_specialist_aggregator_messages,
     build_specialist_messages, build_specialist_reference_section, build_verifier_messages,
-    PromptCtx, E2ESPEC_UNSUPPORTED,
+    PromptCtx, PromptGate, E2ESPEC_UNSUPPORTED,
 };
 
 fn main() {
@@ -46,7 +50,8 @@ fn run() -> Result<()> {
     let v: Value = serde_json::from_str(&input).context("вход не является JSON")?;
     let obj = v.as_object().context("вход должен быть JSON-объектом")?;
     let op = obj.get("op").and_then(Value::as_str).unwrap_or("");
-    let ctx = PromptCtx::from_json(obj.get("profile").unwrap_or(&Value::Null));
+    let mut ctx = PromptCtx::from_json(obj.get("profile").unwrap_or(&Value::Null));
+    ctx.gate = PromptGate::from_json(obj.get("gate"));
 
     let out = match op {
         "buildMessages" => json!({ "messages": build_messages(&v, &ctx)? }),
@@ -62,10 +67,10 @@ fn run() -> Result<()> {
             "messages": build_aggregator_messages(&arr_arg(&v, "baseMessages"), &arr_arg(&v, "references")),
         }),
         "buildSpecialistAggregatorMessages" => json!({
-            "messages": build_specialist_aggregator_messages(&arr_arg(&v, "baseMessages"), &arr_arg(&v, "references")),
+            "messages": build_specialist_aggregator_messages(&arr_arg(&v, "baseMessages"), &arr_arg(&v, "references"), &ctx),
         }),
         "buildSpecialistReferenceSection" => {
-            json!({ "text": build_specialist_reference_section(&arr_arg(&v, "references")) })
+            json!({ "text": build_specialist_reference_section(&arr_arg(&v, "references"), &ctx) })
         }
         "buildMoAReferenceSection" => {
             json!({ "text": build_moa_reference_section(&arr_arg(&v, "references")) })

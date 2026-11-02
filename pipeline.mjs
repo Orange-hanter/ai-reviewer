@@ -492,7 +492,7 @@ export function createReviewPipeline(cfg, deps = {}) {
 
   const costTracker = deps.costTracker ?? createCostTracker(cfg.cost?.priceMap);
   const ollama = deps.ollama ?? createLlmClient(cfg, log, { costTracker });
-  const prompt = deps.prompt ?? createPromptBuilder();
+  const prompt = deps.prompt ?? createPromptBuilder(cfg);
   const graphify = deps.graphify ?? createGraphifyClient(cfg);
   // Пиктограммы — на границе публикации: рендер и логи остаются с эмодзи (lib/icons.mjs).
   const github = withIcons(deps.github ?? createGithubClient(cfg, log), cfg.render?.iconBaseUrl);

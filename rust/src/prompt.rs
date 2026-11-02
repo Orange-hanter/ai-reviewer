@@ -31,6 +31,149 @@ pub struct PromptCtx {
     pub verifier_extra: String,
     /// Исходник layout.e2eSpec (без флагов) или null.
     pub e2e_spec_source: Option<String>,
+    /// Параметры гейта, которые промпт называет модели. Приходят из конфига прогона
+    /// (`cfg.gate`), а не из профиля: см. [`PromptGate`].
+    pub gate: PromptGate,
+}
+
+/// Уровни severity в порядке убывания — порядок, в котором промпт перечисляет блокирующие.
+const GATE_SEVERITIES: [&str; 4] = ["critical", "major", "minor", "nit"];
+
+/// Порог и уровни блока, которыми промпт объясняет модели правило гейта.
+///
+/// Гейт читает `REVIEW_BLOCK_ON` и `REVIEW_CONFIDENCE_MIN` (`config.rs`), и промпт обязан
+/// называть те же величины: рубрика confidence, которой калибруется жюри, иначе расходится
+/// с порогом, по которому её находки блокируют. Дефолт совпадает с дефолтом конфига, и с
+/// ним текст промпта побайтово прежний (снимок — `rust/tests/fixtures/prompt-default/`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PromptGate {
+    /// Блокирующие severity, только известные и в порядке [`GATE_SEVERITIES`]; пусто — ничто не блокирует.
+    pub block_on: Vec<String>,
+    /// Порог confidence в `[0, 1]`.
+    pub confidence_min: f64,
+}
+
+impl Default for PromptGate {
+    fn default() -> Self {
+        PromptGate { block_on: vec!["critical".into(), "major".into()], confidence_min: 0.8 }
+    }
+}
+
+impl PromptGate {
+    /// `{blockOn, confidenceMin}` из входа бинаря. Отсутствует → дефолт; мусорный порог →
+    /// 0.8 (та же проверка, что у `REVIEW_CONFIDENCE_MIN` в `config.rs`); неизвестные
+    /// severity отбрасываются, порядок нормализуется; пустой массив остаётся пустым.
+    pub fn from_json(v: Option<&Value>) -> PromptGate {
+        let d = PromptGate::default();
+        let Some(Value::Object(o)) = v else { return d };
+        let block_on = match o.get("blockOn") {
+            Some(Value::Array(a)) => GATE_SEVERITIES
+                .iter()
+                .filter(|s| a.iter().any(|x| x.as_str() == Some(**s)))
+                .map(|s| s.to_string())
+                .collect(),
+            _ => d.block_on,
+        };
+        let confidence_min = match o.get("confidenceMin").and_then(Value::as_f64) {
+            Some(n) if n.is_finite() && (0.0..=1.0).contains(&n) => n,
+            _ => d.confidence_min,
+        };
+        PromptGate { block_on, confidence_min }
+    }
+
+    fn blocks(&self, severity: &str) -> bool {
+        self.block_on.iter().any(|s| s == severity)
+    }
+
+    /// Блокирует ли что-то из того, во что verifier и refutation понижают (minor/nit).
+    fn downgrade_can_block(&self) -> bool {
+        self.blocks("minor") || self.blocks("nit")
+    }
+
+    fn t(&self) -> f64 {
+        round2(self.confidence_min)
+    }
+}
+
+fn round2(x: f64) -> f64 {
+    (x * 100.0).round() / 100.0
+}
+
+/// Порог в тексте: два знака, целое — с `.0` («1.0», «0.8», «0.85»).
+fn fmt_conf(x: f64) -> String {
+    let r = round2(x);
+    if r.fract() == 0.0 {
+        format!("{r:.1}")
+    } else {
+        format!("{r}")
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Join {
+    And,
+    Or,
+    Slash,
+}
+
+/// «critical and major» / «critical or major» / «critical/major»; три и больше — «a, b and c».
+fn join_levels(levels: &[String], how: Join) -> String {
+    let word = match how {
+        Join::And => " and ",
+        Join::Or => " or ",
+        Join::Slash => return levels.join("/"),
+    };
+    match levels {
+        [] => String::new(),
+        [one] => one.clone(),
+        [init @ .., last] => format!("{}{word}{last}", init.join(", ")),
+    }
+}
+
+/// Шкала confidence с якорями, перестроенная на порог T: нижняя граница «известного
+/// паттерна» — ровно T, «риск, не блокер» — строго ниже T, пустые интервалы не печатаются.
+/// T = 0.8 даёт прежние четыре строки.
+fn conf_bands(g: &PromptGate) -> String {
+    let t = g.t();
+    let top = round2(t + (1.0 - t) / 2.0);
+    let mut s = String::new();
+    if top < 1.0 {
+        s.push_str(&format!("- {}–1.0: ", fmt_conf(top)));
+    } else {
+        s.push_str("- 1.0: ");
+    }
+    s.push_str("you traced the failing path in the shown code and can name the input that triggers it.\n");
+    if t < top {
+        s.push_str(&format!(
+            "- {}–{}: a well-known defect pattern that is clearly present here, with a plausible trigger.\n",
+            fmt_conf(t),
+            fmt_conf(top)
+        ));
+    }
+    if t > 0.5 {
+        s.push_str(&format!(
+            "- 0.5–{}: likely, but it depends on code you cannot see. Use it for risks, not for blockers.\n",
+            fmt_conf(t)
+        ));
+    }
+    let floor = if t > 0.5 { 0.5 } else { t };
+    if floor > 0.0 {
+        s.push_str(&format!(
+            "- below {}: leave it out, except a cross-file risk allowed by the NO ABSENCE CLAIMS rule.\n",
+            fmt_conf(floor)
+        ));
+    }
+    s
+}
+
+/// Подстановка `<<NAME>>`-меток шаблона. Неподставленная метка — ошибка в коде, а не во входе.
+fn fill(tpl: &str, pairs: &[(&str, &str)]) -> String {
+    let mut s = tpl.to_string();
+    for (k, v) in pairs {
+        s = s.replace(&format!("<<{k}>>"), v);
+    }
+    debug_assert!(!s.contains("<<"), "неподставленная метка в шаблоне промпта: {s}");
+    s
 }
 
 impl PromptCtx {
@@ -57,6 +200,7 @@ impl PromptCtx {
             aggregator_extra: extra("aggregatorExtra"),
             verifier_extra: extra("verifierExtra"),
             e2e_spec_source,
+            gate: PromptGate::default(),
         }
     }
 }
@@ -145,8 +289,9 @@ fn arr_arg(args: &Value, key: &str) -> Vec<Value> {
 //   такую разметку, и условные абзацы встают в неё без висячих пустых строк;
 // - явная цена ошибки и явное «пустой ответ — нормальный ответ»: ложный блокер дороже
 //   пропущенного minor (Anthropic security-review, PR-Agent);
-// - рубрика severity и confidence с якорями: порог 0.8 равен дефолту REVIEW_CONFIDENCE_MIN,
-//   и модели нужно знать, что именно его отделяет от подозрения;
+// - рубрика severity и confidence с якорями: порог и уровни блока — не литералы, а
+//   `ctx.gate` из конфига прогона (`<<…>>`-метки в шаблонах ниже, [`PromptGate`]); модели
+//   нужно знать, что именно отделяет блокер от подозрения, и знать это тем же числом, что гейт;
 // - доказательство — дословная цитата и конкретный сценарий отказа;
 // - содержимое PR — данные, а не инструкции (prompt injection через дифф/заголовок);
 // - без КАПСА и «MUST» на каждой строке: на текущих моделях это даёт перегиб в сторону
@@ -366,8 +511,7 @@ nothing to report is still present and says «в моей области сер�
 // часть условного раздела, иначе выключенный оставляет висячую пустую строку.
 
 const AGGREGATOR_HEAD: &str = r#"You are the final reviewer (jury aggregator) of a pull request. Your findings are posted on the PR;
-critical and major findings with confidence of at least 0.8 block the merge once an independent
-verifier confirms them. Report every defect you can prove and let severity and confidence carry
+<<BLOCK_RULE>> Report every defect you can prove and let severity and confidence carry
 your doubt: a false blocker stops a correct PR, a dropped defect reaches production."#;
 
 const AGGREGATOR_LOOK_FOR: &str = r#"<what_to_look_for>
@@ -401,26 +545,20 @@ const AGGREGATOR_SEVERITY: &str = r#"<severity>
 </severity>
 
 <confidence>
-- 0.9–1.0: you traced the failing path in the shown code and can name the input that triggers it.
-- 0.8–0.9: a well-known defect pattern that is clearly present here, with a plausible trigger.
-- 0.5–0.8: likely, but it depends on code you cannot see. Use it for risks, not for blockers.
-- below 0.5: leave it out, except a cross-file risk allowed by the NO ABSENCE CLAIMS rule.
-Only critical/major findings at 0.8 or above block the merge. Set confidence honestly: it is how the
-gate tells your proof from your suspicion.
+<<BANDS>><<THRESHOLD_RULE>>
 </confidence>"#;
 
 const AGGREGATOR_DO_NOT_REPORT: &str = r#"<do_not_report>
 - Versions of GitHub Actions, Node or other tools as "non-existent": your knowledge may be stale,
   and the versions in the repository work.
-- Deliberate project decisions: sending the diff to the configured LLM provider, and blocking the
-  merge on critical/major findings.
+- Deliberate project decisions: sending the diff to the configured LLM provider<<BLOCK_DECISION>>.
 - A symbol, import or constant as "undefined" or "not imported" only because its declaration is not
   in the shown fragment: large files are split into chunks, and the declaration most likely lives in
   another one.
 - Claims that code is a syntax error or violates language, shell, ESM or regex semantics (word
   splitting, hoisting, import order, how an escape sequence is read). You cannot run an interpreter
   here, and such claims are wrong disproportionately often; if you still suspect one, check the
-  shown code character by character and keep confidence below 0.8. This exclusion covers claims
+  shown code character by character and keep confidence below <<T>>. This exclusion covers claims
   about how the language parses or executes code. It does not cover what valid code does: a
   security weakness in correct syntax (say, comparing a secret with a non-constant-time operator)
   is a finding, and so is code that recognises a quoted, escaped or encoded input format (quoted
@@ -450,7 +588,12 @@ same title and line — and add only genuinely new defects. The goal is a stable
 run to run, not a rotation of wordings.
 </convergence>"#;
 
-fn aggregator_output_format() -> String {
+fn aggregator_output_format(g: &PromptGate) -> String {
+    let minor_rule = if g.blocks("minor") {
+        "- Minor findings are posted on the PR and block it in this configuration: report a real minor\n  defect as minor rather than leaving it out. An empty findings array is a valid answer."
+    } else {
+        "- Minor findings are posted on the PR but never block it: report a real minor defect as minor\n  rather than leaving it out. An empty findings array is a valid answer."
+    };
     format!(
         r#"<output_format>
 Respond with a single JSON object inside a ```json fence and no text around it:
@@ -479,15 +622,52 @@ Respond with a single JSON object inside a ```json fence and no text around it:
   identifiers and file paths as they are.
 - At most {AGGREGATOR_MAX_ITEMS} findings, strongest first; the specialists already capped theirs at {SPECIALIST_MAX_ITEMS} each, so
   do not multiply them.
-- Minor findings are posted on the PR but never block it: report a real minor defect as minor
-  rather than leaving it out. An empty findings array is a valid answer.
+{minor_rule}
 </output_format>"#
     )
 }
 
+/// H1: кто и с какой уверенностью блокирует merge.
+fn aggregator_head(g: &PromptGate) -> String {
+    let rule = if g.block_on.is_empty() {
+        "in this configuration no severity blocks the merge, so every finding is advisory.".to_string()
+    } else {
+        format!(
+            "{} findings with confidence of at least {} block the merge once an independent\nverifier confirms them.",
+            join_levels(&g.block_on, Join::And),
+            fmt_conf(g.confidence_min)
+        )
+    };
+    fill(AGGREGATOR_HEAD, &[("BLOCK_RULE", &rule)])
+}
+
+/// H2–H3: шкала confidence от порога и правило блока под ней.
+fn aggregator_severity(g: &PromptGate) -> String {
+    let rule = if g.block_on.is_empty() {
+        "No severity blocks the merge in this configuration. Set confidence honestly all the same: it is how\nreaders tell your proof from your suspicion.".to_string()
+    } else {
+        format!(
+            "Only {} findings at {} or above block the merge. Set confidence honestly: it is how the\ngate tells your proof from your suspicion.",
+            join_levels(&g.block_on, Join::Slash),
+            fmt_conf(g.confidence_min)
+        )
+    };
+    fill(AGGREGATOR_SEVERITY, &[("BANDS", &conf_bands(g)), ("THRESHOLD_RULE", &rule)])
+}
+
+/// H4–H5: блок как решение проекта и потолок confidence для синтаксических претензий.
+fn aggregator_do_not_report(g: &PromptGate) -> String {
+    let decision = if g.block_on.is_empty() {
+        String::new()
+    } else {
+        format!(", and blocking the\n  merge on {} findings", join_levels(&g.block_on, Join::Slash))
+    };
+    fill(AGGREGATOR_DO_NOT_REPORT, &[("BLOCK_DECISION", &decision), ("T", &fmt_conf(g.confidence_min))])
+}
+
 /// Системный промпт жюри (buildMessages).
 fn aggregator_system(ctx: &PromptCtx, with_blast: bool, with_priors: bool) -> String {
-    let mut s = String::from(AGGREGATOR_HEAD);
+    let mut s = aggregator_head(&ctx.gate);
     s.push('\n');
     s.push_str(&rules_block(ctx));
     s.push_str(&prompt_extra(&ctx.aggregator_extra));
@@ -499,16 +679,16 @@ fn aggregator_system(ctx: &PromptCtx, with_blast: bool, with_priors: bool) -> St
     s.push_str("\n\n");
     s.push_str(EVIDENCE_RULES);
     s.push_str("\n\n");
-    s.push_str(AGGREGATOR_SEVERITY);
+    s.push_str(&aggregator_severity(&ctx.gate));
     s.push_str("\n\n");
-    s.push_str(AGGREGATOR_DO_NOT_REPORT);
+    s.push_str(&aggregator_do_not_report(&ctx.gate));
     if with_priors {
         s.push_str(AGGREGATOR_CONVERGENCE);
     }
     s.push_str("\n\n");
     s.push_str(UNTRUSTED_INPUT);
     s.push_str("\n\n");
-    s.push_str(&aggregator_output_format());
+    s.push_str(&aggregator_output_format(&ctx.gate));
     s
 }
 
@@ -528,13 +708,24 @@ fn e2e_re(ctx: &PromptCtx) -> Result<Option<regex::Regex>> {
 }
 
 /// Указание жюри поверх prose-анализов специалистов (конец секции, перед схемой refutation).
-const SPECIALIST_JURY_NOTE: &str = "\nYou are the jury. The specialists' notes above are claims to test, not facts: each comes from a\nmodel that saw the same partial context as you. For each finding you output, include `advisorClaims`:\none entry per specialist role that raised a related concern, with your verdict on that claim:\n- **verified** — the claim holds in the code (keep the finding);\n- **rejected** — false positive or already handled (if every role's claim is rejected, drop the finding);\n- **downgraded** — real but not merge-blocking (lower severity to minor or nit).\nDo not copy specialist bullets; check each against the code.\n\n";
+const SPECIALIST_JURY_NOTE: &str = "\nYou are the jury. The specialists' notes above are claims to test, not facts: each comes from a\nmodel that saw the same partial context as you. For each finding you output, include `advisorClaims`:\none entry per specialist role that raised a related concern, with your verdict on that claim:\n- **verified** — the claim holds in the code (keep the finding);\n- **rejected** — false positive or already handled (if every role's claim is rejected, drop the finding);\n- **downgraded** — <<DOWNGRADED>> (lower severity to minor or nit).\nDo not copy specialist bullets; check each against the code.\n\n";
 
 /// Указание MoA-агрегатору поверх prose-анализов advisors.
 const MOA_AGGREGATOR_NOTE: &str = "\nTreat the advisors' notes as hints from models that saw the same partial context as you: check each\nclaim against the code, drop false positives, merge duplicates, and write the final JSON findings yourself.\n\n";
 
+/// H9: что значит понижение. Понижают в minor/nit (`verifier.rs`, refutation), и если
+/// гейт блокирует и на них, «не блокирует merge» — ложное обещание.
+fn specialist_jury_note(g: &PromptGate) -> String {
+    let downgraded = if g.downgrade_can_block() {
+        "real but less severe than reported"
+    } else {
+        "real but not merge-blocking"
+    };
+    fill(SPECIALIST_JURY_NOTE, &[("DOWNGRADED", downgraded)])
+}
+
 /// buildSpecialistReferenceSection — секция prose-анализов specialists для жюри.
-pub fn build_specialist_reference_section(references: &[Value]) -> String {
+pub fn build_specialist_reference_section(references: &[Value], ctx: &PromptCtx) -> String {
     let ok: Vec<String> = references
         .iter()
         .filter(|r| js_truthy(r.get("text").unwrap_or(&Value::Null)) && !js_truthy(r.get("error").unwrap_or(&Value::Null)))
@@ -552,7 +743,7 @@ pub fn build_specialist_reference_section(references: &[Value]) -> String {
     if !failed.is_empty() {
         s.push_str(&format!("\n### Specialists unavailable\n{}\n", failed.join("\n")));
     }
-    s.push_str(SPECIALIST_JURY_NOTE);
+    s.push_str(&specialist_jury_note(&ctx.gate));
     s
 }
 
@@ -734,7 +925,7 @@ breaks. Judge the contract at the line where the symbol is used, not the import 
 </blast_candidate_rule>"#;
 
 const VERIFIER_HEAD: &str = r#"You are the verifier: the second, independent pass of a code review. You receive candidate findings
-from the first pass. Your verdict decides whether a critical or major finding blocks the merge, so
+from the first pass. <<STAKES>>, so
 judge each candidate by the evidence in front of you, not by how confident its wording sounds."#;
 
 const VERIFIER_DECISION: &str = r#"<decision>
@@ -744,7 +935,7 @@ candidate lines), the declarations of called symbols and the blast-radius, when 
   it fail in the shown code;
 - rejected — a false positive: speculative, contradicted by the shown code, or already handled
   nearby;
-- downgrade — real, but not merge-blocking; set severity to minor or nit.
+- downgrade — <<DOWNGRADE>>; set severity to minor or nit.
 A defect inside the shown code is proven by that code. Do not reject it because its callers or the
 origin of its inputs are not shown: parameters of an exported function, request fields and other
 external data may carry any value, so string-built SQL, an unchecked file path or a non-constant-time
@@ -771,10 +962,30 @@ One verdict per candidate index. severity only when decision is downgrade. Write
 the readers are Russian-speaking developers.
 </output_format>"#;
 
+/// H7: что решает вердикт verifier'а. Кандидаты к нему — severity из blockOn (lib/verifier.mjs).
+fn verifier_head(g: &PromptGate) -> String {
+    let stakes = if g.block_on.is_empty() {
+        "Your verdict decides whether a finding is confirmed".to_string()
+    } else {
+        format!("Your verdict decides whether a {} finding blocks the merge", join_levels(&g.block_on, Join::Or))
+    };
+    fill(VERIFIER_HEAD, &[("STAKES", &stakes)])
+}
+
+/// H8: см. [`specialist_jury_note`] — понижение в блокирующий уровень не «снимает блок».
+fn verifier_decision(g: &PromptGate) -> String {
+    let downgrade = if g.downgrade_can_block() {
+        "real, but less severe than reported"
+    } else {
+        "real, but not merge-blocking"
+    };
+    fill(VERIFIER_DECISION, &[("DOWNGRADE", downgrade)])
+}
+
 fn verifier_system(ctx: &PromptCtx, with_blast: bool, with_blast_candidates: bool) -> String {
-    let mut s = String::from(VERIFIER_HEAD);
+    let mut s = verifier_head(&ctx.gate);
     s.push_str("\n\n");
-    s.push_str(VERIFIER_DECISION);
+    s.push_str(&verifier_decision(&ctx.gate));
     if !ctx.verifier_extra.is_empty() {
         s.push_str("\n\n");
         s.push_str(prompt_extra(&ctx.verifier_extra).trim_end());
@@ -992,8 +1203,9 @@ pub fn build_reference_messages(base_messages: &[Value], ctx: &PromptCtx) -> Vec
 
 /// buildSpecialistAggregatorMessages — жюри: секция specialists + схема refutation.
 /// Подставляется content ПОСЛЕДНЕГО user-сообщения (i === length-1 в JS-map).
-pub fn build_specialist_aggregator_messages(base_messages: &[Value], references: &[Value]) -> Vec<Value> {
-    let ref_section = build_specialist_reference_section(references);
+pub fn build_specialist_aggregator_messages(base_messages: &[Value], references: &[Value], ctx: &PromptCtx) -> Vec<Value> {
+    let ref_section = build_specialist_reference_section(references, ctx);
+    let schema = refutation_schema(&ctx.gate);
     let last = base_messages.len().saturating_sub(1);
     base_messages
         .iter()
@@ -1001,7 +1213,7 @@ pub fn build_specialist_aggregator_messages(base_messages: &[Value], references:
         .map(|(i, m)| {
             if m.get("role").and_then(Value::as_str) == Some("user") && i == last {
                 let user = js_to_string(m.get("content").unwrap_or(&Value::Null));
-                msg("user", format!("{ref_section}{REFUTATION_SCHEMA}\n{user}"))
+                msg("user", format!("{ref_section}{schema}\n{user}"))
             } else {
                 m.clone()
             }
@@ -1032,7 +1244,20 @@ In specialist mode every finding includes advisorClaims, one entry per role:
 "advisorClaims": [
   { "role": "security"|"correctness"|"architecture", "status": "verified"|"rejected"|"downgraded", "reason": "in Russian", "severity": "minor"|"nit" }
 ]
-For status downgraded, set severity to minor or nit. A critical or major finding without advisorClaims is downgraded by the pipeline."#;
+For status downgraded, set severity to minor or nit.<<NO_CLAIMS_RULE>>"#;
+
+/// H10: refutation понижает находки уровней blockOn без advisorClaims (lib/specialists.mjs).
+fn refutation_schema(g: &PromptGate) -> String {
+    let rule = if g.block_on.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " A {} finding without advisorClaims is downgraded by the pipeline.",
+            join_levels(&g.block_on, Join::Or)
+        )
+    };
+    fill(REFUTATION_SCHEMA, &[("NO_CLAIMS_RULE", &rule)])
+}
 
 impl PromptCtx {
     /// Контекст без профиля (пустые правила/вставки) — для служебных вызовов.
@@ -1044,6 +1269,7 @@ impl PromptCtx {
             aggregator_extra: String::new(),
             verifier_extra: String::new(),
             e2e_spec_source: None,
+            gate: PromptGate::default(),
         }
     }
 }
@@ -1272,7 +1498,7 @@ mod tests {
             json!({"role": "correctness", "model": "c", "error": "down"}),
             json!({"role": "architecture", "model": "a", "text": ""}),
         ];
-        let s = build_specialist_reference_section(&refs);
+        let s = build_specialist_reference_section(&refs, &ctx());
         assert!(s.contains("### Specialist: security (s)\nfound x"));
         assert!(s.contains("### Specialists unavailable\n- correctness (c): down"));
         assert!(!s.contains("### Specialist: architecture"));
@@ -1290,7 +1516,7 @@ mod tests {
             json!({"role": "user", "content": "u1"}),
             json!({"role": "user", "content": "u2"}),
         ];
-        let out = build_specialist_aggregator_messages(&base, &[]);
+        let out = build_specialist_aggregator_messages(&base, &[], &ctx());
         assert_eq!(out[0]["content"], "sys");
         assert_eq!(out[1]["content"], "u1");
         let last = out[2]["content"].as_str().unwrap();
@@ -1370,5 +1596,193 @@ mod tests {
         assert!(s.starts_with("You are a panel of 2 independent code review specialists"));
         assert!(s.contains("Exactly 2 sections, in this order, each opening with its heading verbatim on\nits own line:\n### ROLE: correctness\n### ROLE: security\n"));
         assert!(!s.contains("bogus"));
+    }
+
+    // --- Гейт в тексте промпта: порог и уровни блока из ctx.gate -------------------------
+
+    fn gate_ctx(t: f64, levels: &[&str]) -> PromptCtx {
+        let mut c = ctx();
+        c.gate = PromptGate { block_on: levels.iter().map(|s| s.to_string()).collect(), confidence_min: t };
+        c
+    }
+
+    /// Все тексты, где промпт называет правило гейта: системные жюри и verifier'а (со всеми
+    /// условными разделами), секция specialists и схема refutation.
+    fn gate_texts(c: &PromptCtx) -> Vec<(&'static str, String)> {
+        let refs = vec![json!({"role": "security", "model": "m", "text": "IDOR"})];
+        vec![
+            ("aggregator", aggregator_system(c, true, true)),
+            ("verifier", verifier_system(c, true, true)),
+            ("specialist_section", build_specialist_reference_section(&refs, c)),
+            ("refutation", refutation_schema(&c.gate)),
+        ]
+    }
+
+    /// Литерал порога как отдельное число: «0.8», но не «0.85» и не «10.8».
+    fn has_number(s: &str, n: &str) -> bool {
+        s.match_indices(n).any(|(i, _)| {
+            let before = s[..i].chars().next_back();
+            let after = s[i + n.len()..].chars().next();
+            !before.is_some_and(|c| c.is_ascii_digit() || c == '.') && !after.is_some_and(|c| c.is_ascii_digit())
+        })
+    }
+
+    #[test]
+    fn gate_markers_are_always_filled() {
+        for c in [ctx(), gate_ctx(0.7, &[]), gate_ctx(1.0, &["critical", "major", "minor", "nit"])] {
+            for (name, text) in gate_texts(&c) {
+                assert!(!text.contains("<<"), "{name}: неподставленная метка");
+            }
+        }
+    }
+
+    #[test]
+    fn prompt_threshold_follows_gate() {
+        for t in [0.65, 0.7, 0.9, 1.0] {
+            let c = gate_ctx(t, &["critical", "major"]);
+            let ts = fmt_conf(t);
+            for (name, text) in gate_texts(&c) {
+                assert!(!has_number(&text, "0.8"), "T={t} {name}: в тексте остался порог 0.8");
+            }
+            let agg = aggregator_system(&c, false, false);
+            assert!(agg.contains(&format!("with confidence of at least {ts} block the merge")), "T={t}: H1");
+            assert!(agg.contains(&format!("Only critical/major findings at {ts} or above block")), "T={t}: H3");
+            assert!(agg.contains(&format!("keep confidence below {ts}.")), "T={t}: H5");
+        }
+    }
+
+    /// Строки шкалы: (нижняя, верхняя) для «- a–b:», (x, x) для «- 1.0:», (0, x) для «- below x:».
+    fn parse_bands(s: &str) -> Vec<(f64, f64)> {
+        s.lines()
+            .map(|l| {
+                let head = l.trim_start_matches("- ").split(':').next().unwrap();
+                if let Some(x) = head.strip_prefix("below ") {
+                    (0.0, x.parse().unwrap())
+                } else if let Some((a, b)) = head.split_once('–') {
+                    (a.parse().unwrap(), b.parse().unwrap())
+                } else {
+                    let x: f64 = head.parse().unwrap();
+                    (x, x)
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn conf_bands_default_is_the_old_text() {
+        assert_eq!(
+            conf_bands(&PromptGate::default()),
+            "- 0.9–1.0: you traced the failing path in the shown code and can name the input that triggers it.\n\
+             - 0.8–0.9: a well-known defect pattern that is clearly present here, with a plausible trigger.\n\
+             - 0.5–0.8: likely, but it depends on code you cannot see. Use it for risks, not for blockers.\n\
+             - below 0.5: leave it out, except a cross-file risk allowed by the NO ABSENCE CLAIMS rule.\n"
+        );
+    }
+
+    #[test]
+    fn conf_bands_are_contiguous_and_anchored_at_threshold() {
+        for t in [0.0, 0.4, 0.5, 0.7, 0.75, 0.8, 1.0] {
+            let g = PromptGate { confidence_min: t, ..PromptGate::default() };
+            let text = conf_bands(&g);
+            let bands = parse_bands(&text);
+            assert_eq!(bands[0].1, 1.0, "T={t}: шкала начинается с 1.0");
+            for w in bands.windows(2) {
+                assert_eq!(w[1].1, w[0].0, "T={t}: разрыв или нахлёст между {:?} и {:?}", w[0], w[1]);
+            }
+            for (lo, hi) in &bands {
+                assert!(lo <= hi, "T={t}: перевёрнутый интервал");
+            }
+            for l in text.lines() {
+                if l.contains("well-known defect pattern") {
+                    assert!(l.starts_with(&format!("- {}–", fmt_conf(t))), "T={t}: паттерн начинается не с T: {l}");
+                }
+                if l.contains("not for blockers") {
+                    assert!(l.contains(&format!("–{}:", fmt_conf(t))), "T={t}: «риск» не упирается в T: {l}");
+                }
+            }
+            // «риск, не блокер» печатается, только пока между 0.5 и T есть место
+            assert_eq!(text.contains("not for blockers"), round2(t) > 0.5, "T={t}");
+        }
+        // T = 1: «известного паттерна» нет — пустой интервал не печатается
+        let one = conf_bands(&PromptGate { confidence_min: 1.0, ..PromptGate::default() });
+        assert!(one.starts_with("- 1.0: you traced"));
+        assert!(!one.contains("well-known defect pattern"));
+        assert_eq!(fmt_conf(0.875), "0.88");
+        assert_eq!(fmt_conf(1.0), "1.0");
+        assert_eq!(fmt_conf(0.8), "0.8");
+        assert_eq!(fmt_conf(0.7 + 0.15), "0.85");
+    }
+
+    #[test]
+    fn prompt_block_levels_follow_gate() {
+        let c = gate_ctx(0.8, &["critical"]);
+        let agg = aggregator_system(&c, false, false);
+        assert!(agg.contains("PR;\ncritical findings with confidence of at least 0.8 block"));
+        assert!(agg.contains("Only critical findings at 0.8 or above block"));
+        assert!(agg.contains("blocking the\n  merge on critical findings."));
+        assert!(verifier_system(&c, false, false).contains("whether a critical finding blocks the merge"));
+        assert!(refutation_schema(&c.gate).contains(" A critical finding without advisorClaims"));
+        // Правило цитаты зашито в код на critical||major (findings.rs, require_quote), а не
+        // берётся из blockOn, — промпт описывает его верно и от гейта не зависит.
+        const QUOTE_RULE: &str = "a critical or major finding without a quote is discarded";
+        for (name, text) in gate_texts(&c) {
+            let text = text.replace(QUOTE_RULE, "");
+            for stale in ["critical and major", "critical/major", "critical or major"] {
+                assert!(!text.contains(stale), "{name}: «{stale}» при blockOn=[critical]");
+            }
+        }
+
+        let c = gate_ctx(0.8, &["critical", "major", "minor"]);
+        let agg = aggregator_system(&c, false, false);
+        assert!(agg.contains("critical, major and minor findings with confidence of at least"));
+        assert!(agg.contains("Only critical/major/minor findings at"));
+        assert!(verifier_system(&c, false, false).contains("whether a critical, major or minor finding blocks"));
+        assert!(refutation_schema(&c.gate).contains(" A critical, major or minor finding without"));
+    }
+
+    #[test]
+    fn prompt_no_false_unblock_promises() {
+        for levels in [&["critical", "minor"][..], &["critical", "nit"][..]] {
+            let c = gate_ctx(0.8, levels);
+            for (name, text) in gate_texts(&c) {
+                assert!(!text.contains("not merge-blocking"), "{levels:?} {name}: понижение обещает снять блок");
+            }
+            assert!(verifier_system(&c, false, false).contains("downgrade — real, but less severe than reported;"));
+        }
+        let agg = aggregator_system(&gate_ctx(0.8, &["critical", "minor"]), false, false);
+        assert!(!agg.contains("never block"));
+        assert!(agg.contains("Minor findings are posted on the PR and block it in this configuration"));
+        // блокирует nit, а не minor: обещание про minor остаётся верным
+        assert!(aggregator_system(&gate_ctx(0.8, &["critical", "nit"]), false, false).contains("never block"));
+
+        let c = gate_ctx(0.8, &[]);
+        let agg = aggregator_system(&c, false, false);
+        assert!(agg.contains("no severity blocks the merge, so every finding is advisory."));
+        assert!(agg.contains("No severity blocks the merge in this configuration."));
+        assert!(!agg.contains("Only "));
+        assert!(agg.contains("sending the diff to the configured LLM provider.\n"));
+        assert!(verifier_system(&c, false, false).contains("Your verdict decides whether a finding is confirmed, so"));
+        assert!(!refutation_schema(&c.gate).contains("without advisorClaims"));
+    }
+
+    #[test]
+    fn prompt_gate_from_json_validation() {
+        let d = PromptGate::default();
+        assert_eq!(PromptGate::from_json(None), d);
+        assert_eq!(PromptGate::from_json(Some(&json!(null))), d);
+        assert_eq!(PromptGate::from_json(Some(&json!("x"))), d);
+        assert_eq!(PromptGate::from_json(Some(&json!({}))), d);
+        for junk in [json!("0.7"), json!(-1), json!(2), json!(null), json!([0.7])] {
+            assert_eq!(PromptGate::from_json(Some(&json!({"confidenceMin": junk}))).confidence_min, 0.8, "{junk}");
+        }
+        assert_eq!(PromptGate::from_json(Some(&json!({"confidenceMin": 0}))).confidence_min, 0.0);
+        assert_eq!(PromptGate::from_json(Some(&json!({"confidenceMin": 1}))).confidence_min, 1.0);
+        assert_eq!(PromptGate::from_json(Some(&json!({"blockOn": "critical"}))).block_on, d.block_on);
+        assert_eq!(PromptGate::from_json(Some(&json!({"blockOn": ["major", "critical"]}))), d);
+        assert_eq!(
+            PromptGate::from_json(Some(&json!({"blockOn": ["nit", "bogus", 7, "Critical", "minor"]}))).block_on,
+            vec!["minor".to_string(), "nit".to_string()]
+        );
+        assert!(PromptGate::from_json(Some(&json!({"blockOn": []}))).block_on.is_empty());
     }
 }

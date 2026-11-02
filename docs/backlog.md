@@ -85,6 +85,14 @@ FP-learning-loop» пуста — конкурентов в ней нет; ри�
 9. **Strict-режим профиля**: prescan + verifier-confirmed, без advisory (точность Graphite
    без их провала recall 7.5% — наша фильтрация по сигналам, а не молчанием).
 10. Дифференциация температур по типу чанка (security — глубже, docs — легче).
+11. **Понижение не снимает блок, если minor/nit в `REVIEW_BLOCK_ON`.** verifier и refutation
+    понижают ровно в minor/nit (`rust/src/verifier.rs`, `rust/src/specialists.rs`), а гейт
+    вне strict-режима блокирует по severity и confidence (`rust/src/findings.rs`, кластерное
+    решение): при `REVIEW_BLOCK_ON=critical,major,minor` пониженная verifier'ом находка с
+    confidence ≥ порога по-прежнему блокирует. Промпт с 2026-11-02 этого больше не обещает
+    («less severe than reported»), но гейт держит дыру. Решение — пониженная
+    (`verifierStatus: downgraded` / все claims downgraded) не блокирует при любой severity;
+    нужен eval-fixture.
 
 ## C. Анти-FP контур
 
