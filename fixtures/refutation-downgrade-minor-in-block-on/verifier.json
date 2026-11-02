@@ -1,0 +1,9 @@
+{
+  "verdicts": [
+    {
+      "candidateIndex": 0,
+      "decision": "verified",
+      "reason": "auth-проверки на строке нет"
+    }
+  ]
+}

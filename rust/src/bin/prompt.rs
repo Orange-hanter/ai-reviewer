@@ -70,7 +70,7 @@ fn run() -> Result<()> {
             "messages": build_specialist_aggregator_messages(&arr_arg(&v, "baseMessages"), &arr_arg(&v, "references"), &ctx),
         }),
         "buildSpecialistReferenceSection" => {
-            json!({ "text": build_specialist_reference_section(&arr_arg(&v, "references"), &ctx) })
+            json!({ "text": build_specialist_reference_section(&arr_arg(&v, "references")) })
         }
         "buildMoAReferenceSection" => {
             json!({ "text": build_moa_reference_section(&arr_arg(&v, "references")) })

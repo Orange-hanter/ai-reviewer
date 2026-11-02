@@ -10,6 +10,13 @@ last_updated: 2026-11-02
 
 ## Unreleased
 
+- fix: пониженная находка не блокирует merge при любом `REVIEW_BLOCK_ON` (RFC 22). verifier
+  и refutation понижают в minor/nit, и с minor в `REVIEW_BLOCK_ON` понижение блок не
+  снимало — гейт игнорировал вердикт судьи. Теперь находка с `verifierStatus: downgraded`
+  или `refutationStatus: downgraded*` выходит из уровня блока и не голосует за консенсус
+  кластера, а пониженная refutation'ом не уходит к verifier'у. Дефолтный конфиг не
+  меняется. Только в Rust: без бинарей deprecated JS-гейт ведёт себя по-старому.
+
 - fix: промпты жюри и verifier'а берут порог и уровни блока из конфига гейта. Раньше порог
   0.8 и `critical/major` были записаны в текст промпта, и при `REVIEW_CONFIDENCE_MIN` ≠ 0.8
   или своём `REVIEW_BLOCK_ON` модель калибровалась по правилу, которого гейт не применяет:

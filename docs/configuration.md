@@ -110,7 +110,7 @@ pr-review-structure-mcp                     # stdio MCP structure-контура
 
 | Переменная | Default | Описание |
 |------------|---------|----------|
-| `REVIEW_BLOCK_ON` | `critical,major` | Severity → exit 1. Тот же список называют модели системные промпты жюри и verifier'а и схема refutation (Rust-бинарь `prompt`); без бинаря deprecated JS-промпт называет дефолт |
+| `REVIEW_BLOCK_ON` | `critical,major` | Severity → exit 1. Находка, пониженная verifier'ом или refutation'ом (`verifierStatus`/`refutationStatus` = `downgraded*`), не блокирует при любом списке, в т.ч. с `minor`/`nit` (RFC 22, только Rust). Тот же список называют модели системные промпты жюри и verifier'а и схема refutation (Rust-бинарь `prompt`); без бинаря deprecated JS-промпт называет дефолт |
 | `REVIEW_BLOCK_SINGLE` | `critical` | Severity, которой хватает одной модели |
 | `REVIEW_CONSENSUS` | `1` (moa) / `2` (consensus) | Мин. моделей с находкой уровня блока в кластере (корзина `file|floor((line-1)/3)`), чтобы major стал блокером; остальное находка набирает сама (RFC 17). В `moa` всегда `1` (значение зажимается); в `consensus` — не больше числа моделей |
 | `REVIEW_CONFIDENCE_MIN` | `0.8` | Блок только при собственной confidence находки ≥ порога (уверенность соседа по кластеру не засчитывается, RFC 17). Порог T уходит и в промпт жюри: правило блока, потолок для синтаксических претензий и шкала confidence, перестроенная на T (`[T+(1−T)/2, 1]` — путь отказа прослежен, `[T, …)` — известный паттерн, `[0.5, T)` — риск, не блокер). Без Rust-бинаря `prompt` промпт называет 0.8 |

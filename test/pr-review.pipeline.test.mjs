@@ -1475,12 +1475,12 @@ test('createPromptBuilder(cfg): gate доходит до verifier\'а и схе�
     annotated: '', fileContents: '', blastBlocks: [], pr: { number: 1, title: 't' },
   })[0].content;
   assert.ok(verifier.includes('whether a critical or minor finding blocks the merge'));
-  assert.ok(!verifier.includes('not merge-blocking'), 'понижение в minor тут блок не снимает');
+  assert.ok(verifier.includes('downgrade — real, but not merge-blocking'), 'понижение снимает блок при любом blockOn (RFC 22)');
   const base = [{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }];
   const refs = [{ role: 'security', model: 'm', text: 'IDOR' }];
   const user = prompt.buildSpecialistAggregatorMessages(base, refs)[1].content;
   assert.ok(user.includes(' A critical or minor finding without advisorClaims is downgraded'));
-  assert.ok(!user.includes('not merge-blocking'));
+  assert.ok(user.includes('**downgraded** — real but not merge-blocking'));
   const jury = prompt.buildMessages({ annotated: 'd', pr: { number: 1, title: 't' } })[0].content;
   assert.ok(jury.includes('Only critical/minor findings at 0.7 or above'));
 

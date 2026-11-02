@@ -1,0 +1,14 @@
+{
+  "id": "gate-minor-in-block-on-blocks",
+  "description": "RFC 22, контроль: minor в REVIEW_BLOCK_ON, minor не понижен и подтверждён verifier'ом — блокирует; правило о понижении не выключает блок по minor целиком",
+  "gate": {
+    "blockOn": ["critical", "major", "minor"],
+    "blockSingle": ["critical", "minor"]
+  },
+  "requiresRust": true,
+  "expected": {
+    "shouldBlock": true,
+    "blockerCount": 1,
+    "titles": ["нет проверки прав на изменённом маршруте"]
+  }
+}
