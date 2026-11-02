@@ -182,8 +182,9 @@ jobs:
           REVIEW_BASE_REF: ${{ steps.pr.outputs.base }}
           # Провайдер — OpenRouter. Ростер — как у потребителя Orakul (examples/consumers/orakul/
           # README.md): deepseek без рассуждения (на low — пустой ответ), glm с обязательным
-          # рассуждением (none → 400), verifier на бесплатной модели с запасной — лимит :free
-          # не блокирует PR.
+          # рассуждением (none → 400). Отличие от Orakul — verifier: mimo-v2.6-pro (дефолт движка
+          # с 0.8.0, docs/model-tuning.md) с запасным gpt-6-luna (пробник OpenRouter, роль
+          # verifier'а); оба вне жюри (haiku) — судьи независимы.
           LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           LLM_BASE_URL: https://openrouter.ai/api/v1
           REVIEW_MODE: moa
@@ -193,7 +194,7 @@ jobs:
           MOA_REFERENCE_TEMPERATURE: '0.3'
           MOA_AGGREGATOR_TEMPERATURE: '0.4'
           OLLAMA_MODELS_FALLBACK: '~deepseek/deepseek-flash-latest'
-          LLM_MODEL_SETTINGS: '{"deepseek/deepseek-v4.1-flash":{"effort":"none"},"z-ai/glm-5.3-flash":{"effort":"high","maxTokens":12000},"minimax/minimax-m3.1-flash:free":{"effort":"high"}}'
+          LLM_MODEL_SETTINGS: '{"deepseek/deepseek-v4.1-flash":{"effort":"none"},"z-ai/glm-5.3-flash":{"effort":"high","maxTokens":12000}}'
           REVIEW_AUTO_TRIAGE: '1'
           REVIEW_INLINE_ON: critical,major
           REVIEW_BLOCK_ON: critical,major
@@ -201,8 +202,8 @@ jobs:
           REVIEW_CONSENSUS: '1'
           REVIEW_CONFIDENCE_MIN: '0.8'
           REVIEW_VERIFIER: '1'
-          REVIEW_VERIFIER_MODEL: 'minimax/minimax-m3.1-flash:free'
-          REVIEW_VERIFIER_FALLBACK_MODEL: '~deepseek/deepseek-pro-latest'
+          REVIEW_VERIFIER_MODEL: xiaomi/mimo-v2.6-pro
+          REVIEW_VERIFIER_FALLBACK_MODEL: openai/gpt-6-luna
           REVIEW_VERIFIER_STRICT: '1'
           REVIEW_ROUTER: '1'
           REVIEW_PRESCAN: '0'

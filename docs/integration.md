@@ -108,8 +108,9 @@ PR в `engine/` и собирается `cargo build --locked` из его `Carg
 следующего PR после мержа.
 prescan выключен (нет eslint, ast-grep ruleset под TypeScript), blast-radius — по графу
 graphify. Провайдер — OpenRouter (секрет `OPENROUTER_API_KEY`), ростер — как у потребителя
-Orakul ([examples/consumers/orakul](../examples/consumers/orakul/README.md)); с 2026-11-02,
-после таймаутов агрегатора на Ollama Cloud. Без секрета job пропускает ревью с
+Orakul ([examples/consumers/orakul](../examples/consumers/orakul/README.md)), кроме verifier'а:
+`xiaomi/mimo-v2.6-pro` с запасным `openai/gpt-6-luna`. С 2026-11-02, после таймаутов агрегатора
+на Ollama Cloud. Без секрета job пропускает ревью с
 предупреждением. PR из форков
 и черновики не ревьюятся.
 
