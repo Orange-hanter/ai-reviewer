@@ -16,7 +16,9 @@ name: PR Review (AI, self)
 #
 # Профиль .ai-reviewer.json и его вход движок читает из base.sha (REVIEW_PROFILE_TRUSTED +
 # REVIEW_BASE_REF): PR не может ослабить правила собственного ревью.
-# Провайдер — Ollama Cloud, секрет OLLAMA_API_KEY (свой ключ, не общий с orakul).
+# Провайдер — OpenRouter, секрет OPENROUTER_API_KEY. Ростер — как у потребителя Orakul
+# (examples/consumers/orakul/README.md, замеры — RFC 20 § 4–7): на Ollama Cloud агрегатор
+# minimax-m3 упирался в таймаут SSE, и части PR оставались не отревьюены (degraded-блок, RFC 19).
 # prescan выключен: у пакета нет node_modules/eslint-конфига, а поставляемый ast-grep ruleset
 # написан под TypeScript и на .mjs не срабатывает (docs/model-tuning.md, «Локальный прогон»).
 # Сигнал blastCaller даёт code graph (graphify), собранный по коду PR — парсинг, не исполнение.
@@ -61,13 +63,13 @@ jobs:
           PR_EVENT: ${{ github.event.pull_request.number }}
           PR_INPUT: ${{ inputs.pr_number }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HAS_KEY: ${{ secrets.OLLAMA_API_KEY != '' }}
+          HAS_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           if [ "$HAS_KEY" != true ]; then
-            echo "::warning::секрет OLLAMA_API_KEY не задан — ревью пропущено (gh secret set OLLAMA_API_KEY)"
+            echo "::warning::секрет OPENROUTER_API_KEY не задан — ревью пропущено (gh secret set OPENROUTER_API_KEY)"
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -178,16 +180,21 @@ jobs:
           REVIEW_PROFILE: .ai-reviewer.json
           REVIEW_PROFILE_TRUSTED: '1'
           REVIEW_BASE_REF: ${{ steps.pr.outputs.base }}
-          # Провайдер — Ollama Cloud (дефолт движка), отдельный ключ репозитория движка: квота
-          # не делится с потребителем orakul. Ростер — как в examples/ci/pr-review.yml.
-          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          # Провайдер — OpenRouter. Ростер — как у потребителя Orakul (examples/consumers/orakul/
+          # README.md): deepseek без рассуждения (на low — пустой ответ), glm с обязательным
+          # рассуждением (none → 400). Отличие от Orakul — verifier: mimo-v2.6-pro (дефолт движка
+          # с 0.8.0, docs/model-tuning.md) с запасным gpt-6-luna (пробник OpenRouter, роль
+          # verifier'а); оба вне жюри (haiku) — судьи независимы.
+          LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LLM_BASE_URL: https://openrouter.ai/api/v1
           REVIEW_MODE: moa
-          MOA_REFERENCE_MODELS: kimi-k2.7-code,glm-5.3,glm-5.3-flash
-          MOA_SPECIALIST_MODELS: security:glm-5.3-flash,correctness:kimi-k2.7-code,architecture:glm-5.3
-          MOA_AGGREGATOR: minimax-m3
+          MOA_REFERENCE_MODELS: z-ai/glm-5.3-flash,deepseek/deepseek-v4.1-flash
+          MOA_SPECIALIST_MODELS: security:z-ai/glm-5.3-flash,correctness:deepseek/deepseek-v4.1-flash,architecture:deepseek/deepseek-v4.1-flash
+          MOA_AGGREGATOR: anthropic/claude-haiku-5.5
           MOA_REFERENCE_TEMPERATURE: '0.3'
           MOA_AGGREGATOR_TEMPERATURE: '0.4'
-          OLLAMA_MODELS_FALLBACK: deepseek-v4.1-flash
+          OLLAMA_MODELS_FALLBACK: '~deepseek/deepseek-flash-latest'
+          LLM_MODEL_SETTINGS: '{"deepseek/deepseek-v4.1-flash":{"effort":"none"},"z-ai/glm-5.3-flash":{"effort":"high","maxTokens":12000}}'
           REVIEW_AUTO_TRIAGE: '1'
           REVIEW_INLINE_ON: critical,major
           REVIEW_BLOCK_ON: critical,major
@@ -195,7 +202,8 @@ jobs:
           REVIEW_CONSENSUS: '1'
           REVIEW_CONFIDENCE_MIN: '0.8'
           REVIEW_VERIFIER: '1'
-          REVIEW_VERIFIER_MODEL: deepseek-v4-pro
+          REVIEW_VERIFIER_MODEL: xiaomi/mimo-v2.6-pro
+          REVIEW_VERIFIER_FALLBACK_MODEL: openai/gpt-6-luna
           REVIEW_VERIFIER_STRICT: '1'
           REVIEW_ROUTER: '1'
           REVIEW_PRESCAN: '0'
