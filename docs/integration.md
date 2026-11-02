@@ -107,8 +107,9 @@ PR в `engine/` и собирается `cargo build --locked` из его `Carg
 исполняется, и PR не ослабляет правила собственного ревью: правка движка включается со
 следующего PR после мержа.
 prescan выключен (нет eslint, ast-grep ruleset под TypeScript), blast-radius — по графу
-graphify. Провайдер — Ollama Cloud с отдельным ключом (секрет `OLLAMA_API_KEY`, квота не
-делится с потребителем), ростер — как в шаблоне; без секрета job пропускает ревью с
+graphify. Провайдер — OpenRouter (секрет `OPENROUTER_API_KEY`), ростер — как у потребителя
+Orakul ([examples/consumers/orakul](../examples/consumers/orakul/README.md)); с 2026-11-02,
+после таймаутов агрегатора на Ollama Cloud. Без секрета job пропускает ревью с
 предупреждением. PR из форков
 и черновики не ревьюятся.
 
