@@ -13,7 +13,7 @@ audience: [next-session-agent, maintainers]
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
 
-## 2026-11-02 — RFC 22: пониженная находка не блокирует
+## 2026-11-02 — RFC 23: пониженная находка не блокирует
 
 **Сделано:** `findings::is_downgraded` (`verifierStatus: downgraded` или
 `refutationStatus: downgraded|downgraded_no_claims`); в `cluster_findings` такая находка вне
@@ -49,7 +49,7 @@ merge-blocking»), стали `<<…>>`-метками шаблонов.
 
 **Не тронуто сознательно:** правило цитаты (`critical||major` зашито в `findings.rs`) и цель
 понижения (ровно minor/nit) — промпт описывает код верно. Найденная по ходу дыра гейта —
-понижение в minor блокирует, если minor в `REVIEW_BLOCK_ON` — закрыта RFC 22 (запись выше).
+понижение в minor блокирует, если minor в `REVIEW_BLOCK_ON` — закрыта RFC 23 (запись выше).
 
 ## 2026-11-02 — 0.8.1
 

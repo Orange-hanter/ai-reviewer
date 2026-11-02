@@ -294,9 +294,10 @@ fn arr_arg(args: &Value, key: &str) -> Vec<Value> {
 //   ложных срабатываний (Anthropic prompting best practices). Капсом остались только
 //   имена разделов и меток, на которые ссылается user-часть ([THIS PART], NO ABSENCE CLAIMS).
 //
-// Язык промпта — английский, язык вывода — русский: читают находки русскоязычные
-// разработчики. Выходные контракты (формат пунктов, `### ROLE:`, JSON-схемы, фразы
-// «серьёзных замечаний нет») не изменились — их разбирает код пайплайна.
+// Язык промпта и вывода — английский (RFC 22): английский вывод на ~30% короче по
+// completion-токенам (замер RFC 20, проход 2). Выходные контракты (формат пунктов,
+// `### ROLE:`, JSON-схемы) разбирает код пайплайна; фразы «нечего сообщить» кодом не
+// разбираются. Кириллицы в системных промптах нет совсем — это держит тест ниже.
 
 /// Потолок числа пунктов у одной роли (RFC 04, решение 3). Зеркало SPECIALIST_MAX_ITEMS
 /// в lib/prompt.mjs (deprecated копия читает ту же величину).
@@ -343,7 +344,7 @@ const SEVERITY_PROSE: &str = r#"<severity>
 Style, formatting and naming are never findings: linters and the type checker cover them.
 </severity>"#;
 
-const OUTPUT_LANGUAGE_PROSE: &str = "Write the explanations in Russian: the readers are Russian-speaking developers. Keep code,\nidentifiers and file paths as they are.";
+const OUTPUT_LANGUAGE_PROSE: &str = "Write the explanations in plain, concise English. Keep code, identifiers and file paths as\nthey are.";
 
 /// Формат пункта prose-ролей — разбирается жюри, менять только вместе с ним.
 const PROSE_ITEM_FORMAT: &str = r#"- [severity] `file:line` — title: what breaks, for which input or state, and the fix
@@ -402,7 +403,7 @@ Plain text, not JSON. One bullet per defect, strongest first, at most {SPECIALIS
 {PROSE_ITEM_FORMAT}
 severity is critical, major or minor; do not report nits. Every bullet carries its own quote: line;
 leave out any item you cannot quote verbatim or cannot name a concrete fix for. If there is nothing
-serious, write «серьёзных замечаний нет».
+serious, write "no serious issues".
 {OUTPUT_LANGUAGE_PROSE}
 </output_format>"#,
         rules = rules_block(ctx),
@@ -439,7 +440,7 @@ worth more than twenty observations:
 {PROSE_ITEM_FORMAT}
 severity is critical, major or minor; do not report nits. Every bullet carries its own quote: line;
 leave out any item you cannot quote verbatim or cannot name a concrete fix for. If there is nothing
-in your remit, write «в моей области серьёзных замечаний нет».
+in your remit, write "no serious issues in my remit".
 {OUTPUT_LANGUAGE_PROSE}
 </output_format>"#,
         rules = rules_block(ctx),
@@ -492,7 +493,7 @@ In each section, one bullet per defect, strongest first, at most {SPECIALIST_MAX
 {PROSE_ITEM_FORMAT}
 severity is critical, major or minor; do not report nits. Every bullet carries its own quote: line;
 leave out any item you cannot quote verbatim or cannot name a concrete fix for. A section with
-nothing to report is still present and says «в моей области серьёзных замечаний нет».
+nothing to report is still present and says "no serious issues in my remit".
 {OUTPUT_LANGUAGE_PROSE}
 </output_format>"#,
         n = list.len(),
@@ -614,8 +615,8 @@ Respond with a single JSON object inside a ```json fence and no text around it:
 - summary describes the change, not its quality: do not say whether it is safe, has blocking issues
   or is ready to merge. That verdict is the gate's: it is reached after the verifier, over every part
   of the PR, and a verdict written here contradicts it whenever another part blocks.
-- summary, title and body are in Russian: the readers are Russian-speaking developers. Keep code,
-  identifiers and file paths as they are.
+- summary, title and body are in plain, concise English. Keep code, identifiers and file paths as
+  they are.
 - At most {AGGREGATOR_MAX_ITEMS} findings, strongest first; the specialists already capped theirs at {SPECIALIST_MAX_ITEMS} each, so
   do not multiply them.
 {minor_rule}
@@ -943,8 +944,8 @@ fence:
     }
   ]
 }
-One verdict per candidate index. severity only when decision is downgrade. Write reason in Russian:
-the readers are Russian-speaking developers.
+One verdict per candidate index. severity only when decision is downgrade. Write reason in plain,
+concise English.
 </output_format>"#;
 
 /// H7: что решает вердикт verifier'а. Кандидаты к нему — severity из blockOn (lib/verifier.mjs).
@@ -960,7 +961,7 @@ fn verifier_head(g: &PromptGate) -> String {
 fn verifier_system(ctx: &PromptCtx, with_blast: bool, with_blast_candidates: bool) -> String {
     let mut s = verifier_head(&ctx.gate);
     s.push_str("\n\n");
-    // «downgrade — not merge-blocking» верно при любом blockOn: гейт исполняет понижение (RFC 22).
+    // «downgrade — not merge-blocking» верно при любом blockOn: гейт исполняет понижение (RFC 23).
     s.push_str(VERIFIER_DECISION);
     if !ctx.verifier_extra.is_empty() {
         s.push_str("\n\n");
@@ -1218,7 +1219,7 @@ pub fn build_aggregator_messages(base_messages: &[Value], references: &[Value]) 
 const REFUTATION_SCHEMA: &str = r#"
 In specialist mode every finding includes advisorClaims, one entry per role:
 "advisorClaims": [
-  { "role": "security"|"correctness"|"architecture", "status": "verified"|"rejected"|"downgraded", "reason": "in Russian", "severity": "minor"|"nit" }
+  { "role": "security"|"correctness"|"architecture", "status": "verified"|"rejected"|"downgraded", "reason": "one sentence", "severity": "minor"|"nit" }
 ]
 For status downgraded, set severity to minor or nit.<<NO_CLAIMS_RULE>>"#;
 
@@ -1503,8 +1504,8 @@ mod tests {
         assert_eq!(out[2]["content"], "u2", "пустая секция — content не меняется");
     }
 
-    /// Все системные промпты: теги сбалансированы, кириллица — только в дословных фразах
-    /// вывода (их разбирает пайплайн) и во вставках профиля, которых здесь нет.
+    /// Все системные промпты: теги сбалансированы, кириллицы нет (вставки профиля здесь
+    /// пустые), указания писать вывод по-русски нет (RFC 22).
     #[test]
     fn system_prompts_are_english_and_tags_balanced() {
         let c = ctx();
@@ -1524,14 +1525,10 @@ mod tests {
             specialist_rules("security", &c),
             build_merged_specialist_system(&[json!("security"), json!("correctness")], &c),
         ];
-        let allowed = ["«в моей области серьёзных замечаний нет»", "«серьёзных замечаний нет»"];
         let tag = regex::Regex::new(r"<(/?)([a-z_]+)>").unwrap();
         for s in &systems {
-            let mut stripped = s.clone();
-            for a in allowed {
-                stripped = stripped.replace(a, "");
-            }
-            assert!(!stripped.chars().any(|ch| ('\u{0400}'..='\u{04FF}').contains(&ch)), "кириллица в промпте:\n{s}");
+            assert!(!s.contains("Russian"), "указание писать по-русски в промпте:\n{s}");
+            assert!(!s.chars().any(|ch| ('\u{0400}'..='\u{04FF}').contains(&ch)), "кириллица в промпте:\n{s}");
             let mut stack: Vec<String> = Vec::new();
             for cap in tag.captures_iter(s) {
                 let name = cap[2].to_string();
@@ -1718,7 +1715,7 @@ mod tests {
 
     #[test]
     fn prompt_no_false_unblock_promises() {
-        // Понижение снимает блок при любом blockOn (RFC 22, гейт — findings::is_downgraded),
+        // Понижение снимает блок при любом blockOn (RFC 23, гейт — findings::is_downgraded),
         // поэтому обещание «not merge-blocking» безусловно — и при minor/nit в blockOn.
         for levels in [&["critical", "minor"][..], &["critical", "nit"][..], &["critical", "major"][..]] {
             let c = gate_ctx(0.8, levels);

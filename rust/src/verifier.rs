@@ -52,7 +52,7 @@ pub fn select_verifier_candidates(
         let sev = f.get("severity").unwrap_or(&Value::Null);
         tiers.iter().any(|t| t == sev)
     };
-    // RFC 22: находку, пониженную refutation'ом, гейт не блокирует при любом вердикте —
+    // RFC 23: находку, пониженную refutation'ом, гейт не блокирует при любом вердикте —
     // кандидатом уровня блока она не становится, вызов модели был бы оплачен впустую.
     // Rust-owned: JS-копия отбирает по одной severity.
     let mut blockers: Vec<usize> = (0..findings.len())
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn select_skips_refutation_downgraded() {
-        // RFC 22: гейт пониженную не блокирует — кандидатом уровня блока она не становится
+        // RFC 23: гейт пониженную не блокирует — кандидатом уровня блока она не становится
         let f = vec![
             json!({"severity": "minor", "title": "понижена жюри", "refutationStatus": "downgraded"}),
             json!({"severity": "minor", "title": "strict без claims", "refutationStatus": "downgraded_no_claims"}),

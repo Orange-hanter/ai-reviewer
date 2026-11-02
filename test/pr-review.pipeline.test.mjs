@@ -767,7 +767,7 @@ const advisoryMinorReview = () => ({
 
 /** Прогон с перехватом того, что реально ушло в engine.verifyFindings. */
 // RFC 21: blast-находка о caller'е вне PR. foo.ts меняется в CODE_DIFF, lib/caller.ts — нет.
-const BLAST_BLOCK = '- `foo` → 1 зависимостей вне диффа: `useFoo()` @ lib/caller.ts:5 [calls][EXTRACTED] cross-community';
+const BLAST_BLOCK = '- `foo` → 1 dependents outside the diff: `useFoo()` @ lib/caller.ts:5 [calls][EXTRACTED] cross-community';
 const blastGraphify = { buildBlastRadius: async () => [BLAST_BLOCK] };
 const CALLER_ENTRY = `### lib/caller.ts\n\`\`\`\n${Array.from({ length: 60 }, (_, i) => (i === 4 ? 'const r = foo(1, 2);' : `// ${i + 1}`)).join('\n')}\n\`\`\``;
 const emptyReview = () => ({ model: 'm1', summary: '', verdict: 'comment', findings: [] });
@@ -896,7 +896,7 @@ test('blast-verify moa: REVIEW_BLAST_VERIFY=1 + rejected → находка сн
     env: { ...MOA, REVIEW_BLAST_VERIFY: '1' }, readOutsideFile: withCaller, verdict: 'rejected',
   });
   assert.equal(code, 0);
-  assert.ok(!calls.upsertSticky[0].includes('Код вне PR зависит от'), 'отклонённая находка не в отчёте');
+  assert.ok(!calls.upsertSticky[0].includes('Code outside the PR depends on'), 'отклонённая находка не в отчёте');
 });
 
 test('blast-verify moa: REVIEW_BLAST_VERIFY=1 + downgrade → minor, exit 0', { skip: skipNoRust }, async () => {
@@ -1475,7 +1475,7 @@ test('createPromptBuilder(cfg): gate доходит до verifier\'а и схе�
     annotated: '', fileContents: '', blastBlocks: [], pr: { number: 1, title: 't' },
   })[0].content;
   assert.ok(verifier.includes('whether a critical or minor finding blocks the merge'));
-  assert.ok(verifier.includes('downgrade — real, but not merge-blocking'), 'понижение снимает блок при любом blockOn (RFC 22)');
+  assert.ok(verifier.includes('downgrade — real, but not merge-blocking'), 'понижение снимает блок при любом blockOn (RFC 23)');
   const base = [{ role: 'system', content: 'S' }, { role: 'user', content: 'U' }];
   const refs = [{ role: 'security', model: 'm', text: 'IDOR' }];
   const user = prompt.buildSpecialistAggregatorMessages(base, refs)[1].content;

@@ -69,7 +69,7 @@ flowchart TB
 | `lib/specialist-merge.mjs` | Роли на одной модели — одним вызовом и разбор ответа обратно по ролям (RFC 04) |
 | `lib/llm.mjs` | Клиент LLM: семафоры и AIMD по 429, учёт цены, отказ по исчерпанной квоте, `LLM_MODEL_SETTINGS`; HTTP, SSE и каскад ретраев — в бинаре `rust/src/llm.rs`, `rust/src/llm/cascade.rs` (`lib/ollama.mjs` — deprecated re-export) |
 | `lib/cost.mjs` | Учёт токенов и оценка стоимости прогона (`REVIEW_PRICE_JSON`) |
-| `lib/prompt.mjs` | Обёртка над `rust/src/prompt.rs`: системные промпты aggregator, advisors, verifier — на английском, вывод на русском; JS-копия текстов deprecated (RFC 20) |
+| `lib/prompt.mjs` | Обёртка над `rust/src/prompt.rs`: системные промпты aggregator, advisors, verifier — на английском, вывод модели тоже на английском (RFC 22); JS-копия текстов deprecated (RFC 20) |
 | `lib/prompt-layout.mjs` | Раскладка сообщений под префиксный кэш: общая рамка и контекст чанка до инструкции роли (RFC 04) |
 | `lib/specialists.mjs` | Роли advisors + refutation жюри |
 | `lib/verifier.mjs` | Pass B: доказать / отклонить / понизить кандидатов в блокеры |

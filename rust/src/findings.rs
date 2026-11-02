@@ -387,7 +387,7 @@ impl Gate {
     }
 }
 
-/// RFC 22: находку понизил один из судей — verifier (`downgrade`) или refutation жюри
+/// RFC 23: находку понизил один из судей — verifier (`downgrade`) или refutation жюри
 /// (все claims `downgraded`, либо strict без `advisorClaims`). Вердикт «реален, но не
 /// merge-blocker» гейт исполняет при любом blockOn: пониженная находка выходит из уровня
 /// блока, как её новая severity при дефолтном конфиге.
@@ -476,7 +476,7 @@ pub fn cluster_findings(findings: &[Value], gate: &Gate) -> ClusterOutcome {
                 models.push(f.get("model").unwrap_or(&Value::Null).clone());
             }
             let sev = f.get("severity");
-            // пониженная не голосует за консенсус кластера (RFC 22)
+            // пониженная не голосует за консенсус кластера (RFC 23)
             if gate.in_block_on(sev)
                 && !is_downgraded(f)
                 && !gate.in_block_single(sev)
@@ -823,7 +823,7 @@ mod tests {
         }))
     }
 
-    /// RFC 22: minor и nit в blockOn — пониженная находка тем не менее не блокирует.
+    /// RFC 23: minor и nit в blockOn — пониженная находка тем не менее не блокирует.
     fn gate_minor_blocks() -> Gate {
         Gate::from_value(&json!({
             "blockOn": ["critical", "major", "minor", "nit"],

@@ -821,7 +821,7 @@ test('readChangedFiles: добавленный файл не дублирует�
     const marker = skipped.get(tmp);
     assert.ok(marker, 'путь остаётся в карте контекста — модель должна знать, что файл виден');
     assert.doesNotMatch(marker, /export const a = 1;/, 'содержимое не дублирует дифф');
-    assert.match(marker, /новый файл/, 'вместо содержимого — указатель на дифф');
+    assert.match(marker, /new file/, 'вместо содержимого — указатель на дифф');
     assert.ok(marker.length < full.get(tmp).length, 'указатель дешевле полного текста');
   } finally {
     await rm(tmp, { force: true });
@@ -1579,7 +1579,7 @@ test('emitBlastRadiusFindings: cross-layer caller outside diff', () => {
   setProfile({
     layout: { layerDirs: ['apps', 'packages'] },
   });
-  const blocks = ['- `exportFn` → 2 зависимостей вне диффа: `api()` @ apps/web/api.ts:10 [calls][EXTRACTED], packages/core/x.ts:3 [calls]'];
+  const blocks = ['- `exportFn` → 2 dependents outside the diff: `api()` @ apps/web/api.ts:10 [calls][EXTRACTED], packages/core/x.ts:3 [calls]'];
   const findings = emitBlastRadiusFindings(blocks, ['packages/core/changed.ts'], { symbols: ['exportFn'] });
   assert.equal(findings.length, 1, findings);
   assert.equal(findings[0].file, 'apps/web/api.ts');
@@ -1616,8 +1616,8 @@ test('emitBlastRadiusFindings: путь с `_` из blast-блока совпа�
 test('emitBlastRadiusFindings: файл, зависящий от двух изменённых символов, — две находки (RFC 21)', () => {
   setProfile({ layout: { layerDirs: ['apps', 'packages'] } });
   const blocks = [
-    '- `queueAlerts` → 1 зависимостей вне диффа: `server.js` @ apps/web/server.js:10 [imports_from][EXTRACTED] cross-community',
-    '- `getToken` → 1 зависимостей вне диффа: `server.js` @ apps/web/server.js:10 [imports_from][EXTRACTED] cross-community',
+    '- `queueAlerts` → 1 dependents outside the diff: `server.js` @ apps/web/server.js:10 [imports_from][EXTRACTED] cross-community',
+    '- `getToken` → 1 dependents outside the diff: `server.js` @ apps/web/server.js:10 [imports_from][EXTRACTED] cross-community',
   ];
   const findings = emitBlastRadiusFindings(blocks, ['packages/core/telegram.js'], { symbols: ['queueAlerts', 'getToken'] });
   assert.deepEqual(findings.map((f) => f.blastSymbol).sort(), ['getToken', 'queueAlerts'],
@@ -1628,7 +1628,7 @@ test('emitBlastRadiusFindings: файл, зависящий от двух изм
 test('emitBlastRadiusFindings: DROP_AMBIGUOUS=0 оставляет AMBIGUOUS', () => {
   setProfile({ layout: { layerDirs: ['apps', 'packages'] } });
   const blocks = [
-    '- `exportFn` → 1 зависимостей вне диффа: `maybe()` @ apps/web/x.ts:1 [uses][AMBIGUOUS]',
+    '- `exportFn` → 1 dependents outside the diff: `maybe()` @ apps/web/x.ts:1 [uses][AMBIGUOUS]',
   ];
   const kept = emitBlastRadiusFindings(blocks, ['packages/core/a.ts'], {
     symbols: ['exportFn'], dropAmbiguous: false,
@@ -1655,7 +1655,7 @@ test('emitBlastRadiusFindings: Orakul appDir strips before layer compare', () =>
   });
   try {
     const blocks = [
-      '- `makeDataStore` → 2 зависимостей вне диффа: `render()` @ app/client/ui.ts:L42 [calls][EXTRACTED], app/server/other.ts:3 [calls]',
+      '- `makeDataStore` → 2 dependents outside the diff: `render()` @ app/client/ui.ts:L42 [calls][EXTRACTED], app/server/other.ts:3 [calls]',
     ];
     const findings = emitBlastRadiusFindings(blocks, ['app/server/store.ts'], { symbols: ['makeDataStore'] });
     assert.equal(findings.length, 1, findings);
@@ -1671,14 +1671,14 @@ test('emitBlastRadiusFindings: Orakul appDir strips before layer compare', () =>
 test('emitBlastRadiusFindings: cross-community без смены layerDirs', () => {
   setProfile({ layout: { layerDirs: ['app'] } });
   const blocks = [
-    '- `sharedFn` → 1 зависимостей вне диффа: `other()` @ app/other.ts:5 [calls][EXTRACTED] cross-community',
+    '- `sharedFn` → 1 dependents outside the diff: `other()` @ app/other.ts:5 [calls][EXTRACTED] cross-community',
   ];
   const findings = emitBlastRadiusFindings(blocks, ['app/changed.ts'], { symbols: ['sharedFn'] });
   assert.equal(findings.length, 1, findings);
   assert.equal(findings[0].file, 'app/other.ts');
   assert.equal(findings[0].blastCrossCommunity, true);
   assert.equal(findings[0].confidence, 0.9);
-  assert.ok(findings[0].body.includes('другой кластер графа зависимостей'));
+  assert.ok(findings[0].body.includes('different dependency-graph cluster'));
   assert.ok(!findings[0].body.includes('[EXTRACTED]'), 'метка ребра — словами, не тегом');
   resetProfile();
 });
@@ -1687,7 +1687,7 @@ test('emitBlastRadiusFindings: caller-узел с именем файла не �
   setProfile({ layout: { appDir: 'app/', layerDirs: ['server', 'shared', 'client'] } });
   try {
     const blocks = [
-      '- `canWriteType` → 2 зависимостей вне диффа: '
+      '- `canWriteType` → 2 dependents outside the diff: '
         + '`AccessPanel.tsx` @ app/client/src/AccessPanel.tsx:6 [imports_from][EXTRACTED], '
         + '`StockTab/index.tsx` @ app/client/src/tabs/StockTab/index.tsx:9 [calls][EXTRACTED]',
     ];
@@ -1697,8 +1697,8 @@ test('emitBlastRadiusFindings: caller-узел с именем файла не �
       assert.ok(f.title.includes('`canWriteType`'), f.title);
       assert.ok(!f.body.includes('.tsx'), `имя файла не повторяется в теле: ${f.body}`);
     }
-    assert.match(findings.find((f) => f.line === 6).body, /импортирует `canWriteType`,/);
-    assert.match(findings.find((f) => f.line === 9).body, /вызывает `canWriteType`,/);
+    assert.match(findings.find((f) => f.line === 6).body, /imports `canWriteType`,/);
+    assert.match(findings.find((f) => f.line === 9).body, /calls `canWriteType`,/);
   } finally {
     resetProfile();
   }
@@ -1747,7 +1747,7 @@ test('fp-patterns: softblast-typedef + graphify-path-norm speculation', async ()
 test('emitBlastRadiusFindings: AMBIGUOUS пропускается', () => {
   setProfile({ layout: { layerDirs: ['apps', 'packages'] } });
   const blocks = [
-    '- `exportFn` → 1 зависимостей вне диффа: `maybe()` @ apps/web/x.ts:1 [uses][AMBIGUOUS]',
+    '- `exportFn` → 1 dependents outside the diff: `maybe()` @ apps/web/x.ts:1 [uses][AMBIGUOUS]',
   ];
   const findings = emitBlastRadiusFindings(blocks, ['packages/core/a.ts'], { symbols: ['exportFn'] });
   assert.equal(findings.length, 0, findings);
@@ -1889,7 +1889,7 @@ test('loadReviewConfig: envFlag unifies boolean off (false/no) for default-on fl
 
 test('emitBlastRadiusFindings: sort by confidence then cap; symbol after preamble', () => {
   setProfile({ layout: { layerDirs: ['apps', 'packages'] } });
-  const preamble = 'Note:\n\n- `exportFn` → 3 зависимостей вне диффа: '
+  const preamble = 'Note:\n\n- `exportFn` → 3 dependents outside the diff: '
     + '`low()` @ apps/web/a.ts:1 [calls][INFERRED], '
     + '`hi()` @ apps/web/b.ts:2 [calls][EXTRACTED], '
     + '`mid()` @ apps/web/c.ts:3 [calls]';
@@ -2063,7 +2063,7 @@ test('windowFileEntry: пересекающиеся окна сливаются,
 });
 
 test('windowFileEntry: маркер добавленного файла и файл целиком в окне проходят без изменений', () => {
-  const marker = '### new.ts\n(новый файл — его полное содержимое целиком приведено в диффе ниже)';
+  const marker = '### new.ts\n(new file — its full content is in the diff below)';
   assert.equal(windowFileEntry(marker, [3], { margin: 80 }), marker, 'тела нет — резать нечего');
   const small = mkEntry('a.ts', 20);
   assert.equal(windowFileEntry(small, [10], { margin: 80 }), small, 'окно покрывает файл целиком');
@@ -2112,7 +2112,7 @@ test('windowChunkFileContents: margin=0 — окна выключены, кар�
 });
 
 test('windowChunkFileContents: маркер добавленного файла и файл без изменённых строк не режутся', () => {
-  const marker = '### new.ts\n(новый файл — его полное содержимое целиком приведено в диффе ниже)';
+  const marker = '### new.ts\n(new file — its full content is in the diff below)';
   const untouched = mkEntry('u.ts', 300);
   const r = windowChunkFileContents(new Map([['new.ts', marker], ['u.ts', untouched]]),
     mkFiles({ 'new.ts': [1, 2, 3] }), { margin: 10, minChars: 0 });
