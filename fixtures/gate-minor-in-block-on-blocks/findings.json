@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "file": "server/api.ts",
+      "line": 11,
+      "severity": "minor",
+      "confidence": 0.9,
+      "title": "нет проверки прав на изменённом маршруте",
+      "body": "маршрут открыт без проверки роли",
+      "model": "m1"
+    }
+  ]
+}

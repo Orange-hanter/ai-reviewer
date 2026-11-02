@@ -85,10 +85,6 @@ impl PromptGate {
         self.block_on.iter().any(|s| s == severity)
     }
 
-    /// Блокирует ли что-то из того, во что verifier и refutation понижают (minor/nit).
-    fn downgrade_can_block(&self) -> bool {
-        self.blocks("minor") || self.blocks("nit")
-    }
 
     fn t(&self) -> f64 {
         round2(self.confidence_min)
@@ -708,24 +704,13 @@ fn e2e_re(ctx: &PromptCtx) -> Result<Option<regex::Regex>> {
 }
 
 /// Указание жюри поверх prose-анализов специалистов (конец секции, перед схемой refutation).
-const SPECIALIST_JURY_NOTE: &str = "\nYou are the jury. The specialists' notes above are claims to test, not facts: each comes from a\nmodel that saw the same partial context as you. For each finding you output, include `advisorClaims`:\none entry per specialist role that raised a related concern, with your verdict on that claim:\n- **verified** — the claim holds in the code (keep the finding);\n- **rejected** — false positive or already handled (if every role's claim is rejected, drop the finding);\n- **downgraded** — <<DOWNGRADED>> (lower severity to minor or nit).\nDo not copy specialist bullets; check each against the code.\n\n";
+const SPECIALIST_JURY_NOTE: &str = "\nYou are the jury. The specialists' notes above are claims to test, not facts: each comes from a\nmodel that saw the same partial context as you. For each finding you output, include `advisorClaims`:\none entry per specialist role that raised a related concern, with your verdict on that claim:\n- **verified** — the claim holds in the code (keep the finding);\n- **rejected** — false positive or already handled (if every role's claim is rejected, drop the finding);\n- **downgraded** — real but not merge-blocking (lower severity to minor or nit).\nDo not copy specialist bullets; check each against the code.\n\n";
 
 /// Указание MoA-агрегатору поверх prose-анализов advisors.
 const MOA_AGGREGATOR_NOTE: &str = "\nTreat the advisors' notes as hints from models that saw the same partial context as you: check each\nclaim against the code, drop false positives, merge duplicates, and write the final JSON findings yourself.\n\n";
 
-/// H9: что значит понижение. Понижают в minor/nit (`verifier.rs`, refutation), и если
-/// гейт блокирует и на них, «не блокирует merge» — ложное обещание.
-fn specialist_jury_note(g: &PromptGate) -> String {
-    let downgraded = if g.downgrade_can_block() {
-        "real but less severe than reported"
-    } else {
-        "real but not merge-blocking"
-    };
-    fill(SPECIALIST_JURY_NOTE, &[("DOWNGRADED", downgraded)])
-}
-
 /// buildSpecialistReferenceSection — секция prose-анализов specialists для жюри.
-pub fn build_specialist_reference_section(references: &[Value], ctx: &PromptCtx) -> String {
+pub fn build_specialist_reference_section(references: &[Value]) -> String {
     let ok: Vec<String> = references
         .iter()
         .filter(|r| js_truthy(r.get("text").unwrap_or(&Value::Null)) && !js_truthy(r.get("error").unwrap_or(&Value::Null)))
@@ -743,7 +728,7 @@ pub fn build_specialist_reference_section(references: &[Value], ctx: &PromptCtx)
     if !failed.is_empty() {
         s.push_str(&format!("\n### Specialists unavailable\n{}\n", failed.join("\n")));
     }
-    s.push_str(&specialist_jury_note(&ctx.gate));
+    s.push_str(SPECIALIST_JURY_NOTE);
     s
 }
 
@@ -935,7 +920,7 @@ candidate lines), the declarations of called symbols and the blast-radius, when 
   it fail in the shown code;
 - rejected — a false positive: speculative, contradicted by the shown code, or already handled
   nearby;
-- downgrade — <<DOWNGRADE>>; set severity to minor or nit.
+- downgrade — real, but not merge-blocking; set severity to minor or nit.
 A defect inside the shown code is proven by that code. Do not reject it because its callers or the
 origin of its inputs are not shown: parameters of an exported function, request fields and other
 external data may carry any value, so string-built SQL, an unchecked file path or a non-constant-time
@@ -972,20 +957,11 @@ fn verifier_head(g: &PromptGate) -> String {
     fill(VERIFIER_HEAD, &[("STAKES", &stakes)])
 }
 
-/// H8: см. [`specialist_jury_note`] — понижение в блокирующий уровень не «снимает блок».
-fn verifier_decision(g: &PromptGate) -> String {
-    let downgrade = if g.downgrade_can_block() {
-        "real, but less severe than reported"
-    } else {
-        "real, but not merge-blocking"
-    };
-    fill(VERIFIER_DECISION, &[("DOWNGRADE", downgrade)])
-}
-
 fn verifier_system(ctx: &PromptCtx, with_blast: bool, with_blast_candidates: bool) -> String {
     let mut s = verifier_head(&ctx.gate);
     s.push_str("\n\n");
-    s.push_str(&verifier_decision(&ctx.gate));
+    // «downgrade — not merge-blocking» верно при любом blockOn: гейт исполняет понижение (RFC 22).
+    s.push_str(VERIFIER_DECISION);
     if !ctx.verifier_extra.is_empty() {
         s.push_str("\n\n");
         s.push_str(prompt_extra(&ctx.verifier_extra).trim_end());
@@ -1204,7 +1180,7 @@ pub fn build_reference_messages(base_messages: &[Value], ctx: &PromptCtx) -> Vec
 /// buildSpecialistAggregatorMessages — жюри: секция specialists + схема refutation.
 /// Подставляется content ПОСЛЕДНЕГО user-сообщения (i === length-1 в JS-map).
 pub fn build_specialist_aggregator_messages(base_messages: &[Value], references: &[Value], ctx: &PromptCtx) -> Vec<Value> {
-    let ref_section = build_specialist_reference_section(references, ctx);
+    let ref_section = build_specialist_reference_section(references);
     let schema = refutation_schema(&ctx.gate);
     let last = base_messages.len().saturating_sub(1);
     base_messages
@@ -1498,7 +1474,7 @@ mod tests {
             json!({"role": "correctness", "model": "c", "error": "down"}),
             json!({"role": "architecture", "model": "a", "text": ""}),
         ];
-        let s = build_specialist_reference_section(&refs, &ctx());
+        let s = build_specialist_reference_section(&refs);
         assert!(s.contains("### Specialist: security (s)\nfound x"));
         assert!(s.contains("### Specialists unavailable\n- correctness (c): down"));
         assert!(!s.contains("### Specialist: architecture"));
@@ -1613,7 +1589,7 @@ mod tests {
         vec![
             ("aggregator", aggregator_system(c, true, true)),
             ("verifier", verifier_system(c, true, true)),
-            ("specialist_section", build_specialist_reference_section(&refs, c)),
+            ("specialist_section", build_specialist_reference_section(&refs)),
             ("refutation", refutation_schema(&c.gate)),
         ]
     }
@@ -1742,12 +1718,13 @@ mod tests {
 
     #[test]
     fn prompt_no_false_unblock_promises() {
-        for levels in [&["critical", "minor"][..], &["critical", "nit"][..]] {
+        // Понижение снимает блок при любом blockOn (RFC 22, гейт — findings::is_downgraded),
+        // поэтому обещание «not merge-blocking» безусловно — и при minor/nit в blockOn.
+        for levels in [&["critical", "minor"][..], &["critical", "nit"][..], &["critical", "major"][..]] {
             let c = gate_ctx(0.8, levels);
-            for (name, text) in gate_texts(&c) {
-                assert!(!text.contains("not merge-blocking"), "{levels:?} {name}: понижение обещает снять блок");
-            }
-            assert!(verifier_system(&c, false, false).contains("downgrade — real, but less severe than reported;"));
+            assert!(verifier_system(&c, false, false).contains("downgrade — real, but not merge-blocking;"), "{levels:?}");
+            let refs = vec![json!({"role": "security", "model": "m", "text": "IDOR"})];
+            assert!(build_specialist_reference_section(&refs).contains("**downgraded** — real but not merge-blocking"));
         }
         let agg = aggregator_system(&gate_ctx(0.8, &["critical", "minor"]), false, false);
         assert!(!agg.contains("never block"));

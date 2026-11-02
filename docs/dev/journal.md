@@ -13,6 +13,23 @@ audience: [next-session-agent, maintainers]
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
 
+## 2026-11-02 — RFC 22: пониженная находка не блокирует
+
+**Сделано:** `findings::is_downgraded` (`verifierStatus: downgraded` или
+`refutationStatus: downgraded|downgraded_no_claims`); в `cluster_findings` такая находка вне
+уровня блока — не блокирует и не голосует за консенсус; отбор кандидатов verifier'а её
+пропускает. Промпт снова безусловно говорит «downgrade — not merge-blocking».
+
+**Доказательство:** три fixture с `minor` в blockOn — `verifier-downgrade-minor-in-block-on`
+и `refutation-downgrade-minor-in-block-on` до правки падали (`shouldBlock: ожидали false,
+получили true`), контроль `gate-minor-in-block-on-blocks` (непониженный minor блокирует)
+проходил до и после. Существующие 21 fixture не тронуты — дефолтный конфиг тот же.
+
+**Почему «вне уровня блока», а не «просто не блокирует»:** так пониженная ведёт себя ровно
+как её новая severity при дефолтном конфиге — в том числе не даёт голос консенсуса соседу
+по кластеру. Любой другой вариант делал бы исход зависимым от `REVIEW_BLOCK_ON` там, где
+судья уже вынес вердикт.
+
 ## 2026-11-02 — порог и уровни блока в промпте из `cfg.gate`
 
 **Сделано:** `PromptGate` в `PromptCtx` (`rust/src/prompt.rs`), поле `gate` во входе бинаря
@@ -32,7 +49,7 @@ merge-blocking»), стали `<<…>>`-метками шаблонов.
 
 **Не тронуто сознательно:** правило цитаты (`critical||major` зашито в `findings.rs`) и цель
 понижения (ровно minor/nit) — промпт описывает код верно. Найденная по ходу дыра гейта —
-понижение в minor блокирует, если minor в `REVIEW_BLOCK_ON` — в [backlog](../backlog.md), B.11.
+понижение в minor блокирует, если minor в `REVIEW_BLOCK_ON` — закрыта RFC 22 (запись выше).
 
 ## 2026-11-02 — 0.8.1
 
