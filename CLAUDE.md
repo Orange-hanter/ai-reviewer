@@ -137,7 +137,7 @@ specialist-merge, incremental) — только JS.
 механической правки общего с оркестрацией контракта) и не удаляй до аудита «ничего не
 потеряно». Разошедшиеся намеренно тексты помечаются в parity как rust-owned, а не
 подгоняются. Уже разошлись: каскад ретраев LLM (`rust/src/llm/cascade.rs`), системные
-промпты (`rust/src/prompt.rs`, английские; вывод — на русском); только в Rust —
+промпты (`rust/src/prompt.rs`, английские; вывод модели тоже английский — RFC 22); только в Rust —
 `LLM_MODEL_SETTINGS`, `REVIEW_VERIFIER_FALLBACK_MODEL`, область квоты (`quota_scope`).
 `rust/parity/*.parity.mjs` (`npm run check:parity`) сверяют собранный бинарь с JS и без
 `cargo build` сходятся тривиально. Пороги латентности в тестах умножаются на
