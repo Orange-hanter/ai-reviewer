@@ -2264,6 +2264,52 @@ test('Graphify: unresolved_symbols различает омоним вне PR и 
   assert.equal(metrics.skip_reasons.symbol_unresolved, 3);
 });
 
+test('Graphify ≥ 0.9.111: «Ambiguous:» и «No unique node match» с ненулевым exit — не сбой, омоним разрешается по id', async () => {
+  // graphify 0.9.111 пишет ответ в stderr и выходит с кодом: омоним — 3, нет узла — 4.
+  // execFile при ненулевом коде бросает; ответ лежит в error.stderr.
+  const cfg = {
+    graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
+    limits: { concurrency: 2, godNodeThreshold: 20, maxDepsPerSymbol: 20 },
+  };
+  const graphJson = JSON.stringify({
+    nodes: [
+      { id: 'a_audit', label: 'auditAndPublish()', source_file: 'app/a.ts' },
+      { id: 'b_audit', label: 'auditAndPublish()', source_file: 'app/b.ts' },
+      { id: 'a_round2', label: 'round2()', source_file: 'app/a.ts' },
+      { id: 'b_round2', label: 'round2()', source_file: 'app/b.ts' },
+    ],
+    links: [],
+  });
+  const fail = (code, stderr) => Object.assign(new Error(`Command failed: gf\n${stderr}`), { code, stdout: '', stderr });
+  const ambiguous = (name) => fail(3, `Ambiguous: '${name}' matches 2 nodes in different files.\n  app/a.ts\n    id: a_x\n`);
+  const execFileP = async (bin, args) => {
+    if (bin === 'git') return { stdout: '12345678\n' };
+    if (args[1] === 'auditAndPublish' || args[1] === 'round2') throw ambiguous(args[1]);
+    if (args[1] === 'a_audit') return { stdout: 'Affected nodes for auditAndPublish()\n- caller [calls] app/c.ts:L7\n' };
+    if (args[1] === 'ghostField') throw fail(4, 'No unique node match for ghostField\n');
+    throw fail(1, 'Traceback (most recent call last):\n  boom\n');
+  };
+  const client = createGraphifyClient(cfg, {
+    execFileP,
+    readFile: async (path) => (String(path).endsWith('graph.json') ? graphJson : '- Built from commit: `12345678`\n'),
+    access: async () => {},
+  });
+  const { blocks, metrics } = await client.buildBlastRadius(
+    ['auditAndPublish', 'round2', 'ghostField', 'crashSym'], { changedPaths: ['app/a.ts', 'app/b.ts', 'app/z.ts'] },
+  );
+  const byPr = await client.buildBlastRadius(['auditAndPublish'], { changedPaths: ['app/a.ts'] });
+  assert.equal(byPr.blocks.length, 1, 'омоним с одним узлом в PR — повтор по id');
+  assert.ok(byPr.blocks[0].includes('@ app/c.ts:7'), byPr.blocks[0]);
+  assert.deepEqual(blocks, []);
+  assert.deepEqual(metrics.unresolved_symbols, [
+    { symbol: 'auditAndPublish', kind: 'ambiguous', reply: 'ambiguous', candidates: 2, in_pr: 2 },
+    { symbol: 'round2', kind: 'ambiguous', reply: 'ambiguous', candidates: 2, in_pr: 2 },
+    { symbol: 'ghostField', kind: 'not_found', reply: 'no_unique_match', candidates: 0, in_pr: 0 },
+  ]);
+  assert.equal(metrics.skip_reasons.symbol_unresolved, 3);
+  assert.equal(metrics.skip_reasons.graphify_error, 1, 'неизвестный ненулевой выход — по-прежнему сбой');
+});
+
 test('Graphify: unresolved_symbols — повтор по id омонима и длинное имя (PLAT-084, ревью #75)', async () => {
   const cfg = {
     graphify: { bin: 'gf', graph: 'graph.json', report: 'GRAPH_REPORT.md', depth: 2, dropAmbiguous: true },
