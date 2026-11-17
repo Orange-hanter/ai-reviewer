@@ -3,22 +3,12 @@ type: journal
 status: active
 owner: ai-reviewer
 source_of_truth: true
-last_updated: 2026-11-02
+last_updated: 2026-11-17
 ---
 
 # Changelog
 
 ## Unreleased
-
-- fix: blast-radius понимает ответы graphify ≥ 0.9.111. Эта версия пишет «символ не
-  разрешён» в stderr и выходит с ненулевым кодом: омоним — `Ambiguous: '<name>' matches N
-  nodes …` (exit 3), нет узла — `No unique node match` (exit 4). Движок принимал это за сбой
-  CLI (`graphify_error`): омоним с одним узлом в файлах PR больше не разрешался повтором по
-  id, и символ пропадал из blast-radius. Теперь ненулевой выход с известным ответом читается
-  как ответ, `unresolved.reply` получил значение `ambiguous`; прочий ненулевой выход —
-  по-прежнему `graphify_error`, убитый по таймауту — `graphify_timeout`. Ответы 0.9.99
-  (stdout, exit 0) разбираются как раньше. Шаблон `examples/ci/pr-review.yml` пинит
-  `graphifyy` 0.9.111.
 
 - fix: пониженная находка не блокирует merge при любом `REVIEW_BLOCK_ON` (RFC 23). verifier
   и refutation понижают в minor/nit, и с minor в `REVIEW_BLOCK_ON` понижение блок не
@@ -43,6 +33,21 @@ last_updated: 2026-11-02
   английские альтернативы. Обвязка sticky-комментария остаётся русской. Первый прогон после
   обновления один раз покажет перенесённые находки как «новые + снятые»: ключ находки
   строится из заголовка.
+
+## 0.8.2 — blast-radius понимает ответы graphify 0.9.111 — 2026-11-17
+
+Пин потребителя — `v0.8.2`. Хотфикс от `v0.8.1`: в него не вошло ничего из Unreleased в
+`main` (RFC 22, RFC 23, пороги в промптах) — для них нужен gold A/B до релиза.
+
+- fix: graphify 0.9.111 пишет «символ не разрешён» в stderr и выходит с ненулевым кодом:
+  омоним — `Ambiguous: '<name>' matches N nodes …` (exit 3), нет узла — `No unique node
+  match` (exit 4). Движок принимал это за сбой CLI (`graphify_error`): омоним с одним узлом в
+  файлах PR больше не разрешался повтором по id и пропадал из blast-radius. Теперь ненулевой
+  выход с известным ответом читается как ответ, `unresolved.reply` получил значение
+  `ambiguous`; прочий ненулевой выход — по-прежнему `graphify_error`, убитый по таймауту —
+  `graphify_timeout`. Без индекса графа `kind: ambiguous` — только для ответа `Ambiguous:`.
+  Ответы 0.9.99 (stdout, exit 0) разбираются как раньше.
+- Шаблон `examples/ci/pr-review.yml` пинит `graphifyy` 0.9.111.
 
 ## 0.8.1 — Rust-бинари darwin-arm64 собираются на macos-15 — 2026-11-02
 
