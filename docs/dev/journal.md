@@ -4,7 +4,7 @@ status: active
 owner: ai-reviewer
 source_of_truth: true
 created: 2026-09-10
-last_updated: 2026-11-02
+last_updated: 2026-11-17
 audience: [next-session-agent, maintainers]
 ---
 
@@ -12,6 +12,16 @@ audience: [next-session-agent, maintainers]
 
 Живой лог решений и прогонов. Релизы по SemVer — в [CHANGELOG.md](../../CHANGELOG.md).
 Сессионные отчёты — в [log/](log/). RFC пишутся **до** кода; этот журнал — что случилось после.
+
+## 2026-11-17 — 0.8.2
+
+**Сделано:** хотфикс `v0.8.2` от `v0.8.1` (#82): blast-radius понимает ответы graphify 0.9.111
+(«не разрешён» — в stderr с exit 3/4). На `v0.8.1` с graphify 0.9.111 омоним с одним узлом в PR
+давал `graphify_error` и выпадал из blast-radius; живой прогон на графе Orakul это подтвердил
+(`auditAndPublish`: 0 блоков → 108 зависимых после правки). Шаблон пинит `graphifyy` 0.9.111.
+
+**Почему хотфикс, а не релиз `main`:** Unreleased в `main` несёт RFC 22 (английский вход и
+выход LLM), а его RFC требует gold A/B против `v0.8.1` до релиза. Пин потребителя — `v0.8.2`.
 
 ## 2026-11-02 — 0.8.1
 
