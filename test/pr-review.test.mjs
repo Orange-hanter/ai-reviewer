@@ -2287,6 +2287,9 @@ test('Graphify ≥ 0.9.111: «Ambiguous:» и «No unique node match» с нен
     if (args[1] === 'auditAndPublish' || args[1] === 'round2') throw ambiguous(args[1]);
     if (args[1] === 'a_audit') return { stdout: 'Affected nodes for auditAndPublish()\n- caller [calls] app/c.ts:L7\n' };
     if (args[1] === 'ghostField') throw fail(4, 'No unique node match for ghostField\n');
+    if (args[1] === 'slowSym') {
+      throw Object.assign(fail(143, 'No unique node match for slowSym\n'), { killed: true, signal: 'SIGTERM' });
+    }
     throw fail(1, 'Traceback (most recent call last):\n  boom\n');
   };
   const client = createGraphifyClient(cfg, {
@@ -2295,7 +2298,7 @@ test('Graphify ≥ 0.9.111: «Ambiguous:» и «No unique node match» с нен
     access: async () => {},
   });
   const { blocks, metrics } = await client.buildBlastRadius(
-    ['auditAndPublish', 'round2', 'ghostField', 'crashSym'], { changedPaths: ['app/a.ts', 'app/b.ts', 'app/z.ts'] },
+    ['auditAndPublish', 'round2', 'ghostField', 'crashSym', 'slowSym'], { changedPaths: ['app/a.ts', 'app/b.ts', 'app/z.ts'] },
   );
   const byPr = await client.buildBlastRadius(['auditAndPublish'], { changedPaths: ['app/a.ts'] });
   assert.equal(byPr.blocks.length, 1, 'омоним с одним узлом в PR — повтор по id');
@@ -2308,6 +2311,9 @@ test('Graphify ≥ 0.9.111: «Ambiguous:» и «No unique node match» с нен
   ]);
   assert.equal(metrics.skip_reasons.symbol_unresolved, 3);
   assert.equal(metrics.skip_reasons.graphify_error, 1, 'неизвестный ненулевой выход — по-прежнему сбой');
+  assert.equal(metrics.skip_reasons.graphify_timeout, 1, 'убитый по таймауту — сбой, а не ответ');
+  const report = JSON.stringify({ blocks, metrics });
+  assert.ok(!report.includes('Traceback') && !report.includes('matches 2 nodes'), 'stderr graphify не попадает в отчёт');
 });
 
 test('Graphify: unresolved_symbols — повтор по id омонима и длинное имя (PLAT-084, ревью #75)', async () => {
